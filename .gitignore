@@ -4,6 +4,7 @@ node_modules/
 # Environment & secrets
 .env
 .env.*
+!.env.example
 
 # User config (contains RPC URL, wallet key, API keys)
 user-config.json
