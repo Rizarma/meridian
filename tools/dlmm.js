@@ -101,6 +101,7 @@ export async function deployPosition({
   // optional pool metadata for learning (passed by agent when available)
   pool_name,
   bin_step,
+  base_fee,
   volatility,
   fee_tvl_ratio,
   organic_score,
@@ -246,11 +247,20 @@ export async function deployPosition({
       initial_value_usd,
     });
 
+    const actualBinStep = pool.lbPair.binStep;
+    const activePrice = parseFloat(activeBin.price);
+    const minPrice = activePrice * Math.pow(1 + actualBinStep / 10000, minBinId - activeBin.binId);
+    const maxPrice = activePrice * Math.pow(1 + actualBinStep / 10000, maxBinId - activeBin.binId);
+
     return {
       success: true,
       position: newPosition.publicKey.toString(),
       pool: pool_address,
+      pool_name,
       bin_range: { min: minBinId, max: maxBinId, active: activeBin.binId },
+      price_range: { min: minPrice, max: maxPrice },
+      bin_step: actualBinStep,
+      base_fee: base_fee ?? null,
       strategy: activeStrategy,
       wide_range: isWideRange,
       amount_x: finalAmountX,
@@ -652,10 +662,10 @@ export async function closePosition({ position_address }) {
         close_reason: "agent decision",
       });
 
-      return { success: true, position: position_address, pool: poolAddress, txs: txHashes, pnl_usd: pnlUsd, pnl_pct: pnlPct, base_mint: pool.lbPair.tokenXMint.toString() };
+      return { success: true, position: position_address, pool: poolAddress, pool_name: tracked.pool_name || null, txs: txHashes, pnl_usd: pnlUsd, pnl_pct: pnlPct, base_mint: pool.lbPair.tokenXMint.toString() };
     }
 
-    return { success: true, position: position_address, pool: poolAddress, txs: txHashes, base_mint: pool.lbPair.tokenXMint.toString() };
+    return { success: true, position: position_address, pool: poolAddress, pool_name: null, txs: txHashes, base_mint: pool.lbPair.tokenXMint.toString() };
   } catch (error) {
     log("close_error", error.message);
     return { success: false, error: error.message };
