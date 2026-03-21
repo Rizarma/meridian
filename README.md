@@ -208,7 +208,7 @@ Meridian includes an **opt-in** collective intelligence system called **Hive Min
 **1. Register with the hive**
 
 ```bash
-node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app'))"
+node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'REGISTRATION_TOKEN_HERE'))"
 ```
 
 This prints your API key and saves it to `user-config.json` automatically. **Save the key** — it won't be shown again.

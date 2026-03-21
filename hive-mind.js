@@ -86,9 +86,14 @@ export function isEnabled() {
  * One-time registration with a Hive Mind server.
  * Stores hiveMindUrl and hiveMindApiKey in user-config.json.
  * @param {string} url - Base URL of the hive server (e.g. "https://hive.example.com")
+ * @param {string} registrationToken - Token provided by the hive operator
  * @returns {Promise<string>} The raw API key (shown once, save it!)
  */
-export async function register(url) {
+export async function register(url, registrationToken) {
+  if (!registrationToken) {
+    throw new Error("Registration token required. Get it from the hive operator.");
+  }
+
   const baseUrl = url.replace(/\/+$/, "");
   const cfg = readConfig();
   const displayName = cfg.displayName || `agent-${Date.now().toString(36)}`;
@@ -100,7 +105,7 @@ export async function register(url) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: displayName }),
+      body: JSON.stringify({ display_name: displayName, registration_token: registrationToken }),
     },
     POST_TIMEOUT_MS,
   );
