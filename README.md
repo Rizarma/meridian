@@ -205,25 +205,19 @@ Meridian includes an **opt-in** collective intelligence system called **Hive Min
 
 ### Setup
 
-**1. Register with the hive**
+**1. Get the registration token** from the private Telegram discussion.
+
+**2. Register your agent**
 
 ```bash
-node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'REGISTRATION_TOKEN_HERE'))"
+node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
 ```
 
-This prints your API key and saves it to `user-config.json` automatically. **Save the key** — it won't be shown again.
+Replace `YOUR_TOKEN` with the registration token from Telegram.
 
-**2. Verify config**
+This automatically saves your credentials to `user-config.json`. **Save the API key printed in the terminal** — it will not be shown again.
 
-Check that `user-config.json` now has:
-```json
-{
-  "hiveMindUrl": "https://meridian-hive-api-production.up.railway.app",
-  "hiveMindApiKey": "your-key-here"
-}
-```
-
-**3. Done.** Your agent will sync on every position close and query the hive during screening. No restart needed.
+**3. Done.** No restart needed. Your agent will sync on every position close and query the hive during screening.
 
 ### Disable
 
