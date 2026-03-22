@@ -306,33 +306,40 @@ REPORT FORMAT (one per position):
         }
       } catch { /* hive is best-effort */ }
 
-      const { content } = await agentLoop(`
-SCREENING CYCLE — DEPLOY ONLY
+      // Phase 1: pick the best candidate — return pool address + reasoning only
+      const { content: pickContent } = await agentLoop(`
+SCREENING CYCLE — SELECTION ONLY (do NOT deploy yet)
 ${strategyBlock}
 Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${currentBalance.sol.toFixed(3)} | Deploy: ${deployAmount} SOL
 ${candidateContext}
-DECISION RULES (apply to the pre-loaded candidates above, no re-fetching needed):
+DECISION RULES:
 - HARD SKIP if global_fees_sol < ${config.screening.minTokenFeesSol} SOL (bundled/scam)
 - HARD SKIP if top_10_pct > ${config.screening.maxTop10Pct}% OR bundlers_pct > ${config.screening.maxBundlersPct}%
 - SKIP if narrative is empty/null or pure hype with no specific story (unless smart wallets present)
 - Bundlers 5–15% are normal, not a skip reason on their own
 - Smart wallets present → strong confidence boost
 
-STEPS:
-1. Pick the best candidate from the pre-loaded analysis above. If none pass, report why and stop.
-2. Call deploy_position tool now — do NOT skip this step or simulate it in text.
-   Use ${deployAmount} SOL. Do NOT use a smaller amount — this is compounded from your ${currentBalance.sol.toFixed(3)} SOL wallet.
-   Set bins_below by scaling volatility linearly: bins = round(35 + (volatility / 5) * 34), clamped to [35, 69]. Example: volatility=1 → 42, volatility=3 → 56, volatility=5 → 69.
-3. Write your report AFTER the deploy tool call completes, using the actual result.
+Evaluate each candidate and output ONLY this:
+SELECTED: <pool_address> | <pool_name> | bins_below=<round(35 + (volatility/5)*34) clamped 35-69>
+or: NO_DEPLOY: <reason>
 
-REPORT FORMAT (one block per candidate evaluated):
-**[PAIR]** | fee_tvl: [X]% | vol: $[X] | organic: [X] | smart_wallets: [Y/N]
-**Verdict:** DEPLOY / SKIP | **Reason:** [1-2 sentences on key signals that made or broke it]
+No other text.
+      `, 5, [], "SCREENER", config.llm.screeningModel, 512);
 
-After all candidates, add a final line based on actual tool result:
-**Deployed:** [PAIR] — [X] SOL (tx: [tx_hash]) | or **No deploy this cycle** — [reason]
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 4096);
-      screenReport = content;
+      // Phase 2: parse pick and deploy in a focused call
+      const selectedMatch = pickContent.match(/SELECTED:\s*(\S+)\s*\|\s*([^|]+)\|\s*bins_below=(\d+)/);
+      if (!selectedMatch) {
+        const noDeployMatch = pickContent.match(/NO_DEPLOY:\s*(.+)/);
+        screenReport = `No deploy this cycle — ${noDeployMatch?.[1]?.trim() ?? pickContent.trim()}`;
+      } else {
+        const [, poolAddr, poolName, binsStr] = selectedMatch;
+        const binsBelow = Math.min(69, Math.max(35, parseInt(binsStr)));
+        const { content: deployContent } = await agentLoop(
+          `Deploy ${deployAmount} SOL into pool ${poolAddr.trim()} (${poolName.trim()}). bins_below=${binsBelow}, bins_above=0. Call deploy_position now. Report the tx hash when done.`,
+          10, [], "SCREENER", config.llm.screeningModel, 512
+        );
+        screenReport = `${pickContent.trim()}\n\n${deployContent.trim()}`;
+      }
     } catch (error) {
       log("cron_error", `Screening cycle failed: ${error.message}`);
       screenReport = `Screening cycle failed: ${error.message}`;
