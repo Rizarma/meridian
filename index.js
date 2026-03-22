@@ -283,12 +283,18 @@ After all positions, add one summary line:
           const priceChange = ti?.stats_1h?.price_change;
           const netBuyers = ti?.stats_1h?.net_buyers;
 
+          // Use Jupiter audit for bot/top holders (more reliable than custom detection)
+          const botPct    = ti?.audit?.bot_holders_pct ?? h?.bundlers_pct_in_top_100 ?? "?";
+          const top10Pct  = ti?.audit?.top_holders_pct ?? h?.top_10_real_holders_pct ?? "?";
+          const launchpad = ti?.launchpad ?? null;
+          const feesSol   = ti?.global_fees_sol ?? h?.global_fees_sol ?? "?";
+
           // Build compact block
           const lines = [
             `POOL: ${pool.name} (${pool.pool})`,
             `  metrics: bin_step=${pool.bin_step}, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.active_tvl}, vol=${pool.volatility}, organic=${pool.organic_score}, mcap=$${pool.mcap}`,
+            `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
             sw?.in_pool?.length ? `  smart_wallets: ${sw.in_pool.map(w => w.name).join(", ")} ✓` : null,
-            h ? `  holders: top10=${h.top_10_real_holders_pct ?? "?"}%, bundlers=${h.bundlers_pct_in_top_100 ?? "?"}%, fees=${h.global_fees_sol ?? "?"}SOL` : null,
             priceChange != null ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}` : null,
             n?.narrative ? `  narrative: ${n.narrative.slice(0, 200)}` : null,
             mem ? `  memory: ${mem.slice(0, 150)}` : null,
@@ -319,10 +325,11 @@ ${strategyBlock}
 Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${currentBalance.sol.toFixed(3)} | Deploy: ${deployAmount} SOL
 ${candidateContext}
 DECISION RULES:
-- HARD SKIP if global_fees_sol < ${config.screening.minTokenFeesSol} SOL (bundled/scam)
-- HARD SKIP if top_10_pct > ${config.screening.maxTop10Pct}% OR bundlers_pct > ${config.screening.maxBundlersPct}%
+- HARD SKIP if fees < ${config.screening.minTokenFeesSol} SOL (bundled/scam)
+- HARD SKIP if top10 > ${config.screening.maxTop10Pct}% OR bots > ${config.screening.maxBundlersPct}%
+${config.screening.blockedLaunchpads.length ? `- HARD SKIP if launchpad is any of: ${config.screening.blockedLaunchpads.join(", ")}` : ""}
 - SKIP if narrative is empty/null or pure hype with no specific story (unless smart wallets present)
-- Bundlers 5–15% are normal, not a skip reason on their own
+- Bots 5–25% are normal, not a skip reason on their own
 - Smart wallets present → strong confidence boost
 
 STEPS:

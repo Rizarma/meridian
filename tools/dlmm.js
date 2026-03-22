@@ -252,6 +252,10 @@ export async function deployPosition({
     const minPrice = activePrice * Math.pow(1 + actualBinStep / 10000, minBinId - activeBin.binId);
     const maxPrice = activePrice * Math.pow(1 + actualBinStep / 10000, maxBinId - activeBin.binId);
 
+    // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
+    const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
+    const actualBaseFee = base_fee ?? (baseFactor > 0 ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4)) : null);
+
     return {
       success: true,
       position: newPosition.publicKey.toString(),
@@ -260,7 +264,7 @@ export async function deployPosition({
       bin_range: { min: minBinId, max: maxBinId, active: activeBin.binId },
       price_range: { min: minPrice, max: maxPrice },
       bin_step: actualBinStep,
-      base_fee: base_fee ?? null,
+      base_fee: actualBaseFee,
       strategy: activeStrategy,
       wide_range: isWideRange,
       amount_x: finalAmountX,
