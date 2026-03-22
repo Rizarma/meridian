@@ -300,7 +300,7 @@ Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${
 ${candidateContext}
 DECISION RULES (apply to the pre-loaded candidates above, no re-fetching needed):
 - HARD SKIP if global_fees_sol < ${config.screening.minTokenFeesSol} SOL (bundled/scam)
-- HARD SKIP if top_10_pct > 60% OR bundlers_pct > 30%
+- HARD SKIP if top_10_pct > ${config.screening.maxTop10Pct}% OR bundlers_pct > ${config.screening.maxBundlersPct}%
 - SKIP if narrative is empty/null or pure hype with no specific story (unless smart wallets present)
 - Bundlers 5–15% are normal, not a skip reason on their own
 - Smart wallets present → strong confidence boost

@@ -37,6 +37,8 @@ export const config = {
     timeframe:         u.timeframe         ?? "5m",
     category:          u.category          ?? "trending",
     minTokenFeesSol:   u.minTokenFeesSol   ?? 30,  // global fees paid (priority+jito tips). below = bundled/scam
+    maxBundlersPct:    u.maxBundlersPct    ?? 30,  // max bundlers % in top 100 holders
+    maxTop10Pct:       u.maxTop10Pct       ?? 60,  // max top 10 holders concentration
   },
 
   // ─── Position Management ────────────────

@@ -21,6 +21,8 @@
   "maxBinStep": 125,
   "minFeeActiveTvlRatio": 0.05,
   "minTokenFeesSol": 30,
+  "maxBundlersPct": 30,
+  "maxTop10Pct": 60,
   "takeProfitFeePct": 3,
   "emergencyPriceDropPct": -50,
   "outOfRangeBinsToClose": 5,
