@@ -11,7 +11,7 @@ import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { registerCronRestarter } from "./tools/executor.js";
 import { startPolling, stopPolling, sendMessage, sendHTML, notifyOutOfRange, isEnabled as telegramEnabled } from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
-import { getLastBriefingDate, setLastBriefingDate } from "./state.js";
+import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
@@ -114,6 +114,18 @@ export function startCronJobs() {
         log("cron", "No open positions — triggering screening cycle");
         runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
         return;
+      }
+
+      // Enforce management interval based on most volatile open position
+      const maxVolatility = positions.reduce((max, p) => {
+        const tracked = getTrackedPosition(p.position);
+        return Math.max(max, tracked?.volatility ?? 0);
+      }, 0);
+      const targetInterval = maxVolatility >= 5 ? 3 : maxVolatility >= 2 ? 5 : 10;
+      if (config.schedule.managementIntervalMin !== targetInterval) {
+        config.schedule.managementIntervalMin = targetInterval;
+        log("cron", `Management interval adjusted to ${targetInterval}m (max volatility: ${maxVolatility})`);
+        if (cronStarted) startCronJobs();
       }
 
       // Also trigger screening if under max positions — runs in background, doesn't block management
