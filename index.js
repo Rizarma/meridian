@@ -324,7 +324,7 @@ SELECTED: <pool_address> | <pool_name> | bins_below=<round(35 + (volatility/5)*3
 or: NO_DEPLOY: <reason>
 
 No other text.
-      `, 5, [], "SCREENER", config.llm.screeningModel, 512);
+      `, 5, [], "SCREENER", config.llm.screeningModel, 2048);
 
       // Phase 2: parse pick and deploy in a focused call
       const selectedMatch = pickContent.match(/SELECTED:\s*(\S+)\s*\|\s*([^|]+)\|\s*bins_below=(\d+)/);
@@ -336,7 +336,7 @@ No other text.
         const binsBelow = Math.min(69, Math.max(35, parseInt(binsStr)));
         const { content: deployContent } = await agentLoop(
           `Deploy ${deployAmount} SOL into pool ${poolAddr.trim()} (${poolName.trim()}). bins_below=${binsBelow}, bins_above=0. Call deploy_position now. Report the tx hash when done.`,
-          10, [], "SCREENER", config.llm.screeningModel, 512
+          10, [], "SCREENER", config.llm.screeningModel, 2048
         );
         screenReport = `${pickContent.trim()}\n\n${deployContent.trim()}`;
       }
