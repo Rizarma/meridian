@@ -242,12 +242,12 @@ REPORT FORMAT (one per position):
       const topCandidates = await getTopCandidates({ limit: 5 }).catch(() => null);
       const candidates = topCandidates?.candidates || topCandidates?.pools || [];
 
-      const candidateBlocks = await Promise.all(
-        candidates.slice(0, 5).map(async (pool) => {
-          const mint = pool.base?.mint;
-          const [smartWallets, holders, narrative, tokenInfo, poolMemory] = await Promise.allSettled([
+      const candidateBlocks = [];
+      for (const pool of candidates.slice(0, 5)) {
+        const mint = pool.base?.mint;
+        const [smartWallets, holders, narrative, tokenInfo, poolMemory] = await Promise.allSettled([
             checkSmartWalletsOnPool({ pool_address: pool.pool }),
-            mint ? getTokenHolders({ mint, limit: 10 }) : Promise.resolve(null),
+            mint ? getTokenHolders({ mint, limit: 100 }) : Promise.resolve(null),
             mint ? getTokenNarrative({ mint }) : Promise.resolve(null),
             mint ? getTokenInfo({ query: mint }) : Promise.resolve(null),
             Promise.resolve(recallForPool(pool.pool)),
@@ -274,9 +274,8 @@ REPORT FORMAT (one per position):
             mem ? `  memory: ${mem}` : null,
           ].filter(Boolean);
 
-          return lines.join("\n");
-        })
-      );
+          candidateBlocks.push(lines.join("\n"));
+      }
 
       let candidateContext = candidateBlocks.length > 0
         ? `\nPRE-LOADED CANDIDATE ANALYSIS (smart wallets, holders, narrative already fetched):\n${candidateBlocks.join("\n\n")}\n`
@@ -310,7 +309,14 @@ STEPS:
 1. Pick the best candidate from the pre-loaded analysis above. If none pass, report why and stop.
 2. deploy_position directly — it fetches the active bin internally, no separate get_active_bin needed.
    Use ${deployAmount} SOL. Do NOT use a smaller amount — this is compounded from your ${currentBalance.sol.toFixed(3)} SOL wallet.
-3. Report: pool chosen, key signals, deploy outcome.
+3. Write your report using the format below.
+
+REPORT FORMAT (one block per candidate evaluated):
+**[PAIR]** | fee_tvl: [X]% | vol: $[X] | organic: [X] | smart_wallets: [Y/N]
+**Verdict:** DEPLOY / SKIP | **Reason:** [1-2 sentences on key signals that made or broke it]
+
+After all candidates, add a final line:
+**Deployed:** [PAIR] — [X] SOL | or **No deploy this cycle** — [reason]
       `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 4096);
       screenReport = content;
     } catch (error) {
