@@ -45,7 +45,7 @@ export const config = {
   management: {
     minClaimAmount:        u.minClaimAmount        ?? 5,
     autoSwapAfterClaim:    u.autoSwapAfterClaim    ?? false,
-    outOfRangeBinsToClose: u.outOfRangeBinsToClose ?? 5,
+    outOfRangeBinsToClose: u.outOfRangeBinsToClose ?? 10,
     outOfRangeWaitMinutes: u.outOfRangeWaitMinutes ?? 30,
     minVolumeToRebalance:  u.minVolumeToRebalance  ?? 1000,
     emergencyPriceDropPct: u.emergencyPriceDropPct ?? -50,
