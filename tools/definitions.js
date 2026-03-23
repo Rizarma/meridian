@@ -211,7 +211,7 @@ Does NOT close the position — the account stays open for re-use.`,
       name: "add_liquidity",
       description: `Add liquidity to an existing position account.
 If bins_below and bins_above are omitted, the position's original bin range is reused automatically.
-For flip bid-ask (tokenX-only sell side): set amount_x, amount_y=0, bins_below=0 — bins_above is auto-derived from the position's original bins_below.
+For flip bid-ask (re-add tokenX after OOR): set amount_x=<balance>, amount_y=0, omit bins — uses the position's original range automatically.
 For topping up an existing position with same range: just provide amount_x/amount_y, omit bins.`,
       parameters: {
         type: "object",

@@ -750,14 +750,9 @@ export async function addLiquidity({ position_address, amount_x, amount_y, bins_
 
     let minBinId, maxBinId;
     if (bins_below == null && bins_above == null) {
-      // No bins provided — reuse existing position range
+      // No bins provided — reuse existing position's original range (e.g. re-adding tokenX after OOR)
       minBinId = tracked?.bin_range?.min ?? activeBin.binId - 69;
       maxBinId = tracked?.bin_range?.max ?? activeBin.binId;
-    } else if (bins_below === 0 && bins_above == null) {
-      // Flip bid-ask: tokenX-only sell side — mirror original bins_below as bins_above
-      const originalBinsBelow = tracked?.bin_range?.bins_below ?? 69;
-      minBinId = activeBin.binId;
-      maxBinId = activeBin.binId + originalBinsBelow;
     } else {
       // Explicit bins provided
       minBinId = activeBin.binId - (bins_below ?? 0);

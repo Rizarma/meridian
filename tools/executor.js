@@ -413,14 +413,14 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      // Check SOL balance — must have enough to deploy + gas reserve
+      // Check SOL balance — for tokenX-only deploys only gas reserve is needed
       const balance = await getWalletBalances();
       const gasReserve = config.management.gasReserve;
-      const minRequired = amountY + gasReserve;
+      const minRequired = amountY > 0 ? amountY + gasReserve : gasReserve;
       if (balance.sol < minRequired) {
         return {
           pass: false,
-          reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
+          reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY > 0 ? `${amountY} deploy + ` : ""}${gasReserve} gas reserve).`,
         };
       }
 
