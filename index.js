@@ -180,7 +180,11 @@ PRE-LOADED POSITION DATA (no fetching needed):
 ${positionBlocks}${hivePatterns}
 
 SPECIAL INSTRUCTIONS — check before close rules:
-- instruction = "flip bid-ask" AND active_bin <= lower_bin → FLIP: call remove_liquidity, then add_liquidity with all tokenX balance, bins_above=bins_below (same width), bins_below=0, strategy=bid_ask. Clear instruction after with set_position_note(null). Use general model reasoning.
+- instruction = "flip bid-ask" AND active_bin <= lower_bin → FLIP (execute all steps in order):
+  1. call remove_liquidity(position_address)
+  2. call get_wallet_balance to get current tokenX amount
+  3. call add_liquidity(position_address, amount_x=<tokenX balance>, amount_y=0, bins_below=0, bins_above=<same as original bins_below>, strategy=bid_ask)
+  4. call set_position_note(position_address, null) to clear the instruction
 - instruction = "flip bid-ask" AND condition NOT met → HOLD, skip all close rules
 
 HARD CLOSE RULES — apply in order, first match wins (skip if instruction handled above):
@@ -197,7 +201,7 @@ CLAIM RULE: If unclaimed_fee_usd >= ${config.management.minClaimAmount}, call cl
 INSTRUCTIONS:
 All data is pre-loaded above — do NOT call get_my_positions or get_position_pnl.
 Apply the rules to each position and write your report immediately.
-Only call tools if a position needs to be CLOSED or fees need to be CLAIMED.
+Only call tools if a position needs to be CLOSED, FLIPPED, or fees need to be CLAIMED.
 If all positions STAY and no fees to claim, just write the report with no tool calls.
 
 REPORT FORMAT (one per position):
