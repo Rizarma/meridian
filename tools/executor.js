@@ -56,7 +56,17 @@ const toolMap = {
   claim_fees: claimFees,
   close_position: closePosition,
   remove_liquidity: removeLiquidity,
-  add_liquidity: addLiquidity,
+  add_liquidity: async (args) => {
+    const result = await addLiquidity(args);
+    // Auto-clear "flip bid-ask" instruction after successful re-add so it doesn't re-trigger
+    if (result.success && args.position_address) {
+      const tracked = (await import("../state.js")).getTrackedPosition(args.position_address);
+      if (tracked?.instruction === "flip bid-ask") {
+        setPositionInstruction(args.position_address, null);
+      }
+    }
+    return result;
+  },
   get_wallet_balance: getWalletBalances,
   swap_token: swapToken,
   get_top_lpers: studyTopLPers,
