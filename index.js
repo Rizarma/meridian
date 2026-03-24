@@ -340,7 +340,7 @@ STEPS:
 3. Report in this exact format (no tables, no extra sections):
    Deployed: PAIR
    bin_step=X | fee=X% | bots=X% | top10=X% | fees=XSOL
-   range=minPrice→maxPrice (downside=minPrice/maxPrice*100%)
+   range=minPrice→maxPrice (downside=(minPrice/maxPrice-1)*100%)
    smart_wallets=name1,name2 (or none)
    narrative: <one sentence>
    reason: <one sentence why picked over others>
