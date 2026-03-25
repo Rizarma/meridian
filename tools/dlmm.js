@@ -232,11 +232,16 @@ export async function deployPosition({
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
 
     _positionsCacheAt = 0;
+    // SOL-only bid_ask (all bins below, no token X) → management strategy is single_sided_reseed
+    const trackedStrategy =
+      finalAmountX === 0 && finalAmountY > 0 && activeStrategy === "bid_ask" && activeBinsAbove === 0
+        ? "single_sided_reseed"
+        : activeStrategy;
     trackPosition({
       position: newPosition.publicKey.toString(),
       pool: pool_address,
       pool_name,
-      strategy: activeStrategy,
+      strategy: trackedStrategy,
       bin_range: { min: minBinId, max: maxBinId, bins_below: activeBinsBelow, bins_above: activeBinsAbove },
       bin_step,
       volatility,
