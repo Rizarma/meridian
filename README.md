@@ -58,7 +58,17 @@ cd meridian
 npm install
 ```
 
-### 2. Create `.env`
+### 2. Run the setup wizard
+
+```bash
+npm run setup
+```
+
+The wizard walks you through creating `.env` (API keys, wallet, RPC, Telegram) and `user-config.json` (risk preset, deploy size, thresholds, models). Takes about 2 minutes.
+
+**Or set up manually:**
+
+Create `.env`:
 
 ```env
 WALLET_PRIVATE_KEY=your_base58_private_key
@@ -72,15 +82,15 @@ DRY_RUN=true                            # set false for live trading
 
 > Never put your private key or API keys in `user-config.json` — use `.env` only. Both files are gitignored.
 
-### 3. Copy config
+Copy config and edit as needed:
 
 ```bash
 cp user-config.example.json user-config.json
 ```
 
-Edit `user-config.json` to set your screening thresholds, deploy sizes, and model preferences. See [Config reference](#config-reference) below.
+See [Config reference](#config-reference) below.
 
-### 4. Run
+### 3. Run
 
 ```bash
 npm run dev    # dry run — no on-chain transactions
@@ -389,6 +399,7 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `gasReserve` | `0.2` | Minimum SOL to keep for gas |
 | `minSolToOpen` | `0.55` | Minimum wallet SOL before opening |
 | `outOfRangeWaitMinutes` | `30` | Minutes OOR before acting |
+| `stopLossPct` | `-15` | Close position if price drops by this % |
 
 ### Schedule
 
@@ -401,9 +412,9 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 | Field | Default | Description |
 |---|---|---|
-| `managementModel` | `openrouter/healer-alpha` | LLM for management cycles |
-| `screeningModel` | `openrouter/healer-alpha` | LLM for screening cycles |
-| `generalModel` | `openrouter/healer-alpha` | LLM for REPL / chat |
+| `managementModel` | `openai/gpt-oss-20b:free` | LLM for management cycles |
+| `screeningModel` | `openai/gpt-oss-20b:free` | LLM for screening cycles |
+| `generalModel` | `openai/gpt-oss-20b:free` | LLM for REPL / chat |
 
 > Override model at runtime: `node cli.js config set screeningModel anthropic/claude-opus-4-5`
 

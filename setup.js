@@ -1,10 +1,9 @@
 /**
  * Interactive setup wizard.
- * Runs before the agent starts. Saves settings to user-config.json.
+ * Guides user through .env + user-config.json creation.
  * Run: npm run setup
  */
 
-import "dotenv/config";
 import readline from "readline";
 import fs from "fs";
 import path from "path";
@@ -12,12 +11,15 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, "user-config.json");
+const ENV_PATH    = path.join(__dirname, ".env");
+
+const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 function ask(question, defaultVal) {
   return new Promise((resolve) => {
-    const hint = defaultVal !== undefined ? ` (default: ${defaultVal})` : "";
+    const hint = defaultVal !== undefined && defaultVal !== "" ? ` (default: ${defaultVal})` : "";
     rl.question(`${question}${hint}: `, (ans) => {
       const trimmed = ans.trim();
       resolve(trimmed === "" ? defaultVal : trimmed);
@@ -39,6 +41,19 @@ function askNum(question, defaultVal, { min, max } = {}) {
   });
 }
 
+function askBool(question, defaultVal) {
+  return new Promise(async (resolve) => {
+    while (true) {
+      const hint = defaultVal ? "Y/n" : "y/N";
+      const raw = await ask(`${question} [${hint}]`, "");
+      if (raw === "") { resolve(defaultVal); break; }
+      if (/^y(es)?$/i.test(raw)) { resolve(true);  break; }
+      if (/^n(o)?$/i.test(raw))  { resolve(false); break; }
+      console.log("  ⚠ Enter y or n.");
+    }
+  });
+}
+
 function askChoice(question, choices) {
   return new Promise(async (resolve) => {
     const labels = choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n");
@@ -53,45 +68,55 @@ function askChoice(question, choices) {
   });
 }
 
+function parseEnv(content) {
+  const map = {};
+  for (const line of content.split("\n")) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m) map[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+  return map;
+}
+
+function buildEnv(map) {
+  return Object.entries(map).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
+}
+
 // ─── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = {
   degen: {
-    label:                 "🔥 Degen",
+    label:                 "Degen",
     timeframe:             "30m",
-    maxVolatility:         12.0,   // pumping meme coins welcome
-    maxPriceChangePct:     1000,   // don't filter pumps — high fee/TVL is the gate
     minOrganic:            60,
     minHolders:            200,
     maxMcap:               5_000_000,
     takeProfitFeePct:      10,
+    stopLossPct:           -25,
     outOfRangeWaitMinutes: 15,
     managementIntervalMin: 5,
     screeningIntervalMin:  15,
     description: "30m timeframe, pumping tokens allowed, fast cycles. High risk/reward.",
   },
   moderate: {
-    label:                 "⚖️  Moderate",
+    label:                 "Moderate",
     timeframe:             "4h",
-    maxVolatility:         8.0,    // allow active meme coins
-    maxPriceChangePct:     300,    // allow up to 3x pump if fee/TVL justifies it
     minOrganic:            65,
     minHolders:            500,
     maxMcap:               10_000_000,
     takeProfitFeePct:      5,
+    stopLossPct:           -15,
     outOfRangeWaitMinutes: 30,
     managementIntervalMin: 10,
     screeningIntervalMin:  30,
     description: "4h timeframe, balanced risk/reward. Recommended for most users.",
   },
   safe: {
-    label:                 "🛡️  Safe",
+    label:                 "Safe",
     timeframe:             "24h",
-    maxVolatility:         2.5,
-    maxPriceChangePct:     80,     // avoid pumped coins
     minOrganic:            75,
     minHolders:            1000,
     maxMcap:               10_000_000,
     takeProfitFeePct:      3,
+    stopLossPct:           -10,
     outOfRangeWaitMinutes: 60,
     managementIntervalMin: 15,
     screeningIntervalMin:  60,
@@ -99,51 +124,82 @@ const PRESETS = {
   },
 };
 
-// Load existing config
-const existing = fs.existsSync(CONFIG_PATH)
+// ─── Load existing state ───────────────────────────────────────────────────────
+const existingConfig = fs.existsSync(CONFIG_PATH)
   ? JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"))
   : {};
+const existingEnv = fs.existsSync(ENV_PATH)
+  ? parseEnv(fs.readFileSync(ENV_PATH, "utf8"))
+  : {};
 
-const e = (key, fallback) => existing[key] ?? fallback;
+const e  = (key, fallback) => existingConfig[key] ?? fallback;
+const ev = (key, fallback) => existingEnv[key] ?? fallback;
 
+// ─── Banner ────────────────────────────────────────────────────────────────────
 console.log(`
-╔═══════════════════════════════════════════╗
-║       DLMM LP Agent — Setup Wizard        ║
-╚═══════════════════════════════════════════╝
+╔═══════════════════════════════════════════════╗
+║        Meridian — Setup Wizard                ║
+║        Autonomous Meteora DLMM LP Agent       ║
+╚═══════════════════════════════════════════════╝
+
+This wizard creates your .env and user-config.json.
+Press Enter to keep the current/default value.
 `);
 
-// ─── Preset selection ─────────────────────────────────────────────────────────
-const presetChoice = await askChoice("Select a risk preset:", [
-  { label: `Degen    — ${PRESETS.degen.description}`,    key: "degen"    },
-  { label: `Moderate — ${PRESETS.moderate.description}`, key: "moderate" },
-  { label: `Safe     — ${PRESETS.safe.description}`,     key: "safe"     },
-  { label: "Custom   — Configure every setting manually", key: "custom"  },
-]);
+// ─── Section 1: API Keys & Wallet ─────────────────────────────────────────────
+console.log("── API Keys & Wallet ─────────────────────────────────────────");
 
-let preset = presetChoice.key === "custom" ? null : PRESETS[presetChoice.key];
-
-console.log(preset
-  ? `\n✓ Using ${preset.label} preset. You can still override individual values below.\n`
-  : `\nCustom mode — configure everything manually.\n`
-);
-
-const p = (key, fallback) => preset?.[key] ?? e(key, fallback);
-
-// ─── Wallet & RPC ─────────────────────────────────────────────────────────────
-console.log("── Wallet & RPC ──────────────────────────────");
-
-const rpcUrl = await ask(
-  "RPC URL",
-  e("rpcUrl", process.env.RPC_URL || "https://api.mainnet-beta.solana.com")
+const openrouterKey = await ask(
+  "OpenRouter API key (sk-or-...)",
+  ev("OPENROUTER_API_KEY", "")
 );
 
 const walletKey = await ask(
   "Wallet private key (base58)",
-  e("walletKey", process.env.WALLET_PRIVATE_KEY ? "*** (already set in .env)" : "")
+  ev("WALLET_PRIVATE_KEY", existingConfig.walletKey || "")
 );
 
-// ─── Deployment ───────────────────────────────────────────────────────────────
-console.log("\n── Deployment ────────────────────────────────");
+const rpcUrl = await ask(
+  "RPC URL",
+  ev("RPC_URL", e("rpcUrl", "https://api.mainnet-beta.solana.com"))
+);
+
+const heliusKey = await ask(
+  "Helius API key (for balance lookups, optional)",
+  ev("HELIUS_API_KEY", "")
+);
+
+// ─── Section 2: Telegram ──────────────────────────────────────────────────────
+console.log("\n── Telegram (optional — skip to disable) ─────────────────────");
+
+const telegramToken = await ask(
+  "Telegram bot token",
+  ev("TELEGRAM_BOT_TOKEN", "")
+);
+
+const telegramChatId = await ask(
+  "Telegram chat ID",
+  ev("TELEGRAM_CHAT_ID", e("telegramChatId", ""))
+);
+
+// ─── Section 3: Preset ────────────────────────────────────────────────────────
+const presetChoice = await askChoice("Select a risk preset:", [
+  { label: `🔥 Degen    — ${PRESETS.degen.description}`,    key: "degen"    },
+  { label: `⚖️  Moderate — ${PRESETS.moderate.description}`, key: "moderate" },
+  { label: `🛡️  Safe     — ${PRESETS.safe.description}`,     key: "safe"     },
+  { label: "⚙️  Custom   — Configure every setting manually", key: "custom"  },
+]);
+
+const preset = presetChoice.key === "custom" ? null : PRESETS[presetChoice.key];
+const p = (key, fallback) => preset?.[key] ?? e(key, fallback);
+
+console.log(preset
+  ? `\n✓ ${preset.label} preset selected. Override individual values below (Enter to keep).\n`
+  : `\nCustom mode — configure all settings.\n`
+);
+
+// ─── Section 4: Deployment ────────────────────────────────────────────────────
+console.log("── Deployment ────────────────────────────────────────────────");
 
 const deployAmountSol = await askNum(
   "SOL to deploy per position",
@@ -163,34 +219,21 @@ const minSolToOpen = await askNum(
   { min: 0.05 }
 );
 
-const maxDeployAmount = await askNum(
-  "Max SOL per single position (safety cap)",
-  e("maxDeployAmount", 50),
-  { min: deployAmountSol }
+const dryRun = await askBool(
+  "Dry run mode? (no real transactions)",
+  e("dryRun", true)
 );
 
-// ─── Risk ─────────────────────────────────────────────────────────────────────
-console.log("\n── Risk & Filters ────────────────────────────");
+// ─── Section 5: Risk & Filters ────────────────────────────────────────────────
+console.log("\n── Risk & Filters ────────────────────────────────────────────");
 
 const timeframe = await ask(
   "Pool discovery timeframe (30m / 1h / 4h / 12h / 24h)",
   p("timeframe", "4h")
 );
 
-const maxVolatility = await askNum(
-  "Max pool volatility",
-  p("maxVolatility", 8.0),
-  { min: 0.5, max: 20 }
-);
-
-const maxPriceChangePct = await askNum(
-  "Max price change % allowed (e.g. 300 = allow 3x pumps)",
-  p("maxPriceChangePct", 300),
-  { min: 10 }
-);
-
 const minOrganic = await askNum(
-  "Min organic score (0-100)",
+  "Min organic score (0–100)",
   p("minOrganic", 65),
   { min: 0, max: 100 }
 );
@@ -207,13 +250,19 @@ const maxMcap = await askNum(
   { min: 100_000 }
 );
 
-// ─── Exit ─────────────────────────────────────────────────────────────────────
-console.log("\n── Exit Rules ────────────────────────────────");
+// ─── Section 6: Exit Rules ────────────────────────────────────────────────────
+console.log("\n── Exit Rules ────────────────────────────────────────────────");
 
 const takeProfitFeePct = await askNum(
   "Take profit when fees earned >= X% of deployed capital",
   p("takeProfitFeePct", 5),
   { min: 0.1, max: 100 }
+);
+
+const stopLossPct = await askNum(
+  "Stop loss at X% price drop (e.g. -15)",
+  p("stopLossPct", -15),
+  { min: -99, max: -1 }
 );
 
 const outOfRangeWaitMinutes = await askNum(
@@ -222,8 +271,8 @@ const outOfRangeWaitMinutes = await askNum(
   { min: 1 }
 );
 
-// ─── Scheduling ───────────────────────────────────────────────────────────────
-console.log("\n── Scheduling ────────────────────────────────");
+// ─── Section 7: Scheduling ────────────────────────────────────────────────────
+console.log("\n── Scheduling ────────────────────────────────────────────────");
 
 const managementIntervalMin = await askNum(
   "Management cycle interval (minutes)",
@@ -237,68 +286,94 @@ const screeningIntervalMin = await askNum(
   { min: 5 }
 );
 
-// ─── LLM ──────────────────────────────────────────────────────────────────────
-console.log("\n── LLM ───────────────────────────────────────");
+// ─── Section 8: LLM Models ────────────────────────────────────────────────────
+console.log("\n── LLM Models ────────────────────────────────────────────────");
+console.log(`  Default: ${DEFAULT_MODEL} (free, fast)\n`);
 
-const llmModel = await ask(
-  "LLM model (OpenRouter model ID)",
-  e("llmModel", process.env.LLM_MODEL || "nousresearch/hermes-3-llama-3.1-405b")
+const managementModel = await ask(
+  "Management agent model",
+  e("managementModel", DEFAULT_MODEL)
 );
 
-const dryRun = await ask(
-  "Dry run mode? (true = no real transactions)",
-  e("dryRun", "false")
+const screeningModel = await ask(
+  "Screening agent model",
+  e("screeningModel", DEFAULT_MODEL)
+);
+
+const generalModel = await ask(
+  "General/chat model",
+  e("generalModel", DEFAULT_MODEL)
 );
 
 rl.close();
 
-// ─── Save ──────────────────────────────────────────────────────────────────────
+// ─── Write .env ───────────────────────────────────────────────────────────────
+const envMap = {
+  ...existingEnv,
+  ...(openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}),
+  ...(walletKey     ? { WALLET_PRIVATE_KEY: walletKey }     : {}),
+  ...(rpcUrl        ? { RPC_URL: rpcUrl }                   : {}),
+  ...(heliusKey     ? { HELIUS_API_KEY: heliusKey }         : {}),
+  ...(telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {}),
+  ...(telegramChatId ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
+  DRY_RUN: dryRun ? "true" : "false",
+};
+fs.writeFileSync(ENV_PATH, buildEnv(envMap));
+
+// ─── Write user-config.json ────────────────────────────────────────────────────
 const userConfig = {
+  ...existingConfig,
   preset: presetChoice.key,
   rpcUrl,
-  ...(walletKey && !walletKey.startsWith("***") ? { walletKey } : {}),
   deployAmountSol,
   maxPositions,
   minSolToOpen,
-  maxDeployAmount,
   timeframe,
-  maxVolatility,
-  maxPriceChangePct,
   minOrganic,
   minHolders,
   maxMcap,
   takeProfitFeePct,
+  stopLossPct,
   outOfRangeWaitMinutes,
   managementIntervalMin,
   screeningIntervalMin,
-  llmModel,
-  dryRun: dryRun === "true",
+  managementModel,
+  screeningModel,
+  generalModel,
+  telegramChatId: telegramChatId || "",
+  dryRun,
 };
+
+// Remove legacy key if present
+delete userConfig.emergencyPriceDropPct;
 
 fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 
-const presetName = preset ? preset.label : "Custom";
+// ─── Summary ──────────────────────────────────────────────────────────────────
+const presetName = preset ? `${preset.label}` : "Custom";
 
 console.log(`
-╔═══════════════════════════════════════════╗
-║           Configuration Saved             ║
-╚═══════════════════════════════════════════╝
+╔═══════════════════════════════════════════════╗
+║           Setup Complete                      ║
+╚═══════════════════════════════════════════════╝
 
-Preset:       ${presetName}
-Timeframe:    ${timeframe}
+  Preset:       ${presetName}
+  Dry run:      ${dryRun ? "YES — no real transactions" : "NO — live trading"}
 
-  Deploy:     ${deployAmountSol} SOL/position  |  Max: ${maxPositions} positions
-  Min balance: ${minSolToOpen} SOL to open
-  Take profit: fees >= ${takeProfitFeePct}%
-  Volatility:  max ${maxVolatility}
-  Organic:     min ${minOrganic}
-  Holders:     min ${minHolders}
-  Max mcap:    $${maxMcap.toLocaleString()}
-  OOR close:   after ${outOfRangeWaitMinutes} min
-  Mgmt:        every ${managementIntervalMin} min
-  Screening:   every ${screeningIntervalMin} min
-  Model:       ${llmModel}
-  Dry run:     ${dryRun}
+  Deploy:       ${deployAmountSol} SOL/position  ·  max ${maxPositions} positions
+  Min balance:  ${minSolToOpen} SOL to open new position
+  Timeframe:    ${timeframe}  ·  organic ≥ ${minOrganic}  ·  holders ≥ ${minHolders}
+  Take profit:  fees ≥ ${takeProfitFeePct}%
+  Stop loss:    ${stopLossPct}% price drop
+  OOR close:    after ${outOfRangeWaitMinutes} min
+
+  Cycles:       management every ${managementIntervalMin}m  ·  screening every ${screeningIntervalMin}m
+  Models:       ${managementModel}
+
+  Telegram:     ${telegramToken ? "enabled" : "disabled"}
+  .env:         ${ENV_PATH}
+  Config:       ${CONFIG_PATH}
 
 Run "npm start" to launch the agent.
+${dryRun ? '\n  ⚠ DRY RUN is ON — set dryRun: false in user-config.json when ready for live trading.\n' : ""}
 `);
