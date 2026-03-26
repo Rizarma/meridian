@@ -4,7 +4,14 @@
  */
 
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
-const LPAGENT_KEY = process.env.LPAGENT_API_KEY;
+const LPAGENT_KEYS = (process.env.LPAGENT_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
+let _keyIndex = 0;
+function nextKey() {
+  if (!LPAGENT_KEYS.length) return null;
+  const key = LPAGENT_KEYS[_keyIndex % LPAGENT_KEYS.length];
+  _keyIndex++;
+  return key;
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -13,14 +20,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * and return condensed behaviour patterns for LLM consumption.
  */
 export async function studyTopLPers({ pool_address, limit = 4 }) {
-  if (!LPAGENT_KEY) {
+  if (!LPAGENT_KEYS.length) {
     return { pool: pool_address, message: "LPAGENT_API_KEY not set in .env — study_top_lpers is disabled.", patterns: [], lpers: [] };
   }
 
   // ── 1. Top LPers for this pool ──────────────────────────────
   const topRes = await fetch(
     `${LPAGENT_API}/pools/${pool_address}/top-lpers?sort_order=desc&page=1&limit=20`,
-    { headers: { "x-api-key": LPAGENT_KEY } }
+    { headers: { "x-api-key": nextKey() } }
   );
 
   if (!topRes.ok) {
@@ -62,7 +69,7 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
 
       const histRes = await fetch(
         `${LPAGENT_API}/lp-positions/historical?owner=${lper.owner}&page=1&limit=50`,
-        { headers: { "x-api-key": LPAGENT_KEY } }
+        { headers: { "x-api-key": nextKey() } }
       );
 
       if (!histRes.ok) continue;

@@ -69,42 +69,83 @@ Current screening timeframe: ${config.screening.timeframe} — interpret all met
 
   if (agentType === "SCREENER") {
     basePrompt += `
-Your goal: Find high-yield, high-volume pools and DEPLOY capital.
+Your goal: Find high-yield, high-volume pools and DEPLOY capital using data-driven strategies.
 
-1. SCREEN: Use get_top_candidates or discover_pools.
-2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume.
-3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.
-4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).
+1. STRATEGY: Call list_strategies then get_strategy for the active one. The active strategy guides your deploy parameters.
+2. SCREEN: Use get_top_candidates or discover_pools.
+3. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume.
+4. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.
+5. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).
    - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).
    - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.
    - Smart wallets present + fees pass → strong signal, proceed to deploy.
    - No smart wallets → also call get_token_narrative before deciding:
      * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story
      * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure
-     * Bundlers 5–15% are normal, not a skip signal on their own
      * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)
      * BAD narrative: generic hype ("next 100x", "community token") with no identifiable subject or story
      * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst
-5. DEPLOY: get_active_bin then deploy_position.
-   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).
+
+6. CHOOSE STRATEGY based on token data:
+   - Strong momentum (net_buyers > 0, price up) → custom_ratio_spot with bullish token ratio
+   - High volatility + strong narrative + degen → single_sided_reseed
+   - Stable volume + range-bound → fee_compounding
+   - Mixed signals + high volume → multi_layer (composite shapes in one position)
+   - High fee pool + clear TP → partial_harvest
+
+7. CHOOSE RATIO (for custom_ratio_spot) — call get_token_info, read stats_1h:
+   - price up >5%, net_buyers >10 → 80% token / 20% SOL (strong bull)
+   - price up 1-5% → 70% token / 30% SOL
+   - price flat → 50% / 50%
+   - price down 1-5% → 30% token / 70% SOL
+   - price down >5% → 20% token / 80% SOL
+   Capital is always in SOL terms. Swap the token portion: swap_token SOL→base_mint for the token %.
+
+8. CHOOSE BIN RANGE — call get_pool_detail, read volatility + price_trend:
+   Total bins (tighter is better — research shows 20-40 bins outperform):
+   - Low vol (0-1): 25-35 bins. Med vol (1-3): 35-50. High vol (3-5): 50-60. Extreme: 60-69.
+   Directional split:
+   - Price downtrend → bins_below = round(total × 0.75), bins_above = rest
+   - Price uptrend → bins_below = round(total × 0.35), bins_above = rest
+   - Price flat → bins_below = round(total × 0.55), bins_above = rest
+
+9. PRE-DEPLOY: Check get_wallet_balance. If token needed, call swap_token first. Ensure SOL remaining >= gasReserve.
+
+10. DEPLOY: get_active_bin then deploy_position with computed ratio and bins.
    - HARD RULE: Bin steps must be [80-125].
-   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.
+   - COMPOUNDING: Deploy amount computed from wallet size. Use the amount provided in the cycle goal.
    - Focus on one high-conviction deployment per cycle.
+   - For custom_ratio_spot two-step: deploy first, then add_liquidity with single_sided_x for token on upside bins ONLY if layering matrix calls for it. Layering is OPTIONAL.
+
+Pool age affects shape: New pools (<3 days) → Spot or Bid-Ask equally. Mature pools (10+ days) → Bid-Ask outperforms (2x avg PnL, 93% win rate).
+Deposit size: >$2K favors Bid-Ask over Spot (Spot breaks at large deposits).
 `;
   } else if (agentType === "MANAGER") {
     basePrompt += `
-Your goal: Manage positions to maximize total Fee + PnL yield.
+Your goal: Manage positions to maximize total Fee + PnL yield using strategy-aware decisions.
 
-INSTRUCTION CHECK (HIGHEST PRIORITY): If a position has an instruction set (e.g. "close at 5% profit"), check get_position_pnl and compare against the condition FIRST. If the condition IS MET → close immediately. No further analysis, no hesitation. BIAS TO HOLD does NOT apply when an instruction condition is met.
+INSTRUCTION CHECK (HIGHEST PRIORITY): If a position has an instruction set (e.g. "close at 5% profit"), check get_position_pnl and compare against the condition FIRST. If the condition IS MET → close immediately.
 
-BIAS TO HOLD: Unless an instruction fires, a pool is dying, volume has collapsed, or yield has vanished, hold.
+STRATEGY CHECK: Call list_strategies to see the active strategy. Each strategy has different management rules:
+- custom_ratio_spot: standard management. Close when OOR or TP hit. Re-deploy with updated ratio.
+- single_sided_reseed: when OOR downside → withdraw_liquidity(bps=10000) → add_liquidity with token-only bid_ask to SAME position. Do NOT close. Do NOT swap to SOL.
+- fee_compounding: when unclaimed fees > $5 AND in range → claim_fees → add_liquidity back to same position.
+- multi_layer: manage the composite position as one unit. Close normally when done.
+- partial_harvest: when total return >= 10% → withdraw_liquidity(bps=5000) to take 50% off. Keep rest running. After harvest: swap withdrawn tokens to SOL.
 
-Decision Factors for Closing (no instruction):
-- Yield Health: Call get_position_pnl. Is the current Fee/TVL still one of the best available?
-- Price Context: Is the token price stabilizing or trending? If it's out of range, will it come back?
-- Opportunity Cost: Only close to "free up SOL" if you see a significantly better pool that justifies the gas cost of exiting and re-entering.
+CLOSE RULES (override strategy defaults when data is clear):
+- OOR UPSIDE + profitable (PnL > 10%) → close IMMEDIATELY to lock gains. Don't wait for timers.
+- OOR DOWNSIDE for >10 min with no volume recovery → close (unless single_sided_reseed strategy).
+- PnL < -25% with no volume recovery → close.
+- Take profit: total return >= 10% of deployed capital.
 
-IMPORTANT: Do NOT call get_top_candidates or study_top_lpers while you have healthy open positions. Focus exclusively on managing what you have.
+BIAS TO HOLD: Unless above rules trigger, a pool is dying, volume has collapsed, or yield has vanished, hold.
+
+DATA-DRIVEN REBALANCE: Before closing or rebalancing, check:
+- get_pool_detail → is volume still present? fee/TVL still good?
+- get_active_bin → how far OOR? Edge or blown through?
+- get_token_info → price trend, net buyers, narrative still alive?
+
 After ANY close: check wallet for base tokens and swap ALL to SOL immediately.
 `;
   } else {

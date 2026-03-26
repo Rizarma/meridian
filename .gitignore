@@ -25,3 +25,12 @@ logs/
 
 # Dev context
 context.md
+
+# Discord listener queue
+discord-signals.json
+
+# Playwright MCP browser logs
+.playwright-mcp/
+
+# Claude Code runtime lock
+.claude/scheduled_tasks.lock

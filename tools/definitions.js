@@ -1026,5 +1026,44 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
         properties: {}
       }
     }
-  }
+  },
+
+  // ═══════════════════════════════════════════
+  //  LIQUIDITY MANAGEMENT TOOLS
+  // ═══════════════════════════════════════════
+  {
+    type: "function",
+    function: {
+      name: "withdraw_liquidity",
+      description: "Remove partial or full liquidity from an existing position WITHOUT closing it. Use bps=5000 to take 50% off the table (partial harvest), or bps=10000 for full withdrawal before re-seeding at a new price level. Position account stays open.",
+      parameters: {
+        type: "object",
+        properties: {
+          position_address: { type: "string", description: "Position public key to withdraw from" },
+          pool_address: { type: "string", description: "Pool address the position belongs to" },
+          bps: { type: "number", description: "Basis points of liquidity to remove. 5000=50%, 10000=100%. Default 10000." },
+          claim_fees: { type: "boolean", description: "Claim accumulated swap fees before withdrawal. Default true." },
+        },
+        required: ["position_address", "pool_address"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_liquidity",
+      description: "Add tokens to an existing position without closing it. Use for fee compounding (claim fees then add them back) or re-seeding after a withdrawal. Liquidity is distributed within the position's existing bin range using the specified strategy shape.",
+      parameters: {
+        type: "object",
+        properties: {
+          position_address: { type: "string", description: "Existing position public key to add liquidity to" },
+          pool_address: { type: "string", description: "Pool address the position belongs to" },
+          amount_x: { type: "number", description: "Base token amount to add (0 if adding only SOL)" },
+          amount_y: { type: "number", description: "SOL amount to add (0 if adding only token)" },
+          strategy: { type: "string", enum: ["spot", "curve", "bid_ask"], description: "Distribution shape for the added liquidity. Default: spot" },
+        },
+        required: ["position_address", "pool_address"],
+      },
+    },
+  },
 ];
