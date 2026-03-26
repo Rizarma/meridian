@@ -149,14 +149,16 @@ Press Enter to keep the current/default value.
 // ─── Section 1: API Keys & Wallet ─────────────────────────────────────────────
 console.log("── API Keys & Wallet ─────────────────────────────────────────");
 
+const alreadySet = (val) => val ? "*** (already set — Enter to keep)" : "";
+
 const openrouterKey = await ask(
   "OpenRouter API key (sk-or-...)",
-  ev("OPENROUTER_API_KEY", "")
+  alreadySet(ev("OPENROUTER_API_KEY", ""))
 );
 
 const walletKey = await ask(
   "Wallet private key (base58)",
-  ev("WALLET_PRIVATE_KEY", existingConfig.walletKey || "")
+  alreadySet(ev("WALLET_PRIVATE_KEY", existingConfig.walletKey || ""))
 );
 
 const rpcUrl = await ask(
@@ -166,7 +168,7 @@ const rpcUrl = await ask(
 
 const heliusKey = await ask(
   "Helius API key (for balance lookups, optional)",
-  ev("HELIUS_API_KEY", "")
+  alreadySet(ev("HELIUS_API_KEY", ""))
 );
 
 // ─── Section 2: Telegram ──────────────────────────────────────────────────────
@@ -174,7 +176,7 @@ console.log("\n── Telegram (optional — skip to disable) ──────
 
 const telegramToken = await ask(
   "Telegram bot token",
-  ev("TELEGRAM_BOT_TOKEN", "")
+  alreadySet(ev("TELEGRAM_BOT_TOKEN", ""))
 );
 
 const telegramChatId = await ask(
@@ -308,14 +310,16 @@ const generalModel = await ask(
 rl.close();
 
 // ─── Write .env ───────────────────────────────────────────────────────────────
+const isKept = (val) => !val || val.startsWith("***");
+
 const envMap = {
   ...existingEnv,
-  ...(openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}),
-  ...(walletKey     ? { WALLET_PRIVATE_KEY: walletKey }     : {}),
-  ...(rpcUrl        ? { RPC_URL: rpcUrl }                   : {}),
-  ...(heliusKey     ? { HELIUS_API_KEY: heliusKey }         : {}),
-  ...(telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {}),
-  ...(telegramChatId ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
+  ...(isKept(openrouterKey) ? {} : { OPENROUTER_API_KEY: openrouterKey }),
+  ...(isKept(walletKey)     ? {} : { WALLET_PRIVATE_KEY: walletKey }),
+  ...(rpcUrl                ? { RPC_URL: rpcUrl } : {}),
+  ...(isKept(heliusKey)     ? {} : { HELIUS_API_KEY: heliusKey }),
+  ...(isKept(telegramToken) ? {} : { TELEGRAM_BOT_TOKEN: telegramToken }),
+  ...(telegramChatId        ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
   DRY_RUN: dryRun ? "true" : "false",
 };
 fs.writeFileSync(ENV_PATH, buildEnv(envMap));
