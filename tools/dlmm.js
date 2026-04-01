@@ -610,18 +610,42 @@ export async function closePosition({ position_address }) {
     }
 
     // ─── Step 2: Remove Liquidity & Close ──────────────────────
-    log("close", `Step 2: Removing liquidity and closing account`);
-    const closeTx = await pool.removeLiquidity({
-      user: wallet.publicKey,
-      position: positionPubKey,
-      fromBinId: -887272,
-      toBinId: 887272,
-      bps: new BN(10000),
-      shouldClaimAndClose: true,
-    });
+    let hasLiquidity = false;
+    try {
+      const positionDataForClose = await pool.getPosition(positionPubKey);
+      if (positionDataForClose.positionData) {
+        const totalLiquidity = positionDataForClose.positionData.liquidityShares.reduce(
+          (sum, share) => sum.add(share), new BN(0)
+        );
+        hasLiquidity = totalLiquidity.gt(new BN(0));
+      }
+    } catch (e) {
+      log("close_warn", `Could not check liquidity state: ${e.message}`);
+    }
 
-    for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+    if (hasLiquidity) {
+      log("close", `Step 2: Removing liquidity and closing account`);
+      const closeTx = await pool.removeLiquidity({
+        user: wallet.publicKey,
+        position: positionPubKey,
+        fromBinId: -887272,
+        toBinId: 887272,
+        bps: new BN(10000),
+        shouldClaimAndClose: true,
+      });
+
+      for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
+        const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+        txHashes.push(txHash);
+      }
+    } else {
+      log("close", `Step 2: Position is empty, closing directly`);
+      const positionObj = { publicKey: positionPubKey };
+      const closeTx = await pool.closePositionIfEmpty({
+        owner: wallet.publicKey,
+        position: positionObj,
+      });
+      const txHash = await sendAndConfirmTransaction(getConnection(), closeTx, [wallet], { skipPreflight: true });
       txHashes.push(txHash);
     }
     log("close", `SUCCESS txs: ${txHashes.join(", ")}`);
