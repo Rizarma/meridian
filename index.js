@@ -66,6 +66,18 @@ let _cronTasks = [];
 let _managementBusy = false; // prevents overlapping management cycles
 let _screeningBusy = false;  // prevents overlapping screening cycles
 let _screeningLastTriggered = 0; // epoch ms — prevents management from spamming screening
+let _screeningCycleId = 0; // incrementing ID — resets _deployedThisCycle when new cycle starts
+let _deployedThisCycle = false; // guard: only one deploy per screening cycle
+
+export function checkDeployGuard() {
+  return _deployedThisCycle;
+}
+export function setDeployGuard() {
+  _deployedThisCycle = true;
+}
+export function getScreeningCycleId() {
+  return _screeningCycleId;
+}
 
 async function runBriefing() {
   log("cron", "Starting morning briefing");
@@ -228,6 +240,8 @@ After all positions, add one summary line:
 export async function runScreeningCycle({ silent = false } = {}) {
     if (_screeningBusy) return;
     _screeningBusy = true; // set immediately to prevent concurrent invocations
+    _screeningCycleId++; // new cycle — reset deploy guard
+    _deployedThisCycle = false;
     let skipReason = null;
 
     // Hard guards — don't even run the agent if preconditions aren't met

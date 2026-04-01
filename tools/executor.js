@@ -1,4 +1,5 @@
 import { discoverPools, getPoolDetail, getTopCandidates } from "./screening.js";
+import { checkDeployGuard, setDeployGuard } from "../index.js";
 import {
   getActiveBin,
   deployPosition,
@@ -44,7 +45,16 @@ const toolMap = {
   get_pool_detail: getPoolDetail,
   get_position_pnl: getPositionPnl,
   get_active_bin: getActiveBin,
-  deploy_position: deployPosition,
+  deploy_position: async (args) => {
+    if (checkDeployGuard()) {
+      return { blocked: true, reason: "Already deployed once in this screening cycle. Only one deploy per cycle allowed." };
+    }
+    const result = await deployPosition(args);
+    if (result?.success) {
+      setDeployGuard();
+    }
+    return result;
+  },
   get_my_positions: getMyPositions,
   get_wallet_positions: getWalletPositions,
   search_pools: searchPools,
