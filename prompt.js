@@ -107,7 +107,8 @@ RISK SIGNALS (guidelines — use judgment):
 - top10 > 60% → concentrated, risky
 - bots > 30% → suspicious distribution
 - bots 5–25% → normal, ignore
-- rugpull flag from OKX → default to SKIP; only override if smart wallets are present and conviction is otherwise high
+- rugpull flag from OKX → major negative score penalty and default to SKIP; only override if smart wallets are present and conviction is otherwise high
+- wash trading flag from OKX → treat as disqualifying even if other metrics look attractive
 - no narrative + no smart wallets → skip
 
 NARRATIVE QUALITY (your main judgment call):

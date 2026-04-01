@@ -400,6 +400,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         pool.sniper_pct     != null ? `sniper=${pool.sniper_pct}%`            : null,
         pool.suspicious_pct != null ? `suspicious=${pool.suspicious_pct}%`    : null,
         pool.new_wallet_pct != null ? `new_wallets=${pool.new_wallet_pct}%`   : null,
+        pool.is_rugpull != null ? `rugpull=${pool.is_rugpull ? "YES" : "NO"}` : null,
+        pool.is_wash != null ? `wash=${pool.is_wash ? "YES" : "NO"}` : null,
       ].filter(Boolean).join(", ");
 
       const okxTags = [
