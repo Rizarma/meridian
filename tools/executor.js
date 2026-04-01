@@ -176,7 +176,6 @@ const toolMap = {
       screeningModel: ["llm", "screeningModel"],
       generalModel: ["llm", "generalModel"],
       // strategy
-      minBinStep: ["strategy", "minBinStep"],
       binsBelow: ["strategy", "binsBelow"],
     };
 

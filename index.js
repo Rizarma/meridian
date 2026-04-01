@@ -440,12 +440,22 @@ STEPS:
 2. Call deploy_position (active_bin is pre-fetched above — no need to call get_active_bin).
    bins_below = round(35 + (volatility/5)*55) clamped to [35,90].
 3. Report in this exact format (no tables, no extra sections):
-   Deployed: PAIR
-   bin_step=X | fee=X% | bots=X% | top10=X% | fees=XSOL
-   range=minPrice→maxPrice (downside=(minPrice/maxPrice-1)*100%)
-   smart_wallets=name1,name2 (or none)
-   narrative: <one sentence>
-   reason: <one sentence why picked over others>
+   Decision: DEPLOYED PAIR
+   pool: <name> | <pool address>
+   amount: <deploy amount> SOL | strategy=<strategy> | active_bin=<bin>
+   metrics: bin_step=X | fee=X% | fee_tvl=X% | volume=$X | tvl=$X | volatility=X | organic=X | mcap=$X
+   holder_audit: top10=X% | bots=X% | fees=XSOL | token_age=Xh
+   okx: risk=X | bundle=X% | sniper=X% | suspicious=X% | ath=X% | rugpull=Y/N | wash=Y/N
+   smart_wallets: <names or none>
+   range: minPrice→maxPrice (downside=(minPrice/maxPrice-1)*100%)
+   narrative: <1-2 sentences on what the token/pool is and why it has attention>
+   analysis: <2-4 sentences covering why this setup is attractive right now, key risks, and what outweighed the alternatives>
+   reason: <one decisive sentence explaining why this pool won over the rest>
+   rejected: <one short sentence on why the next best alternatives were passed over>
+4. If no pool qualifies, report in this exact format instead:
+   Decision: NO DEPLOY
+   analysis: <2-4 sentences explaining why current candidates were rejected>
+   rejected: <short semicolon-separated reasons for the top candidates that were skipped>
       `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048);
     screenReport = content;
   } catch (error) {
