@@ -179,9 +179,9 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           volatility: { type: "number", description: "Pool volatility at deploy time" },
           fee_tvl_ratio: { type: "number", description: "fee/TVL ratio at deploy time" },
           organic_score: { type: "number", description: "Base token organic score at deploy time" },
-          initial_value_usd: { type: "number", description: "USD value being deployed — REQUIRED for accurate PnL tracking" }
+          initial_value_usd: { type: "number", description: "Estimated USD value being deployed" }
         },
-        required: ["pool_address", "initial_value_usd"]
+        required: ["pool_address"]
       }
     }
   },
@@ -274,6 +274,10 @@ WARNING: This executes a real on-chain transaction. Cannot be undone.`,
           skip_swap: {
             type: "boolean",
             description: "Set to true if user explicitly wants to hold/keep the base token after closing. Default: false (auto-swaps base token back to SOL)."
+          },
+          reason: {
+            type: "string",
+            description: "Why this position is being closed. Include the rule that triggered it, e.g. 'low yield', 'stop loss', 'trailing TP', 'OOR'. Used for pool memory."
           }
         },
         required: ["position_address"]
@@ -369,7 +373,7 @@ Changes persist to user-config.json and take effect immediately — no restart n
 
 VALID KEYS (use EXACTLY these key names, nothing else):
 Screening: minFeeActiveTvlRatio, minTvl, maxTvl, minVolume, minOrganic, minHolders, minMcap, maxMcap, minBinStep, maxBinStep, timeframe, category, minTokenFeesSol
-Management: minClaimAmount, outOfRangeBinsToClose, outOfRangeWaitMinutes, minVolumeToRebalance, emergencyPriceDropPct, takeProfitFeePct, minSolToOpen, deployAmountSol, gasReserve, positionSizePct
+Management: minClaimAmount, outOfRangeBinsToClose, outOfRangeWaitMinutes, minVolumeToRebalance, stopLossPct, takeProfitFeePct, minSolToOpen, deployAmountSol, gasReserve, positionSizePct
 Risk: maxPositions, maxDeployAmount
 Schedule: managementIntervalMin, screeningIntervalMin
 Models: managementModel, screeningModel, generalModel
@@ -1027,43 +1031,45 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
       }
     }
   },
-
-  // ═══════════════════════════════════════════
-  //  LIQUIDITY MANAGEMENT TOOLS
-  // ═══════════════════════════════════════════
   {
     type: "function",
     function: {
-      name: "withdraw_liquidity",
-      description: "Remove partial or full liquidity from an existing position WITHOUT closing it. Use bps=5000 to take 50% off the table (partial harvest), or bps=10000 for full withdrawal before re-seeding at a new price level. Position account stays open.",
+      name: "block_deployer",
+      description: "Block a deployer wallet address. Any token deployed by this wallet will be hard-filtered from screening before the LLM ever sees it.",
       parameters: {
         type: "object",
         properties: {
-          position_address: { type: "string", description: "Position public key to withdraw from" },
-          pool_address: { type: "string", description: "Pool address the position belongs to" },
-          bps: { type: "number", description: "Basis points of liquidity to remove. 5000=50%, 10000=100%. Default 10000." },
-          claim_fees: { type: "boolean", description: "Claim accumulated swap fees before withdrawal. Default true." },
+          wallet:  { type: "string", description: "Deployer wallet address (base58)" },
+          label:   { type: "string", description: "Human-readable label (e.g. 'known rugger')" },
+          reason:  { type: "string", description: "Why this deployer is being blocked" },
         },
-        required: ["position_address", "pool_address"],
-      },
-    },
+        required: ["wallet"]
+      }
+    }
   },
   {
     type: "function",
     function: {
-      name: "add_liquidity",
-      description: "Add tokens to an existing position without closing it. Use for fee compounding (claim fees then add them back) or re-seeding after a withdrawal. Liquidity is distributed within the position's existing bin range using the specified strategy shape.",
+      name: "unblock_deployer",
+      description: "Remove a deployer wallet from the blocklist.",
       parameters: {
         type: "object",
         properties: {
-          position_address: { type: "string", description: "Existing position public key to add liquidity to" },
-          pool_address: { type: "string", description: "Pool address the position belongs to" },
-          amount_x: { type: "number", description: "Base token amount to add (0 if adding only SOL)" },
-          amount_y: { type: "number", description: "SOL amount to add (0 if adding only token)" },
-          strategy: { type: "string", enum: ["spot", "curve", "bid_ask"], description: "Distribution shape for the added liquidity. Default: spot" },
+          wallet: { type: "string", description: "Deployer wallet address to unblock" },
         },
-        required: ["position_address", "pool_address"],
-      },
-    },
+        required: ["wallet"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_blocked_deployers",
+      description: "List all blocked deployer wallets.",
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
   },
 ];

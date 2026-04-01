@@ -31,6 +31,46 @@ async function okxPost(path, body) {
 const pct = (v) => v != null && v !== "" ? parseFloat(v) : null;
 const int = (v) => v != null && v !== "" ? parseInt(v, 10) : null;
 
+function isAffirmative(label) {
+  return typeof label === "string" && label.trim().toLowerCase() === "yes";
+}
+
+function collectRiskEntries(section) {
+  if (!section || typeof section !== "object") return [];
+  return [
+    ...(Array.isArray(section.highRiskList) ? section.highRiskList : []),
+    ...(Array.isArray(section.middleRiskList) ? section.middleRiskList : []),
+    ...(Array.isArray(section.lowRiskList) ? section.lowRiskList : []),
+  ];
+}
+
+/**
+ * Token risk flags from OKX's nested risk check endpoint.
+ * Rugpull is informational only; wash trading is used as a hard filter upstream.
+ */
+export async function getRiskFlags(tokenAddress, chainId = CHAIN_SOLANA) {
+  const ts = Date.now();
+  const path = `/priapi/v1/dx/market/v2/risk/new/check?chainId=${chainId}&tokenContractAddress=${tokenAddress}&t=${ts}`;
+  const data = await okxGet(path);
+
+  const entries = [
+    ...collectRiskEntries(data?.allAnalysis),
+    ...collectRiskEntries(data?.swapAnalysis),
+    ...collectRiskEntries(data?.contractAnalysis),
+    ...collectRiskEntries(data?.extraAnalysis),
+  ];
+
+  const hasRisk = (riskKey) =>
+    entries.some((entry) => entry?.riskKey === riskKey && isAffirmative(entry?.newRiskLabel));
+
+  return {
+    is_rugpull: hasRisk("isLiquidityRemoval"),
+    is_wash: hasRisk("isWash"),
+    risk_level: int(data?.riskLevel ?? data?.riskControlLevel),
+    source: "okx-risk-check",
+  };
+}
+
 /**
  * Advanced token info — risk level, bundle/sniper/suspicious %, dev rug history, token tags.
  */

@@ -28,42 +28,35 @@ export async function getTokenInfo({ query }) {
   if (!tokens.length) return { found: false, query };
 
   const results = tokens.slice(0, 5).map((t) => ({
-      mint: t.id,
-      name: t.name,
-      symbol: t.symbol,
-      mcap: t.mcap,
-      price: t.usdPrice,
-      liquidity: t.liquidity,
-      holders: t.holderCount,
-      organic_score: t.organicScore,
-      organic_label: t.organicScoreLabel,
-      launchpad: t.launchpad,
-      graduated: !!t.graduatedPool,
-      // Global fees paid by traders (priority + jito tips) in SOL.
-      // Low value = bundled txs or scam token. Minimum threshold: ~30 SOL.
-      global_fees_sol: t.fees != null ? parseFloat(t.fees.toFixed(2)) : null,
-      audit: t.audit ? {
-        mint_disabled: t.audit.mintAuthorityDisabled,
-        freeze_disabled: t.audit.freezeAuthorityDisabled,
-        top_holders_pct: t.audit.topHoldersPercentage?.toFixed(2),
-        bot_holders_pct: t.audit.botHoldersPercentage?.toFixed(2),
-        dev_migrations: t.audit.devMigrations,
-      } : null,
-      stats_1h: t.stats1h ? {
-        price_change: t.stats1h.priceChange?.toFixed(2),
-        buy_vol: t.stats1h.buyVolume?.toFixed(0),
-        sell_vol: t.stats1h.sellVolume?.toFixed(0),
-        buyers: t.stats1h.numOrganicBuyers,
-        net_buyers: t.stats1h.numNetBuyers,
-      } : null,
-      stats_24h: t.stats24h ? {
-        price_change: t.stats24h.priceChange?.toFixed(2),
-        buy_vol: t.stats24h.buyVolume?.toFixed(0),
-        sell_vol: t.stats24h.sellVolume?.toFixed(0),
-        buyers: t.stats24h.numOrganicBuyers,
-        net_buyers: t.stats24h.numNetBuyers,
-      } : null,
-    }));
+    mint: t.id,
+    name: t.name,
+    symbol: t.symbol,
+    mcap: t.mcap,
+    price: t.usdPrice,
+    liquidity: t.liquidity,
+    holders: t.holderCount,
+    organic_score: t.organicScore,
+    organic_label: t.organicScoreLabel,
+    launchpad: t.launchpad,
+    graduated: !!t.graduatedPool,
+    global_fees_sol: t.fees != null ? parseFloat(t.fees.toFixed(2)) : null,
+    audit: t.audit ? {
+      mint_disabled: t.audit.mintAuthorityDisabled,
+      freeze_disabled: t.audit.freezeAuthorityDisabled,
+      top_holders_pct: t.audit.topHoldersPercentage?.toFixed(2),
+      bot_holders_pct: t.audit.botHoldersPercentage?.toFixed(2),
+      dev_migrations: t.audit.devMigrations,
+    } : null,
+    stats_1h: t.stats1h ? {
+      price_change: t.stats1h.priceChange?.toFixed(2),
+      buy_vol: t.stats1h.buyVolume?.toFixed(0),
+      sell_vol: t.stats1h.sellVolume?.toFixed(0),
+      buyers: t.stats1h.numOrganicBuyers,
+      net_buyers: t.stats1h.numNetBuyers,
+    } : null,
+    // stats_24h omitted — misleading for short-timeframe LP (reflects full pump history)
+    stats_24h_net_buyers: t.stats24h ? t.stats24h.numNetBuyers : null, // keep only net buyer direction
+  }));
 
   // Enrich first result with OKX smart money + risk data (public endpoint, no key needed)
   if (results[0]?.mint) {
@@ -77,6 +70,7 @@ export async function getTokenInfo({ query }) {
       results[0].bundle_pct      = adv.bundle_pct;
       results[0].sniper_pct      = adv.sniper_pct;
       results[0].suspicious_pct  = adv.suspicious_pct;
+      results[0].new_wallet_pct  = adv.new_wallet_pct;
       results[0].smart_money_buy = adv.smart_money_buy;
       results[0].tags            = adv.tags;
     }
@@ -129,43 +123,6 @@ export async function getTokenHolders({ mint, limit = 20 }) {
 
   const realHolders = mapped.filter((h) => !h.is_pool);
   const top10Pct = realHolders.slice(0, 10).reduce((s, h) => s + (Number(h.pct) || 0), 0);
-
-  // ─── Bundler Detection ────────────────────────────────────────
-  // common_funder: 2+ wallets funded by same address
-  const funderGroups = {};
-  for (const h of realHolders) {
-    if (h.funding?.address) {
-      (funderGroups[h.funding.address] ||= []).push(h.address);
-    }
-  }
-  const commonFunderSet = new Set(
-    Object.values(funderGroups).filter((g) => g.length >= 2).flat()
-  );
-
-  // funded_same_window: funded within ±5000 slots of any other holder
-  const SLOT_WINDOW = 5000;
-  const withSlots = realHolders.filter((h) => h.funding?.slot);
-  const sorted = [...withSlots].sort((a, b) => a.funding.slot - b.funding.slot);
-  const sameWindowSet = new Set();
-  for (let i = 0; i < sorted.length; i++) {
-    for (let j = i + 1; j < sorted.length; j++) {
-      if (sorted[j].funding.slot - sorted[i].funding.slot <= SLOT_WINDOW) {
-        sameWindowSet.add(sorted[i].address);
-        sameWindowSet.add(sorted[j].address);
-      } else break;
-    }
-  }
-
-  const bundlers = realHolders
-    .map((h) => {
-      const reasons = [];
-      if (commonFunderSet.has(h.address)) reasons.push("common_funder");
-      if (sameWindowSet.has(h.address)) reasons.push("funded_same_window");
-      return reasons.length ? { address: h.address, balance: h.amount, percentage: h.pct, reasons, slot: h.funding?.slot } : null;
-    })
-    .filter(Boolean);
-
-  const totalBundlersPct = bundlers.reduce((s, b) => s + (Number(b.percentage) || 0), 0);
 
   // ─── Bundle / Cluster Analysis (OKX) ─────────────────────────
   const { getAdvancedInfo, getClusterList } = await import("./okx.js");
@@ -240,13 +197,12 @@ export async function getTokenHolders({ mint, limit = 20 }) {
     total_fetched: holders.length,
     showing: mapped.length,
     top_10_real_holders_pct: top10Pct.toFixed(2),
-    bundlers_pct_in_top_100: totalBundlersPct.toFixed(4),
-    bundlers,
     // OKX advanced info
     risk_level:     advancedData?.risk_level     ?? null,  // 1=low..5=high
     bundle_pct:     advancedData?.bundle_pct     ?? null,
     sniper_pct:     advancedData?.sniper_pct     ?? null,
     suspicious_pct: advancedData?.suspicious_pct ?? null,
+    new_wallet_pct: advancedData?.new_wallet_pct ?? null,  // high = rug signal
     smart_wallets_holding: smartWalletsHolding,
     holders: mapped,
   };

@@ -13,8 +13,8 @@ const u = fs.existsSync(USER_CONFIG_PATH)
 if (u.rpcUrl)    process.env.RPC_URL            ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
-if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
-if (u.llmApiKey)  process.env.LLM_API_KEY  ||= u.llmApiKey;
+if (u.llmBaseUrl) process.env.LLM_BASE_URL      ||= u.llmBaseUrl;
+if (u.llmApiKey)  process.env.LLM_API_KEY       ||= u.llmApiKey;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
 export const config = {
@@ -39,14 +39,13 @@ export const config = {
     timeframe:         u.timeframe         ?? "5m",
     category:          u.category          ?? "trending",
     minTokenFeesSol:   u.minTokenFeesSol   ?? 30,  // global fees paid (priority+jito tips). below = bundled/scam
-    maxBundlersPct:    u.maxBundlersPct    ?? 30,  // max bot/bundler holders % (from Jupiter audit)
+    maxBundlePct:      u.maxBundlePct      ?? 30,  // max bundle holding % (OKX advanced-info)
+    maxBotHoldersPct:  u.maxBotHoldersPct  ?? 30,  // max bot holder addresses % (Jupiter audit)
     maxTop10Pct:       u.maxTop10Pct       ?? 60,  // max top 10 holders concentration
-    blockedLaunchpads: u.blockedLaunchpads ?? [],  // e.g. ["letsbonk.fun", "pump.fun"]
-    athFilterPct:       u.athFilterPct       ?? null,
-    maxBundlePct:       u.maxBundlePct       ?? 30,
-    maxBotHoldersPct:   u.maxBotHoldersPct   ?? 30,
-    minTokenAgeHours:   u.minTokenAgeHours   ?? null,
-    maxTokenAgeHours:   u.maxTokenAgeHours   ?? null,
+    blockedLaunchpads:  u.blockedLaunchpads  ?? [],  // e.g. ["letsbonk.fun", "pump.fun"]
+    minTokenAgeHours:   u.minTokenAgeHours   ?? null, // null = no minimum
+    maxTokenAgeHours:   u.maxTokenAgeHours   ?? null, // null = no maximum
+    athFilterPct:       u.athFilterPct       ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
   },
 
   // ─── Position Management ────────────────
@@ -56,15 +55,20 @@ export const config = {
     outOfRangeBinsToClose: u.outOfRangeBinsToClose ?? 10,
     outOfRangeWaitMinutes: u.outOfRangeWaitMinutes ?? 30,
     minVolumeToRebalance:  u.minVolumeToRebalance  ?? 1000,
-    emergencyPriceDropPct: u.emergencyPriceDropPct ?? -50,
+    stopLossPct:           u.stopLossPct           ?? u.emergencyPriceDropPct ?? -50,
     takeProfitFeePct:      u.takeProfitFeePct      ?? 5,
     minFeePerTvl24h:       u.minFeePerTvl24h       ?? 7,
+    minAgeBeforeYieldCheck: u.minAgeBeforeYieldCheck ?? 60, // minutes before low yield can trigger close
     minSolToOpen:          u.minSolToOpen          ?? 0.55,
     deployAmountSol:       u.deployAmountSol       ?? 0.5,
     gasReserve:            u.gasReserve            ?? 0.2,
     positionSizePct:       u.positionSizePct       ?? 0.35,
-    minAgeBeforeYieldCheck: u.minAgeBeforeYieldCheck ?? 60,
-    solMode:                u.solMode                ?? false,
+    // Trailing take-profit
+    trailingTakeProfit:    u.trailingTakeProfit    ?? true,
+    trailingTriggerPct:    u.trailingTriggerPct    ?? 3,    // activate trailing at X% PnL
+    trailingDropPct:       u.trailingDropPct       ?? 1.5,  // close when drops X% from peak
+    // SOL mode — positions, PnL, and balances reported in SOL instead of USD
+    solMode:               u.solMode               ?? false,
   },
 
   // ─── Strategy Mapping ───────────────────
@@ -95,18 +99,6 @@ export const config = {
     SOL:  "So11111111111111111111111111111111111111112",
     USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-  },
-
-  // ─── Darwinian Signal Weighting ───────────
-  darwin: {
-    enabled:        u.darwinEnabled     ?? true,
-    windowDays:     u.darwinWindowDays  ?? 60,
-    recalcEvery:    u.darwinRecalcEvery ?? 5,
-    boostFactor:    u.darwinBoost       ?? 1.05,
-    decayFactor:    u.darwinDecay       ?? 0.95,
-    weightFloor:    u.darwinFloor       ?? 0.3,
-    weightCeiling:  u.darwinCeiling     ?? 2.5,
-    minSamples:     u.darwinMinSamples  ?? 10,
   },
 };
 
@@ -153,13 +145,12 @@ export function reloadScreeningThresholds() {
     if (fresh.minVolume      != null) s.minVolume      = fresh.minVolume;
     if (fresh.minBinStep     != null) s.minBinStep     = fresh.minBinStep;
     if (fresh.maxBinStep     != null) s.maxBinStep     = fresh.maxBinStep;
-    if (fresh.timeframe      != null) s.timeframe      = fresh.timeframe;
-    if (fresh.category       != null) s.category       = fresh.category;
+    if (fresh.timeframe         != null) s.timeframe         = fresh.timeframe;
+    if (fresh.category          != null) s.category          = fresh.category;
+    if (fresh.minTokenAgeHours  !== undefined) s.minTokenAgeHours = fresh.minTokenAgeHours;
+    if (fresh.maxTokenAgeHours  !== undefined) s.maxTokenAgeHours = fresh.maxTokenAgeHours;
     if (fresh.athFilterPct      !== undefined) s.athFilterPct     = fresh.athFilterPct;
     if (fresh.maxBundlePct      != null) s.maxBundlePct     = fresh.maxBundlePct;
     if (fresh.maxBotHoldersPct  != null) s.maxBotHoldersPct = fresh.maxBotHoldersPct;
-    if (fresh.minTokenAgeHours  !== undefined) s.minTokenAgeHours = fresh.minTokenAgeHours;
-    if (fresh.maxTokenAgeHours  !== undefined) s.maxTokenAgeHours = fresh.maxTokenAgeHours;
   } catch { /* ignore */ }
 }
-

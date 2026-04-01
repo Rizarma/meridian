@@ -1,7 +1,9 @@
 import { config } from "../config.js";
 import { isBlacklisted } from "../token-blacklist.js";
-import { isDevBlocked } from "../dev-blocklist.js";
+import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
+
+const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
 const POOL_DISCOVERY_BASE = "https://pool-discovery-api.datapi.meteora.ag";
 
@@ -31,7 +33,9 @@ export async function discoverPools({
     `fee_active_tvl_ratio>=${s.minFeeActiveTvlRatio}`,
     `base_token_organic_score>=${s.minOrganic}`,
     "quote_token_organic_score>=60",
-  ].join("&&");
+    s.minTokenAgeHours != null ? `base_token_created_at<=${Date.now() - s.minTokenAgeHours * 3_600_000}` : null,
+    s.maxTokenAgeHours != null ? `base_token_created_at>=${Date.now() - s.maxTokenAgeHours * 3_600_000}` : null,
+  ].filter(Boolean).join("&&");
 
   const url = `${POOL_DISCOVERY_BASE}/pools?` +
     `page_size=${page_size}` +
@@ -49,18 +53,53 @@ export async function discoverPools({
 
   const condensed = (data.data || []).map(condensePool);
 
-  // Filter blacklisted base tokens
-  const pools = condensed.filter((p) => {
+  // Hard-filter blacklisted tokens and blocked deployers (what pool discovery already gave us)
+  let pools = condensed.filter((p) => {
     if (isBlacklisted(p.base?.mint)) {
       log("blacklist", `Filtered blacklisted token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)}) in pool ${p.name}`);
+      return false;
+    }
+    if (p.dev && isDevBlocked(p.dev)) {
+      log("dev_blocklist", `Filtered blocked deployer ${p.dev?.slice(0, 8)} token ${p.base?.symbol} in pool ${p.name}`);
       return false;
     }
     return true;
   });
 
   const filtered = condensed.length - pools.length;
-  if (filtered > 0) {
-    log("blacklist", `Filtered ${filtered} pool(s) with blacklisted tokens`);
+  if (filtered > 0) log("blacklist", `Filtered ${filtered} pool(s) with blacklisted tokens/devs`);
+
+  // If pool discovery didn't supply dev field, batch-fetch from Jupiter for any pools
+  // where dev is null — but only if the dev blocklist is non-empty (avoid useless calls)
+  const blockedDevs = getBlockedDevs();
+  if (Object.keys(blockedDevs).length > 0) {
+    const missingDev = pools.filter((p) => !p.dev && p.base?.mint);
+    if (missingDev.length > 0) {
+      const devResults = await Promise.allSettled(
+        missingDev.map((p) =>
+          fetch(`${DATAPI_JUP}/assets/search?query=${p.base.mint}`)
+            .then((r) => r.ok ? r.json() : null)
+            .then((d) => {
+              const t = Array.isArray(d) ? d[0] : d;
+              return { pool: p.pool, dev: t?.dev || null };
+            })
+            .catch(() => ({ pool: p.pool, dev: null }))
+        )
+      );
+      const devMap = {};
+      for (const r of devResults) {
+        if (r.status === "fulfilled") devMap[r.value.pool] = r.value.dev;
+      }
+      pools = pools.filter((p) => {
+        const dev = devMap[p.pool];
+        if (dev) p.dev = dev; // enrich in-place
+        if (dev && isDevBlocked(dev)) {
+          log("dev_blocklist", `Filtered blocked deployer (jup) ${dev.slice(0, 8)} token ${p.base?.symbol}`);
+          return false;
+        }
+        return true;
+      });
+    }
   }
 
   return {
@@ -89,17 +128,17 @@ export async function getTopCandidates({ limit = 10 } = {}) {
 
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
   if (eligible.length > 0) {
-    const { getAdvancedInfo, getPriceInfo, getClusterList } = await import("./okx.js");
+    const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = await import("./okx.js");
     const okxResults = await Promise.allSettled(
       eligible.map((p) => p.base?.mint
-        ? Promise.all([getAdvancedInfo(p.base.mint), getPriceInfo(p.base.mint), getClusterList(p.base.mint)])
-        : Promise.resolve([null, null, []])
+        ? Promise.all([getAdvancedInfo(p.base.mint), getPriceInfo(p.base.mint), getClusterList(p.base.mint), getRiskFlags(p.base.mint)])
+        : Promise.resolve([null, null, [], null])
       )
     );
     for (let i = 0; i < eligible.length; i++) {
       const r = okxResults[i];
       if (r.status !== "fulfilled") continue;
-      const [adv, price, clusters] = r.value;
+      const [adv, price, clusters, risk] = r.value;
       if (adv) {
         eligible[i].risk_level      = adv.risk_level;
         eligible[i].bundle_pct      = adv.bundle_pct;
@@ -111,6 +150,10 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         eligible[i].dex_screener_paid = adv.dex_screener_paid;
         if (adv.creator && !eligible[i].dev) eligible[i].dev = adv.creator;
       }
+      if (risk) {
+        eligible[i].is_rugpull = risk.is_rugpull;
+        eligible[i].is_wash    = risk.is_wash;
+      }
       if (price) {
         eligible[i].price_vs_ath_pct = price.price_vs_ath_pct;
         eligible[i].ath              = price.ath;
@@ -118,7 +161,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       if (clusters?.length) {
         // Surface KOL presence and top cluster trend for LLM
         eligible[i].kol_in_clusters      = clusters.some((c) => c.has_kol);
-        eligible[i].top_cluster_trend    = clusters[0]?.trend ?? null;
+        eligible[i].top_cluster_trend    = clusters[0]?.trend ?? null;      // buy|sell|neutral
         eligible[i].top_cluster_hold_pct = clusters[0]?.holding_pct ?? null;
       }
     }
@@ -133,6 +176,12 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         return true;
       }));
     }
+
+    // Wash trading hard filter — fake volume = misleading fee yield
+    eligible.splice(0, eligible.length, ...eligible.filter((p) => {
+      if (p.is_wash) { log("screening", `Risk filter: dropped ${p.name} — wash trading flagged`); return false; }
+      return true;
+    }));
 
     // ATH filter — drop pools where price is too close to ATH
     const athFilter = config.screening.athFilterPct;
@@ -233,6 +282,10 @@ function condensePool(p) {
     holders: p.base_token_holders,
     mcap: round(p.token_x?.market_cap),
     organic_score: Math.round(p.token_x?.organic_score || 0),
+    token_age_hours: p.token_x?.created_at
+      ? Math.floor((Date.now() - p.token_x.created_at) / 3_600_000)
+      : null,
+    dev: p.token_x?.dev || null,
 
     // Position health
     active_positions: p.active_positions,
