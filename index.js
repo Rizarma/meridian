@@ -227,26 +227,31 @@ After all positions, add one summary line:
 
 export async function runScreeningCycle({ silent = false } = {}) {
     if (_screeningBusy) return;
+    _screeningBusy = true; // set immediately to prevent concurrent invocations
+    let skipReason = null;
 
     // Hard guards — don't even run the agent if preconditions aren't met
     let prePositions, preBalance;
     try {
       [prePositions, preBalance] = await Promise.all([getMyPositions(), getWalletBalances()]);
       if (prePositions.total_positions >= config.risk.maxPositions) {
-        log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
-        return;
-      }
-      const minRequired = config.management.deployAmountSol + config.management.gasReserve;
-      if (preBalance.sol < minRequired) {
-        log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
-        return;
+        skipReason = `max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`;
+      } else {
+        const minRequired = config.management.deployAmountSol + config.management.gasReserve;
+        if (preBalance.sol < minRequired) {
+          skipReason = `insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`;
+        }
       }
     } catch (e) {
-      log("cron_error", `Screening pre-check failed: ${e.message}`);
+      skipReason = `pre-check failed: ${e.message}`;
+    }
+
+    if (skipReason) {
+      log("cron", `Screening skipped — ${skipReason}`);
+      _screeningBusy = false;
       return;
     }
 
-    _screeningBusy = true;
     timers.screeningLastRun = Date.now();
     log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
     let screenReport = null;
