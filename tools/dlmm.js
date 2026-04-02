@@ -611,12 +611,16 @@ export async function closePosition({ position_address, reason }) {
 
     // ─── Step 2: Remove Liquidity & Close ──────────────────────
     let hasLiquidity = false;
+    let closeFromBinId = -887272;
+    let closeToBinId = 887272;
     try {
       const positionDataForClose = await pool.getPosition(positionPubKey);
-      const shares = positionDataForClose?.positionData?.liquidityShares;
-      if (Array.isArray(shares) && shares.length > 0) {
-        const totalLiquidity = shares.reduce((sum, share) => sum.add(share), new BN(0));
-        hasLiquidity = totalLiquidity.gt(new BN(0));
+      const processed = positionDataForClose?.positionData;
+      if (processed) {
+        closeFromBinId = processed.lowerBinId ?? closeFromBinId;
+        closeToBinId = processed.upperBinId ?? closeToBinId;
+        const bins = Array.isArray(processed.positionBinData) ? processed.positionBinData : [];
+        hasLiquidity = bins.some((bin) => new BN(bin.positionLiquidity || "0").gt(new BN(0)));
       }
     } catch (e) {
       log("close_warn", `Could not check liquidity state: ${e.message}`);
@@ -627,8 +631,8 @@ export async function closePosition({ position_address, reason }) {
       const closeTx = await pool.removeLiquidity({
         user: wallet.publicKey,
         position: positionPubKey,
-        fromBinId: -887272,
-        toBinId: 887272,
+        fromBinId: closeFromBinId,
+        toBinId: closeToBinId,
         bps: new BN(10000),
         shouldClaimAndClose: true,
       });
@@ -638,7 +642,7 @@ export async function closePosition({ position_address, reason }) {
         closeTxHashes.push(txHash);
       }
     } else {
-      log("close", `Step 2: Position is empty, forcing close account`);
+      log("close", `Step 2: No position liquidity detected, closing account`);
       const closeTx = await pool.closePosition({
         owner: wallet.publicKey,
         position: { publicKey: positionPubKey },
