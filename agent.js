@@ -118,9 +118,9 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
       let response;
       let usedModel = activeModel;
-      // Force a tool call on step 0 for action intents — prevents model from hallucinating results
+      // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
       const ACTION_INTENTS = /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
-      const toolChoice = (step === 0 && agentType === "GENERAL" && ACTION_INTENTS.test(goal)) ? "required" : "auto";
+      const toolChoice = (step === 0 && ACTION_INTENTS.test(goal)) ? "required" : "auto";
 
       for (let attempt = 0; attempt < 3; attempt++) {
         response = await client.chat.completions.create({

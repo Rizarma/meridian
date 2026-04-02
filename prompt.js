@@ -100,6 +100,8 @@ Current screening timeframe: ${config.screening.timeframe} — interpret all met
 
 All candidates are pre-loaded. Your job: pick the highest-conviction candidate and call deploy_position. active_bin is pre-fetched.
 
+⚠️ CRITICAL — NO HALLUCINATION: You MUST call the actual tool to perform any action. NEVER claim a deploy happened unless you actually called deploy_position and got a real tool result back. If no tool call happened, do not report success. If the tool fails, report the real failure.
+
 HARD RULE (no exceptions):
 - fees_sol < ${config.screening.minTokenFeesSol} → SKIP. Low fees = bundled/scam. Smart wallets do NOT override this.
 - bots > ${config.screening.maxBotHoldersPct}% → already hard-filtered before you see the candidate list.

@@ -775,7 +775,8 @@ if (isTTY) {
       const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
       const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
       const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
-      const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, config.llm.generalModel);
+      const agentModel = agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
+      const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, agentModel);
       appendHistory(text, content);
       await sendMessage(stripThink(content));
     } catch (e) {
