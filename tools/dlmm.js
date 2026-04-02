@@ -650,6 +650,34 @@ export async function closePosition({ position_address, reason }) {
     // Wait for RPC to reflect withdrawn balances before returning — prevents
     // agent from seeing zero balance when attempting post-close swap
     await new Promise(r => setTimeout(r, 5000));
+    _positionsCacheAt = 0;
+
+    let closedConfirmed = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const refreshed = await getMyPositions({ force: true, silent: true });
+        const stillOpen = refreshed?.positions?.some((p) => p.position === position_address);
+        if (!stillOpen) {
+          closedConfirmed = true;
+          break;
+        }
+        log("close_warn", `Position ${position_address} still appears open after close txs (attempt ${attempt + 1}/4)`);
+      } catch (e) {
+        log("close_warn", `Close verification failed (attempt ${attempt + 1}/4): ${e.message}`);
+      }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    if (!closedConfirmed) {
+      return {
+        success: false,
+        error: "Close transactions sent but position still appears open after verification window",
+        position: position_address,
+        pool: poolAddress,
+        txs: txHashes,
+      };
+    }
+
     recordClose(position_address, reason || "agent decision");
 
     // Record performance for learning
@@ -661,8 +689,6 @@ export async function closePosition({ position_address, reason }) {
       if (tracked.out_of_range_since) {
         minutesOOR = Math.floor((Date.now() - new Date(tracked.out_of_range_since).getTime()) / 60000);
       }
-
-      _positionsCacheAt = 0; // invalidate cache so next cycle re-fetches
 
       // Fetch closed PnL from API — authoritative source after withdrawal settles
       let pnlUsd = 0;
@@ -696,10 +722,17 @@ export async function closePosition({ position_address, reason }) {
         if (cachedPos) {
           pnlUsd        = cachedPos.pnl_usd   ?? 0;
           pnlPct        = cachedPos.pnl_pct   ?? 0;
-          finalValueUsd = cachedPos.total_value_usd ?? 0;
           feesUsd       = (cachedPos.collected_fees_usd || 0) + (cachedPos.unclaimed_fees_usd || 0);
-          initialUsd    = tracked.initial_value_usd || (finalValueUsd - pnlUsd) || 0;
-          log("close_warn", `Using pre-close cache snapshot as fallback`);
+          initialUsd    = tracked.initial_value_usd || 0;
+          if (initialUsd > 0) {
+            // Keep fallback internally consistent with cached pnl instead of stale balance snapshots.
+            finalValueUsd = Math.max(0, initialUsd + pnlUsd - feesUsd);
+            pnlPct = (pnlUsd / initialUsd) * 100;
+          } else {
+            finalValueUsd = cachedPos.total_value_usd ?? 0;
+            initialUsd = Math.max(0, finalValueUsd + feesUsd - pnlUsd);
+          }
+          log("close_warn", `Using cached pnl fallback because closed API has not settled yet`);
         }
       }
 
