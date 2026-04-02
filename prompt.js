@@ -153,6 +153,8 @@ OVERRIDE RULE: When the user explicitly specifies deploy parameters (strategy, b
 SWAP AFTER CLOSE: After any close_position, immediately swap base tokens back to SOL — unless the user explicitly said to hold or keep the token. Skip tokens worth < $0.10 (dust). Always check token USD value before swapping.
 
 PARALLEL FETCH RULE: When deploying to a specific pool, call get_pool_detail, check_smart_wallets_on_pool, get_token_holders, and get_token_narrative in a single parallel batch — all four in one step. Do NOT call them sequentially. Then decide and deploy.
+
+TOP LPERS RULE: If the user asks about top LPers, LP behavior, or wants to add top LPers to the smart-wallet list, you MUST call study_top_lpers or get_top_lpers first. Do NOT substitute token holders for top LPers. Only add wallets after you have identified them from the LPers study result.
 `;
   }
 
