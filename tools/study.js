@@ -63,6 +63,20 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
   const historicalSamples = [];
 
   for (const lper of top) {
+    const sample = {
+      owner: lper.owner,
+      owner_short: lper.owner.slice(0, 8) + "...",
+      summary: {
+        total_positions: lper.total_lp,
+        win_rate: Math.round(lper.win_rate * 100) + "%",
+        avg_hold_hours: Number(lper.avg_age_hour?.toFixed(2)),
+        roi: (lper.roi * 100).toFixed(2) + "%",
+        fee_pct_of_capital: (lper.fee_percent * 100).toFixed(2) + "%",
+        total_pnl_usd: Math.round(lper.total_pnl),
+      },
+      positions: [],
+    };
+
     try {
       // Small buffer to avoid race conditions on the 5-req limit
       await sleep(1000); 
@@ -72,22 +86,15 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
         { headers: { "x-api-key": nextKey() } }
       );
 
-      if (!histRes.ok) continue;
+      if (!histRes.ok) {
+        historicalSamples.push(sample);
+        continue;
+      }
 
       const histData = await histRes.json();
       const positions = histData.data || [];
 
-      historicalSamples.push({
-        owner: lper.owner.slice(0, 8) + "...",
-        summary: {
-          total_positions: lper.total_lp,
-          win_rate: Math.round(lper.win_rate * 100) + "%",
-          avg_hold_hours: Number(lper.avg_age_hour?.toFixed(2)),
-          roi: (lper.roi * 100).toFixed(2) + "%",
-          fee_pct_of_capital: (lper.fee_percent * 100).toFixed(2) + "%",
-          total_pnl_usd: Math.round(lper.total_pnl),
-        },
-        positions: positions.map((p) => ({
+      sample.positions = positions.map((p) => ({
           pool: p.pool,
           pair: p.pairName || `${p.tokenName0}-${p.tokenName1}`,
           hold_hours: p.ageHour != null ? Number(p.ageHour?.toFixed(2)) : null,
@@ -97,10 +104,10 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
           in_range_pct: p.inRangePct != null ? Math.round(p.inRangePct * 100) + "%" : null,
           strategy: p.strategy || null,
           closed_reason: p.closeReason || null,
-        })),
-      });
+        }));
+      historicalSamples.push(sample);
     } catch {
-      // skip failed fetches
+      historicalSamples.push(sample);
     }
   }
 
