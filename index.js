@@ -123,8 +123,9 @@ export async function runManagementCycle({ silent = false } = {}) {
 
     if (positions.length === 0) {
       log("cron", "No open positions — triggering screening cycle");
+      mgmtReport = "No open positions. Triggering screening cycle.";
       runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
-      return null;
+      return mgmtReport;
     }
 
     // Snapshot + load pool memory
@@ -320,6 +321,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
   // Hard guards — don't even run the agent if preconditions aren't met
   let prePositions, preBalance;
   let liveMessage = null;
+  let screenReport = null;
   try {
     if (!silent && telegramEnabled()) {
       liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
@@ -327,23 +329,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
-      _screeningBusy = false;
-      return null;
+      screenReport = `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
+      return screenReport;
     }
     const minRequired = config.management.deployAmountSol + config.management.gasReserve;
     if (preBalance.sol < minRequired) {
       log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
-      _screeningBusy = false;
-      return null;
+      screenReport = `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
+      return screenReport;
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
-    _screeningBusy = false;
-    return null;
+    screenReport = `Screening pre-check failed: ${e.message}`;
+    return screenReport;
   }
   timers.screeningLastRun = Date.now();
   log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
-  let screenReport = null;
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
