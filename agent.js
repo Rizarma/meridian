@@ -95,7 +95,7 @@ function shouldRequireRealToolUse(goal, agentType, requireTool) {
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null, maxOutputTokens = null, options = {}) {
-  const { requireTool = false } = options;
+  const { requireTool = false, interactive = false, onToolStart = null, onToolFinish = null } = options;
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
@@ -235,13 +235,29 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         // Block once-per-session tools from firing a second time
         if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
           log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
+          await onToolFinish?.({
+            name: functionName,
+            args: functionArgs,
+            result: { blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` },
+            success: false,
+            step,
+          });
           return {
             role: "tool",
             tool_call_id: toolCall.id,
             content: JSON.stringify({ blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` }),
           };
         }
+
+        await onToolStart?.({ name: functionName, args: functionArgs, step });
         const result = await executeTool(functionName, functionArgs);
+        await onToolFinish?.({
+          name: functionName,
+          args: functionArgs,
+          result,
+          success: result?.success !== false && !result?.error && !result?.blocked,
+          step,
+        });
 
         // Lock deploy_position after first attempt regardless of outcome — retrying is never right
         // For close/swap: only lock on success so genuine failures can be retried

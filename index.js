@@ -9,7 +9,7 @@ import { getTopCandidates } from "./tools/screening.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { registerCronRestarter } from "./tools/executor.js";
-import { startPolling, stopPolling, sendMessage, sendHTML, notifyOutOfRange, isEnabled as telegramEnabled } from "./telegram.js";
+import { startPolling, stopPolling, sendMessage, sendHTML, notifyOutOfRange, isEnabled as telegramEnabled, createLiveMessage } from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
 import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, setPositionInstruction, updatePnlAndCheckExits } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
@@ -111,9 +111,13 @@ export async function runManagementCycle({ silent = false } = {}) {
   log("cron", "Starting management cycle");
   let mgmtReport = null;
   let positions = [];
+  let liveMessage = null;
   const screeningCooldownMs = 5 * 60 * 1000;
 
   try {
+    if (!silent && telegramEnabled()) {
+      liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+    }
     const livePositions = await getMyPositions({ force: true }).catch(() => null);
     positions = livePositions?.positions || [];
 
@@ -267,11 +271,15 @@ RULES:
 
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
-      `, config.llm.maxSteps, [], "MANAGER", config.llm.managementModel, 2048);
+      `, config.llm.maxSteps, [], "MANAGER", config.llm.managementModel, 2048, {
+        onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
+        onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+      });
 
       mgmtReport += `\n\n${content}`;
     } else {
       log("cron", "Management: all positions STAY — skipping LLM");
+      await liveMessage?.note("No tool actions needed.");
     }
 
     // Trigger screening after management
@@ -287,7 +295,10 @@ After executing, write a brief one-line result per position.
   } finally {
     _managementBusy = false;
     if (!silent && telegramEnabled()) {
-      if (mgmtReport) sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => { });
+      if (mgmtReport) {
+        if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
+        else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => { });
+      }
       for (const p of positions) {
         if (!p.in_range && p.minutes_out_of_range >= config.management.outOfRangeWaitMinutes) {
           notifyOutOfRange({ pair: p.pair, minutesOOR: p.minutes_out_of_range }).catch(() => { });
@@ -308,7 +319,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
   // Hard guards — don't even run the agent if preconditions aren't met
   let prePositions, preBalance;
+  let liveMessage = null;
   try {
+    if (!silent && telegramEnabled()) {
+      liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
+    }
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
@@ -464,7 +479,10 @@ STEPS:
    Decision: NO DEPLOY
    analysis: <2-4 sentences explaining why current candidates were rejected>
    rejected: <short semicolon-separated reasons for the top candidates that were skipped>
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048);
+      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048, {
+        onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
+        onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+      });
     screenReport = content;
   } catch (error) {
     log("cron_error", `Screening cycle failed: ${error.message}`);
@@ -472,7 +490,10 @@ STEPS:
   } finally {
     _screeningBusy = false;
     if (!silent && telegramEnabled()) {
-      if (screenReport) sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
+      if (screenReport) {
+        if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
+        else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
+      }
     }
   }
   return screenReport;
@@ -770,17 +791,26 @@ if (isTTY) {
     }
 
     busy = true;
+    let liveMessage = null;
     try {
       log("telegram", `Incoming: ${text}`);
       const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
       const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
       const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
       const agentModel = agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
-      const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, agentModel, null, { requireTool: true });
+      liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
+      const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, agentModel, null, {
+        requireTool: true,
+        interactive: true,
+        onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
+        onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+      });
       appendHistory(text, content);
-      await sendMessage(stripThink(content));
+      if (liveMessage) await liveMessage.finalize(stripThink(content));
+      else await sendMessage(stripThink(content));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => { });
+      if (liveMessage) await liveMessage.fail(e.message).catch(() => {});
+      else await sendMessage(`Error: ${e.message}`).catch(() => { });
     } finally {
       busy = false;
       rl.setPrompt(buildPrompt());
