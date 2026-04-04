@@ -125,9 +125,9 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
   }
 }
 
-export async function sendMessage(text: string): Promise<void> {
-  if (!TOKEN || !chatId) return;
-  await postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
+export async function sendMessage(text: string): Promise<unknown> {
+  if (!TOKEN || !chatId) return null;
+  return postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
 }
 
 export async function sendHTML(html: string): Promise<void> {
@@ -275,7 +275,7 @@ export async function createLiveMessage(
     state.flushRequested = false;
     const text = render();
     if (!state.messageId) {
-      const sent = (await sendMessage(text)) as unknown as {
+      const sent = (await sendMessage(text)) as {
         result?: { message_id?: number };
       } | null;
       state.messageId = sent?.result?.message_id ?? null;
