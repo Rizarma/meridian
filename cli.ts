@@ -424,7 +424,7 @@ switch (subcommand as CLISubcommand) {
           narrative.status === "fulfilled"
             ? ((narrative.value as TokenNarrative | null)?.narrative ?? null)
             : null,
-        pool_memory: null, // recallForPool returns string, not PoolMemoryEntry
+        pool_memory: recallForPool(pool.pool),
       });
       await new Promise((r: (value: void) => void) => setTimeout(r, 150)); // avoid 429s
     }

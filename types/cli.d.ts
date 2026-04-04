@@ -95,7 +95,7 @@ export interface EnrichedCandidate {
   };
   holders: unknown;
   narrative: string | null;
-  pool_memory: PoolMemoryEntry | null;
+  pool_memory: string | null;
 }
 
 /** CLI output helper function type */
