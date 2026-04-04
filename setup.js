@@ -1,7 +1,7 @@
 /**
  * Interactive setup wizard.
  * Guides user through .env + user-config.json creation.
- * Run: npm run setup
+ * Run: pnpm run setup
  */
 
 import readline from "readline";
@@ -420,6 +420,6 @@ console.log(`
   .env:         ${ENV_PATH}
   Config:       ${CONFIG_PATH}
 
-Run "npm start" to launch the agent.
+Run "pnpm start" to launch the agent.
 ${dryRun ? '\n  ⚠ DRY RUN is ON — set dryRun: false in user-config.json when ready for live trading.\n' : ""}
 `);
