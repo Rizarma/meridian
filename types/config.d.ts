@@ -159,4 +159,5 @@ export interface UserConfigPartial {
   screeningModel?: string;
   generalModel?: string;
   emergencyPriceDropPct?: number;
+  darwin?: DarwinConfig;
 }

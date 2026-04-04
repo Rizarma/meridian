@@ -28,3 +28,5 @@ export * from "./dlmm.js";
 export * from "./lessons.js";
 export * from "./hive-mind.js";
 export * from "./orchestrator.js";
+export * from "./cli.js";
+export * from "./setup.js";

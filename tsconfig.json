@@ -25,12 +25,12 @@
     "types/**/*.d.ts",
     "tools/**/*.js",
     "tools/**/*.ts",
-    "test/**/*.js",
     "scripts/**/*.js"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "*.config.js"
+    "*.config.js",
+    "test/**/*"
   ]
 }
