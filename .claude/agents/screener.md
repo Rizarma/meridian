@@ -24,7 +24,6 @@ You have access to these CLI commands:
 - `node cli.js lessons` — learned rules from past positions (read this first every cycle)
 - `node cli.js performance` — closed position history, win rate, range efficiency
 - `node cli.js pool-memory --pool <addr>` — previous deploy history for a pool
-- `node cli.js discord-signals` — check incoming discord signal queue (always check this FIRST before running candidates)
 - `node cli.js blacklist list` — blocked tokens (never deploy to these)
 - `node cli.js blacklist add --mint <addr> --reason <text>` — block a token
 - `node cli.js candidates --limit 5` — top pool candidates with full enrichment
@@ -52,7 +51,6 @@ You have access to these CLI commands:
 - net buyers positive in last 1h
 - narrative is strong and genuine
 - top LPers on this pool have >60% win rate
-- discord signal present = strong positive social signal, boosts confidence score
 
 **Risk factors (reduce confidence):**
 - price dumping >15% in 1h
