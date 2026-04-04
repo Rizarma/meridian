@@ -52,6 +52,22 @@ function save(state) {
 
 /**
  * Record a newly deployed position.
+ *
+ * @param {object} params
+ * @param {string} params.position
+ * @param {string} params.pool
+ * @param {string} params.pool_name
+ * @param {string} params.strategy
+ * @param {object} [params.bin_range]
+ * @param {number} params.amount_sol
+ * @param {number} [params.amount_x]
+ * @param {number} params.active_bin
+ * @param {number} params.bin_step
+ * @param {number} params.volatility
+ * @param {number} params.fee_tvl_ratio
+ * @param {number} params.organic_score
+ * @param {number} params.initial_value_usd
+ * @param {object} [params.signal_snapshot]
  */
 export function trackPosition({
   position,
@@ -106,6 +122,8 @@ export function trackPosition({
 
 /**
  * Mark a position as out of range (sets timestamp on first detection).
+ *
+ * @param {string} position_address
  */
 export function markOutOfRange(position_address) {
   const state = load();
@@ -120,6 +138,8 @@ export function markOutOfRange(position_address) {
 
 /**
  * Mark a position as back in range (clears OOR timestamp).
+ *
+ * @param {string} position_address
  */
 export function markInRange(position_address) {
   const state = load();
@@ -135,6 +155,9 @@ export function markInRange(position_address) {
 /**
  * How many minutes has a position been out of range?
  * Returns 0 if currently in range.
+ *
+ * @param {string} position_address
+ * @returns {number}
  */
 export function minutesOutOfRange(position_address) {
   const state = load();
@@ -146,6 +169,9 @@ export function minutesOutOfRange(position_address) {
 
 /**
  * Record a fee claim event.
+ *
+ * @param {string} position_address
+ * @param {number} fees_usd
  */
 export function recordClaim(position_address, fees_usd) {
   const state = load();
@@ -170,6 +196,9 @@ function pushEvent(state, event) {
 
 /**
  * Mark a position as closed.
+ *
+ * @param {string} position_address
+ * @param {string} reason
  */
 export function recordClose(position_address, reason) {
   const state = load();
@@ -185,6 +214,9 @@ export function recordClose(position_address, reason) {
 
 /**
  * Record a rebalance (close + redeploy).
+ *
+ * @param {string} old_position
+ * @param {string} new_position
  */
 export function recordRebalance(old_position, new_position) {
   const state = load();
@@ -205,6 +237,10 @@ export function recordRebalance(old_position, new_position) {
 /**
  * Set a persistent instruction for a position (e.g. "hold until 5% profit").
  * Overwrites any previous instruction. Pass null to clear.
+ *
+ * @param {string} position_address
+ * @param {string | null} instruction
+ * @returns {boolean}
  */
 export function setPositionInstruction(position_address, instruction) {
   const state = load();
@@ -216,6 +252,13 @@ export function setPositionInstruction(position_address, instruction) {
   return true;
 }
 
+/**
+ * Queue a peak PnL confirmation for trailing take-profit.
+ *
+ * @param {string} position_address
+ * @param {number | null} candidatePnlPct
+ * @returns {boolean}
+ */
 export function queuePeakConfirmation(position_address, candidatePnlPct) {
   if (candidatePnlPct == null) return false;
   const state = load();
@@ -238,6 +281,14 @@ export function queuePeakConfirmation(position_address, candidatePnlPct) {
   return true;
 }
 
+/**
+ * Resolve a pending peak confirmation after recheck delay.
+ *
+ * @param {string} position_address
+ * @param {number | null} currentPnlPct
+ * @param {number} [toleranceRatio]
+ * @returns {{ confirmed: boolean; peak?: number; rejected?: boolean; pendingPeak?: number; pending: boolean }}
+ */
 export function resolvePendingPeak(position_address, currentPnlPct, toleranceRatio = 0.85) {
   const state = load();
   const pos = state.positions[position_address];
@@ -251,16 +302,19 @@ export function resolvePendingPeak(position_address, currentPnlPct, toleranceRat
     pos.peak_pnl_pct = Math.max(pos.peak_pnl_pct ?? 0, pendingPeak, currentPnlPct);
     save(state);
     log("state", `Position ${position_address} peak PnL confirmed at ${pos.peak_pnl_pct.toFixed(2)}% after recheck`);
-    return { confirmed: true, peak: pos.peak_pnl_pct };
+    return { confirmed: true, peak: pos.peak_pnl_pct, pending: false };
   }
 
   save(state);
   log("state", `Position ${position_address} rejected pending peak ${pendingPeak.toFixed(2)}% after 15s recheck (current: ${currentPnlPct ?? "?"}%)`);
-  return { confirmed: false, rejected: true, pendingPeak };
+  return { confirmed: false, rejected: true, pendingPeak, pending: false };
 }
 
 /**
  * Get all tracked positions (optionally filter open-only).
+ *
+ * @param {boolean} [openOnly]
+ * @returns {Array<import('./types/position.js').TrackedPosition>}
  */
 export function getTrackedPositions(openOnly = false) {
   const state = load();
@@ -270,6 +324,9 @@ export function getTrackedPositions(openOnly = false) {
 
 /**
  * Get a single tracked position.
+ *
+ * @param {string} position_address
+ * @returns {import('./types/position.js').TrackedPosition | null}
  */
 export function getTrackedPosition(position_address) {
   const state = load();
@@ -278,6 +335,8 @@ export function getTrackedPosition(position_address) {
 
 /**
  * Summarize state for the agent system prompt.
+ *
+ * @returns {object}
  */
 export function getStateSummary() {
   const state = load();
@@ -310,10 +369,11 @@ export function getStateSummary() {
 /**
  * Check all exit conditions for a position (trailing TP, stop loss, OOR, low yield).
  * Updates peak_pnl_pct, trailing_active, and OOR state.
+ *
  * @param {string} position_address
- * @param {object} positionData - fields from getMyPositions: pnl_pct, in_range, fee_per_tvl_24h
- * @param {object} mgmtConfig
- * Returns { action, reason } or null if no exit needed.
+ * @param {import('./types/position.js').Position} positionData - fields from getMyPositions: pnl_pct, in_range, fee_per_tvl_24h
+ * @param {import('./types/config.js').ManagementConfig} mgmtConfig
+ * @returns {{ action: string; reason: string } | null} Returns exit action or null if no exit needed
  */
 export function updatePnlAndCheckExits(position_address, positionData, mgmtConfig) {
   const { pnl_pct: currentPnlPct, pnl_pct_suspicious, in_range, fee_per_tvl_24h } = positionData;

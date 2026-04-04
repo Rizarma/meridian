@@ -7,8 +7,9 @@
     "outDir": "./dist",
     "rootDir": ".",
     "strict": false,
+    "noImplicitAny": false,
     "allowJs": true,
-    "checkJs": false,
+    "checkJs": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -19,6 +20,8 @@
   },
   "include": [
     "*.js",
+    "*.d.ts",
+    "types/**/*.d.ts",
     "tools/**/*.js",
     "test/**/*.js",
     "scripts/**/*.js"

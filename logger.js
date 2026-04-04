@@ -14,6 +14,9 @@ if (!fs.existsSync(LOG_DIR)) {
 
 /**
  * General log function.
+ *
+ * @param {string} category - Log category (e.g., 'startup', 'cron', 'error')
+ * @param {string} message - Log message
  */
 export function log(category, message) {
   const level = category.includes("error") ? "error"
@@ -36,6 +39,13 @@ export function log(category, message) {
 
 /**
  * Log a tool action with full details (for audit trail).
+ *
+ * @param {object} action
+ * @param {string} action.tool
+ * @param {boolean} action.success
+ * @param {object} [action.args]
+ * @param {object} [action.result]
+ * @param {number} [action.duration_ms]
  */
 function actionHint(action) {
   const a = action.args || {};
@@ -76,6 +86,11 @@ export function logAction(action) {
 
 /**
  * Log a portfolio snapshot (for tracking performance over time).
+ *
+ * @param {object} snapshot
+ * @param {number} snapshot.total_value_usd
+ * @param {number} snapshot.total_positions
+ * @param {number} [snapshot.unclaimed_fees_usd]
  */
 export function logSnapshot(snapshot) {
   const timestamp = new Date().toISOString();

@@ -57,12 +57,15 @@ function runBiomeLint(files, checkOnly = false) {
   try {
     const fileList = files.join(" ");
     const writeFlag = checkOnly ? "" : "--write";
-    execSync(`pnpm biome lint ${writeFlag} ${fileList}`, {
+    /** @type {import('child_process').ExecSyncOptions} */
+    const options = {
       stdio: "inherit",
+      // @ts-ignore - shell can be boolean but types expect string
       shell: true,
-    });
+    };
+    execSync(`pnpm biome lint ${writeFlag} ${fileList}`, options);
     return 0;
-  } catch (error) {
+  } catch (/** @type {any} */ error) {
     return error.status || 1;
   }
 }
