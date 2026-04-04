@@ -19,7 +19,7 @@ import {
   syncOpenPositions,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
-import { isPoolOnCooldown } from "../pool-memory.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint } from "./wallet.js";
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
@@ -115,8 +115,8 @@ export async function deployPosition({
   const activeBinsAbove = bins_above ?? 0;
 
   if (isPoolOnCooldown(pool_address)) {
-    log("deploy", `Pool ${pool_address.slice(0, 8)} is on cooldown (closed for low yield) — skipping`);
-    return { success: false, error: "Pool on cooldown — was recently closed for low yield. Try a different pool." };
+    log("deploy", `Pool ${pool_address.slice(0, 8)} is on cooldown — skipping`);
+    return { success: false, error: "Pool on cooldown — was recently closed with a cooldown reason. Try a different pool." };
   }
 
   if (process.env.DRY_RUN === "true") {
@@ -139,6 +139,11 @@ export async function deployPosition({
   const { StrategyType } = await getDLMM();
   const wallet = getWallet();
   const pool = await getPool(pool_address);
+  const baseMint = pool.lbPair.tokenXMint.toString();
+  if (isBaseMintOnCooldown(baseMint)) {
+    log("deploy", `Base mint ${baseMint.slice(0, 8)} is on cooldown — skipping deploy for pool ${pool_address.slice(0, 8)}`);
+    return { success: false, error: "Token on cooldown — recently closed out-of-range too many times. Try a different token." };
+  }
   const activeBin = await pool.getActiveBin();
 
   // Range calculation

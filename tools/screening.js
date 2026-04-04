@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { isBlacklisted } from "../token-blacklist.js";
 import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -123,7 +124,18 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
 
   const eligible = pools
-    .filter((p) => !occupiedPools.has(p.pool) && !occupiedMints.has(p.base?.mint))
+    .filter((p) => {
+      if (occupiedPools.has(p.pool) || occupiedMints.has(p.base?.mint)) return false;
+      if (isPoolOnCooldown(p.pool)) {
+        log("screening", `Filtered cooldown pool ${p.name} (${p.pool.slice(0, 8)})`);
+        return false;
+      }
+      if (isBaseMintOnCooldown(p.base?.mint)) {
+        log("screening", `Filtered cooldown token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)})`);
+        return false;
+      }
+      return true;
+    })
     .slice(0, limit);
 
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
