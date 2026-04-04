@@ -55,12 +55,15 @@ function runBiome(files, command = "format") {
 
   try {
     const fileList = files.join(" ");
-    execSync(`pnpm biome ${command} --write ${fileList}`, {
+    /** @type {import('child_process').ExecSyncOptions} */
+    const options = {
       stdio: "inherit",
+      // @ts-ignore - shell can be boolean but types expect string
       shell: true,
-    });
+    };
+    execSync(`pnpm biome ${command} --write ${fileList}`, options);
     return 0;
-  } catch (error) {
+  } catch (/** @type {any} */ error) {
     return error.status || 1;
   }
 }

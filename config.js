@@ -116,6 +116,9 @@ export const config = {
  *   2.0 SOL wallet → 0.63 SOL deploy
  *   3.0 SOL wallet → 0.98 SOL deploy
  *   4.0 SOL wallet → 1.33 SOL deploy
+ *
+ * @param {number} walletSol
+ * @returns {number}
  */
 export function computeDeployAmount(walletSol) {
   const reserve  = config.management.gasReserve      ?? 0.2;
