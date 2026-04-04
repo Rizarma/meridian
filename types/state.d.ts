@@ -7,6 +7,9 @@ import type { SignalSnapshot } from "./signals.js";
 export interface BinRange {
   min?: number;
   max?: number;
+  active?: number;
+  bins_below?: number;
+  bins_above?: number;
 }
 
 export interface TrackedPosition {

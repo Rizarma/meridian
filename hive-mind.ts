@@ -23,6 +23,17 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import type {
+  HiveMindConfig,
+  SyncPayload,
+  SyncResult,
+  PoolConsensus,
+  LessonConsensus,
+  PatternConsensus,
+  ThresholdConsensus,
+  HivePulse,
+  RegistrationResult,
+} from "./types/hive-mind.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
@@ -39,7 +50,7 @@ let _lastSyncTime = 0;
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-function readConfig() {
+function readConfig(): HiveMindConfig {
   try {
     return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
   } catch {
@@ -47,13 +58,13 @@ function readConfig() {
   }
 }
 
-function writeConfig(patch) {
+function writeConfig(patch: Record<string, unknown>): void {
   const current = readConfig();
   const merged = { ...current, ...patch };
   fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
 }
 
-function readJsonFile(filePath) {
+function readJsonFile(filePath: string): Record<string, unknown> | null {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
@@ -61,7 +72,11 @@ function readJsonFile(filePath) {
   }
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = GET_TIMEOUT_MS) {
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = GET_TIMEOUT_MS
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -75,9 +90,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = GET_TIMEOUT_MS) {
 
 /**
  * Check whether Hive Mind is configured and enabled.
- * @returns {boolean}
  */
-export function isEnabled() {
+export function isEnabled(): boolean {
   const cfg = readConfig();
   return Boolean(cfg.hiveMindUrl && cfg.hiveMindApiKey);
 }
@@ -85,11 +99,11 @@ export function isEnabled() {
 /**
  * One-time registration with a Hive Mind server.
  * Stores hiveMindUrl and hiveMindApiKey in user-config.json.
- * @param {string} url - Base URL of the hive server (e.g. "https://hive.example.com")
- * @param {string} registrationToken - Token provided by the hive operator
- * @returns {Promise<string>} The raw API key (shown once, save it!)
+ * @param url - Base URL of the hive server (e.g. "https://hive.example.com")
+ * @param registrationToken - Token provided by the hive operator
+ * @returns The raw API key (shown once, save it!)
  */
-export async function register(url, registrationToken) {
+export async function register(url: string, registrationToken: string): Promise<string> {
   if (!registrationToken) {
     throw new Error("Registration token required. Get it from the hive operator.");
   }
@@ -107,7 +121,7 @@ export async function register(url, registrationToken) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ display_name: displayName, registration_token: registrationToken }),
     },
-    POST_TIMEOUT_MS,
+    POST_TIMEOUT_MS
   );
 
   if (!res.ok) {
@@ -115,7 +129,7 @@ export async function register(url, registrationToken) {
     throw new Error(`Registration failed (${res.status}): ${text}`);
   }
 
-  const { agent_id, api_key } = await res.json();
+  const { agent_id, api_key } = (await res.json()) as RegistrationResult;
   writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
   console.log("[hive]", `API key: ${api_key}`);
@@ -128,7 +142,7 @@ export async function register(url, registrationToken) {
  * Batch-upload local data to the hive mind server.
  * Debounced (5 min), fire-and-forget, never throws.
  */
-export async function syncToHive() {
+export async function syncToHive(): Promise<void> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return;
@@ -142,13 +156,37 @@ export async function syncToHive() {
 
     // Lessons
     const lessonsData = readJsonFile(LESSONS_FILE) || { lessons: [], performance: [] };
-    const lessons = lessonsData.lessons || [];
+    const lessons = (lessonsData.lessons || []) as Array<{
+      id: number;
+      rule: string;
+      tags: string[];
+      outcome: string;
+      created_at: string;
+      pinned?: boolean;
+      role?: string | null;
+    }>;
 
     // Pool deploys — flatten all pools' deploy arrays
     const poolMemory = readJsonFile(POOL_MEMORY_FILE) || {};
-    const deploys = [];
+    const deploys: Array<{
+      pool_address: string;
+      pool_name?: string;
+      deployed_at?: string;
+      closed_at?: string;
+      pnl_pct?: number;
+      pnl_usd?: number;
+      range_efficiency?: number;
+      minutes_held?: number;
+      close_reason?: string;
+      strategy?: string;
+      volatility?: number;
+      base_mint?: string;
+    }> = [];
     for (const poolAddr of Object.keys(poolMemory)) {
-      const pool = poolMemory[poolAddr];
+      const pool = poolMemory[poolAddr] as {
+        name?: string;
+        deploys?: Array<Record<string, unknown>>;
+      };
       if (Array.isArray(pool.deploys)) {
         for (const d of pool.deploys) {
           deploys.push({ pool_address: poolAddr, pool_name: pool.name, ...d });
@@ -176,13 +214,13 @@ export async function syncToHive() {
     try {
       const { getPerformanceSummary } = await import("./lessons.js");
       agentStats = getPerformanceSummary();
-    } catch (e) {
+    } catch (e: any) {
       console.log("[hive]", `Could not load agent stats: ${e.message}`);
     }
 
     // ── POST to /api/sync ───────────────────────────
 
-    const payload = { lessons, deploys, thresholds, agentStats };
+    const payload: SyncPayload = { lessons, deploys, thresholds, agentStats };
 
     console.log("[hive]", `Syncing ${lessons.length} lessons, ${deploys.length} deploys...`);
 
@@ -196,7 +234,7 @@ export async function syncToHive() {
         },
         body: JSON.stringify(payload),
       },
-      POST_TIMEOUT_MS,
+      POST_TIMEOUT_MS
     );
 
     if (!res.ok) {
@@ -205,30 +243,31 @@ export async function syncToHive() {
       return;
     }
 
-    const result = await res.json();
-    console.log("[hive]", `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`);
-  } catch (e) {
+    const result = (await res.json()) as SyncResult;
+    console.log(
+      "[hive]",
+      `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`
+    );
+  } catch (e: any) {
     console.log("[hive]", `Sync error: ${e.message}`);
   }
 }
 
 /**
  * Query pool consensus from the hive.
- * @param {string} poolAddress
- * @returns {Promise<object|null>}
  */
-export async function queryPoolConsensus(poolAddress) {
+export async function queryPoolConsensus(poolAddress: string): Promise<PoolConsensus | null> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
     const res = await fetchWithTimeout(
       `${cfg.hiveMindUrl}/api/consensus/pool/${encodeURIComponent(poolAddress)}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } }
     );
 
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as PoolConsensus;
   } catch {
     return null;
   }
@@ -236,24 +275,20 @@ export async function queryPoolConsensus(poolAddress) {
 
 /**
  * Query lesson consensus by tags.
- * @param {string[]} [tags]
- * @returns {Promise<Array|null>}
  */
-export async function queryLessonConsensus(tags) {
+export async function queryLessonConsensus(tags?: string[]): Promise<LessonConsensus[] | null> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const qs = Array.isArray(tags) && tags.length > 0
-      ? `?tags=${encodeURIComponent(tags.join(","))}`
-      : "";
-    const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/lessons${qs}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
-    );
+    const qs =
+      Array.isArray(tags) && tags.length > 0 ? `?tags=${encodeURIComponent(tags.join(","))}` : "";
+    const res = await fetchWithTimeout(`${cfg.hiveMindUrl}/api/consensus/lessons${qs}`, {
+      headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` },
+    });
 
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as LessonConsensus[];
   } catch {
     return null;
   }
@@ -261,22 +296,21 @@ export async function queryLessonConsensus(tags) {
 
 /**
  * Query pattern consensus for a given volatility level.
- * @param {number} [volatility]
- * @returns {Promise<Array|null>}
  */
-export async function queryPatternConsensus(volatility) {
+export async function queryPatternConsensus(
+  volatility?: number
+): Promise<PatternConsensus[] | null> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
     const qs = volatility != null ? `?volatility=${encodeURIComponent(volatility)}` : "";
-    const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/patterns${qs}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
-    );
+    const res = await fetchWithTimeout(`${cfg.hiveMindUrl}/api/consensus/patterns${qs}`, {
+      headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` },
+    });
 
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as PatternConsensus[];
   } catch {
     return null;
   }
@@ -284,20 +318,18 @@ export async function queryPatternConsensus(volatility) {
 
 /**
  * Query median threshold consensus across all agents.
- * @returns {Promise<object|null>}
  */
-export async function queryThresholdConsensus() {
+export async function queryThresholdConsensus(): Promise<ThresholdConsensus | null> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/thresholds`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
-    );
+    const res = await fetchWithTimeout(`${cfg.hiveMindUrl}/api/consensus/thresholds`, {
+      headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` },
+    });
 
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as ThresholdConsensus;
   } catch {
     return null;
   }
@@ -305,20 +337,18 @@ export async function queryThresholdConsensus() {
 
 /**
  * Get global hive pulse stats.
- * @returns {Promise<object|null>}
  */
-export async function getHivePulse() {
+export async function getHivePulse(): Promise<HivePulse | null> {
   try {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/pulse`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
-    );
+    const res = await fetchWithTimeout(`${cfg.hiveMindUrl}/api/pulse`, {
+      headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` },
+    });
 
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as HivePulse;
   } catch {
     return null;
   }
@@ -327,10 +357,8 @@ export async function getHivePulse() {
 /**
  * Query multiple pools in parallel and format for LLM prompt injection.
  * Only shows pools with >= 3 agents reporting (filters noise).
- * @param {string[]} poolAddresses
- * @returns {Promise<string>} Formatted consensus block or empty string
  */
-export async function formatPoolConsensusForPrompt(poolAddresses) {
+export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Promise<string> {
   if (!isEnabled() || !Array.isArray(poolAddresses) || poolAddresses.length === 0) {
     return "";
   }
@@ -340,10 +368,10 @@ export async function formatPoolConsensusForPrompt(poolAddresses) {
       poolAddresses.map(async (addr) => {
         const data = await queryPoolConsensus(addr);
         return { addr, data };
-      }),
+      })
     );
 
-    const lines = [];
+    const lines: string[] = [];
     let poolsWithData = 0;
 
     for (const { addr, data } of results) {
@@ -351,10 +379,13 @@ export async function formatPoolConsensusForPrompt(poolAddresses) {
         poolsWithData++;
         const name = data.pool_name || addr.slice(0, 8);
         const winPct = data.weighted_win_rate ?? 0;
-        const avgPnl = data.weighted_avg_pnl != null
-          ? (data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1) + "%"
-          : "N/A";
-        lines.push(`[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`);
+        const avgPnl =
+          data.weighted_avg_pnl != null
+            ? (data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1) + "%"
+            : "N/A";
+        lines.push(
+          `[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`
+        );
       }
     }
 
@@ -368,7 +399,7 @@ export async function formatPoolConsensusForPrompt(poolAddresses) {
     }
 
     return output;
-  } catch (e) {
+  } catch (e: any) {
     console.log("[hive]", `formatPoolConsensusForPrompt error: ${e.message}`);
     return "";
   }

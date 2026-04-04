@@ -23,4 +23,6 @@ export * from "./smart-wallets.js";
 export * from "./token.js";
 export * from "./screening.js";
 export * from "./executor.js";
-export * from "./briefing.js";
+export * from "./dlmm.js";
+export * from "./lessons.js";
+export * from "./hive-mind.js";
