@@ -104,6 +104,17 @@ export const config: Config = {
     USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
   },
+
+  // ─── Darwin Evolution Config ───────────
+  darwin: {
+    enabled: u.darwin?.enabled ?? false,
+    windowDays: u.darwin?.windowDays ?? 30,
+    minSamples: u.darwin?.minSamples ?? 10,
+    boostFactor: u.darwin?.boostFactor ?? 1.5,
+    decayFactor: u.darwin?.decayFactor ?? 0.95,
+    weightFloor: u.darwin?.weightFloor ?? 0.5,
+    weightCeiling: u.darwin?.weightCeiling ?? 2.0,
+  },
 };
 
 /**

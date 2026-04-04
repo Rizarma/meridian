@@ -40,8 +40,8 @@ export function log(category: LogCategory, message: string): void {
  * Generate a human-readable hint for an action log entry.
  */
 function actionHint(action: LogAction): string {
-  const a = action.args ?? {};
-  const r = action.result ?? {};
+  const a = (action.args ?? {}) as Record<string, unknown>;
+  const r = (action.result ?? {}) as Record<string, unknown>;
   switch (action.tool) {
     case "deploy_position":
       return ` ${(a.pool_name as string) || (a.pool_address as string)?.slice(0, 8)} ${a.amount_sol} SOL`;

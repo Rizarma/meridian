@@ -5,34 +5,77 @@
  */
 
 import "dotenv/config";
-import { parseArgs } from "util";
+import { parseArgs, ParseArgsOptionsConfig } from "util";
 import os from "os";
 import fs from "fs";
 import path from "path";
+
+import type {
+  CLIFlags,
+  CLISubcommand,
+  CLIOutputFn,
+  CLIDieFn,
+  CandidatesOutput,
+  EnrichedCandidate,
+  CycleOutput,
+  LessonsListOutput,
+  LessonsAddOutput,
+  PoolMemoryOutput,
+  EvolveOutput,
+  BlacklistAddOutput,
+  BlacklistListOutput,
+  PerformanceOutput,
+} from "./types/cli.js";
+
+import type { CondensedPool, TopCandidatesResult } from "./types/screening.js";
+import type {
+  PositionsResult,
+  PositionPnL,
+  WalletPositionsResult,
+  ActiveBinResult,
+  SearchPoolsResult,
+} from "./types/dlmm.js";
+import type {
+  TokenInfoResult,
+  TokenHoldersResult,
+  TokenNarrative,
+  TokenInfo,
+} from "./types/token.js";
+import type { WalletPositionCheck } from "./types/smart-wallets.js";
+import type { PoolMemoryEntry } from "./types/pool-memory.js";
 
 // ─── DRY_RUN must be set before any tool imports ─────────────────
 if (process.argv.includes("--dry-run")) process.env.DRY_RUN = "true";
 
 // ─── Load .env from ~/.meridian/ if present ──────────────────────
-const meridianDir = path.join(os.homedir(), ".meridian");
-const meridianEnv = path.join(meridianDir, ".env");
+const meridianDir: string = path.join(os.homedir(), ".meridian");
+const meridianEnv: string = path.join(meridianDir, ".env");
 if (fs.existsSync(meridianEnv)) {
   const { config: loadDotenv } = await import("dotenv");
   loadDotenv({ path: meridianEnv, override: false });
 }
 
 // ─── Output helpers ───────────────────────────────────────────────
-function out(data) {
+/**
+ * Output data as formatted JSON to stdout
+ * @param data - The data to output
+ */
+const out: CLIOutputFn = (data: unknown): void => {
   process.stdout.write(JSON.stringify(data, null, 2) + "\n");
-}
+};
 
-function die(msg, extra = {}) {
+/**
+ * Output error message as JSON to stderr and exit
+ * @param msg - Error message
+ * @param extra - Additional error context
+ */
+const die: CLIDieFn = (msg: string, extra: Record<string, unknown> = {}): never => {
   process.stderr.write(JSON.stringify({ error: msg, ...extra }) + "\n");
   process.exit(1);
-}
+};
 
 // ─── SKILL.md generation ──────────────────────────────────────────
-const SKILL_MD = `# meridian — Solana DLMM LP Agent CLI
+const SKILL_MD: string = `# meridian — Solana DLMM LP Agent CLI
 
 Data dir: ~/.meridian/
 
@@ -209,10 +252,10 @@ fs.mkdirSync(meridianDir, { recursive: true });
 fs.writeFileSync(path.join(meridianDir, "SKILL.md"), SKILL_MD);
 
 // ─── Parse args ───────────────────────────────────────────────────
-const argv = process.argv.slice(2);
-const subcommand = argv.find(a => !a.startsWith("-"));
-const sub2 = argv.filter(a => !a.startsWith("-"))[1]; // for "config get/set"
-const silent = argv.includes("--silent");
+const argv: string[] = process.argv.slice(2);
+const subcommand: string | undefined = argv.find((a: string) => !a.startsWith("-"));
+const sub2: string | undefined = argv.filter((a: string) => !a.startsWith("-"))[1]; // for "config get/set"
+const silent: boolean = argv.includes("--silent");
 
 if (!subcommand || subcommand === "help" || argv.includes("--help")) {
   process.stdout.write(SKILL_MD);
@@ -220,43 +263,47 @@ if (!subcommand || subcommand === "help" || argv.includes("--help")) {
 }
 
 // ─── Parse flags ──────────────────────────────────────────────────
+const parseArgsOptions: ParseArgsOptionsConfig = {
+  pool: { type: "string" },
+  amount: { type: "string" },
+  position: { type: "string" },
+  from: { type: "string" },
+  to: { type: "string" },
+  strategy: { type: "string" },
+  query: { type: "string" },
+  mint: { type: "string" },
+  wallet: { type: "string" },
+  timeframe: { type: "string" },
+  reason: { type: "string" },
+  "bins-below": { type: "string" },
+  "bins-above": { type: "string" },
+  "amount-x": { type: "string" },
+  "amount-y": { type: "string" },
+  bps: { type: "string" },
+  "no-claim": { type: "boolean" },
+  "skip-swap": { type: "boolean" },
+  "dry-run": { type: "boolean" },
+  silent: { type: "boolean" },
+  limit: { type: "string" },
+};
+
 const { values: flags } = parseArgs({
   args: argv,
-  options: {
-    pool:       { type: "string" },
-    amount:     { type: "string" },
-    position:   { type: "string" },
-    from:       { type: "string" },
-    to:         { type: "string" },
-    strategy:   { type: "string" },
-    query:      { type: "string" },
-    mint:       { type: "string" },
-    wallet:     { type: "string" },
-    timeframe:  { type: "string" },
-    reason:     { type: "string" },
-    "bins-below": { type: "string" },
-    "bins-above": { type: "string" },
-    "amount-x":   { type: "string" },
-    "amount-y":   { type: "string" },
-    "bps":        { type: "string" },
-    "no-claim":   { type: "boolean" },
-    "skip-swap":  { type: "boolean" },
-    "dry-run":    { type: "boolean" },
-    "silent":     { type: "boolean" },
-    limit:        { type: "string" },
-  },
+  options: parseArgsOptions,
   allowPositionals: true,
   strict: false,
 });
 
+// Cast flags to CLIFlags for proper typing
+const typedFlags = flags as CLIFlags;
+
 // ─── Commands ─────────────────────────────────────────────────────
 
-switch (subcommand) {
-
+switch (subcommand as CLISubcommand) {
   // ── balance ──────────────────────────────────────────────────────
   case "balance": {
     const { getWalletBalances } = await import("./tools/wallet.js");
-    out(await getWalletBalances({}));
+    out(await getWalletBalances());
     break;
   }
 
@@ -269,29 +316,41 @@ switch (subcommand) {
 
   // ── pnl <position_address> ───────────────────────────────────────
   case "pnl": {
-    const posAddr = argv.find((a, i) => !a.startsWith("-") && i > 0 && argv[i - 1] !== "--position" && a !== "pnl");
-    const positionAddress = flags.position || posAddr;
+    const posAddr: string | undefined = argv.find(
+      (a: string, i: number) =>
+        !a.startsWith("-") && i > 0 && argv[i - 1] !== "--position" && a !== "pnl"
+    );
+    const positionAddress: string | undefined = typedFlags.position || posAddr;
     if (!positionAddress) die("Usage: meridian pnl <position_address>");
 
     const { getTrackedPosition } = await import("./state.js");
     const { getPositionPnl, getMyPositions } = await import("./tools/dlmm.js");
 
-    let poolAddress;
+    let poolAddress: string | undefined;
     const tracked = getTrackedPosition(positionAddress);
     if (tracked?.pool) {
       poolAddress = tracked.pool;
     } else {
       // Fall back: scan positions to find pool
-      const pos = await getMyPositions({ force: true });
-      const found = pos.positions?.find(p => p.position === positionAddress);
+      const pos: PositionsResult = await getMyPositions({ force: true });
+      const found = pos.positions?.find((p) => p.position === positionAddress);
       if (!found) die("Position not found", { position: positionAddress });
       poolAddress = found.pool;
     }
 
-    const pnl = await getPositionPnl({ pool_address: poolAddress, position_address: positionAddress });
-    if (tracked?.strategy) pnl.strategy = tracked.strategy;
-    if (tracked?.instruction) pnl.instruction = tracked.instruction;
-    out(pnl);
+    const pnlResult = await getPositionPnl({
+      pool_address: poolAddress,
+      position_address: positionAddress,
+    });
+    // Handle both success and error cases
+    if ("error" in pnlResult) {
+      out(pnlResult);
+    } else {
+      const pnl = pnlResult as PositionPnL & { strategy?: string; instruction?: string };
+      if (tracked?.strategy) pnl.strategy = tracked.strategy;
+      if (tracked?.instruction) pnl.instruction = tracked.instruction;
+      out(pnl);
+    }
     break;
   }
 
@@ -303,64 +362,84 @@ switch (subcommand) {
     const { checkSmartWalletsOnPool } = await import("./smart-wallets.js");
     const { recallForPool } = await import("./pool-memory.js");
 
-    const limit = parseInt(flags.limit || "5");
-    const raw = await getTopCandidates({ limit });
-    const pools = raw.candidates || raw.pools || [];
+    const limit: number = parseInt(typedFlags.limit || "5");
+    const raw: TopCandidatesResult = await getTopCandidates({ limit });
+    const pools: CondensedPool[] = raw.candidates || [];
 
-    const enriched = [];
+    const enriched: EnrichedCandidate[] = [];
     for (const pool of pools) {
-      const mint = pool.base?.mint;
+      const mint: string | undefined = pool.base?.mint;
       const [activeBin, smartWallets, tokenInfo, holders, narrative] = await Promise.allSettled([
         getActiveBin({ pool_address: pool.pool }),
         checkSmartWalletsOnPool({ pool_address: pool.pool }),
-        mint ? getTokenInfo({ query: mint }) : Promise.resolve(null),
-        mint ? getTokenHolders({ mint }) : Promise.resolve(null),
-        mint ? getTokenNarrative({ mint }) : Promise.resolve(null),
+        mint ? getTokenInfo({ query: mint }) : Promise.resolve<TokenInfoResult | null>(null),
+        mint ? getTokenHolders({ mint }) : Promise.resolve<TokenHoldersResult | null>(null),
+        mint ? getTokenNarrative({ mint }) : Promise.resolve<TokenNarrative | null>(null),
       ]);
-      const ti = tokenInfo.status === "fulfilled" ? tokenInfo.value?.results?.[0] : null;
+      const ti: TokenInfo | undefined =
+        tokenInfo.status === "fulfilled" ? tokenInfo.value?.results?.[0] : undefined;
       enriched.push({
         pool: pool.pool,
         name: pool.name,
-        bin_step: pool.bin_step,
+        bin_step: pool.bin_step ?? 0,
         fee_pct: pool.fee_pct,
-        fee_active_tvl_ratio: pool.fee_active_tvl_ratio,
-        volume: pool.volume_window,
-        tvl: pool.active_tvl,
-        volatility: pool.volatility,
-        mcap: pool.mcap,
+        fee_active_tvl_ratio: pool.fee_active_tvl_ratio ?? undefined,
+        volume: pool.volume_window ?? 0,
+        tvl: pool.active_tvl ?? 0,
+        volatility: pool.volatility ?? undefined,
+        mcap: pool.mcap ?? undefined,
         organic_score: pool.organic_score,
-        active_pct: pool.active_pct,
-        price_change_pct: pool.price_change_pct,
-        active_bin: activeBin.status === "fulfilled" ? activeBin.value?.binId : null,
-        smart_wallets: smartWallets.status === "fulfilled" ? (smartWallets.value?.in_pool || []).map(w => w.name) : [],
+        active_pct: pool.active_pct ?? undefined,
+        price_change_pct: pool.price_change_pct ?? undefined,
+        active_bin:
+          activeBin.status === "fulfilled"
+            ? ((activeBin.value as ActiveBinResult | undefined)?.binId ?? null)
+            : null,
+        smart_wallets:
+          smartWallets.status === "fulfilled"
+            ? ((smartWallets.value as WalletPositionCheck | undefined)?.in_pool || []).map(
+                (w) => w.name
+              )
+            : [],
         token: {
           mint,
           symbol: pool.base?.symbol,
           holders: pool.holders,
           mcap: ti?.mcap,
           launchpad: ti?.launchpad,
-          global_fees_sol: ti?.global_fees_sol,
-          price_change_1h: ti?.stats_1h?.price_change,
+          global_fees_sol: ti?.global_fees_sol ?? undefined,
+          price_change_1h: ti?.stats_1h?.price_change
+            ? parseFloat(ti.stats_1h.price_change)
+            : undefined,
           net_buyers_1h: ti?.stats_1h?.net_buyers,
           audit: {
-            top10_pct: ti?.audit?.top_holders_pct,
-            bots_pct: ti?.audit?.bot_holders_pct,
+            top10_pct: ti?.audit?.top_holders_pct
+              ? parseFloat(ti.audit.top_holders_pct)
+              : undefined,
+            bots_pct: ti?.audit?.bot_holders_pct ? parseFloat(ti.audit.bot_holders_pct) : undefined,
           },
         },
         holders: holders.status === "fulfilled" ? holders.value : null,
-        narrative: narrative.status === "fulfilled" ? narrative.value?.narrative : null,
-        pool_memory: recallForPool(pool.pool) || null,
+        narrative:
+          narrative.status === "fulfilled"
+            ? ((narrative.value as TokenNarrative | null)?.narrative ?? null)
+            : null,
+        pool_memory: null, // recallForPool returns string, not PoolMemoryEntry
       });
-      await new Promise(r => setTimeout(r, 150)); // avoid 429s
+      await new Promise((r: (value: void) => void) => setTimeout(r, 150)); // avoid 429s
     }
 
-    out({ candidates: enriched, total_screened: raw.total_screened });
+    const output: CandidatesOutput = { candidates: enriched, total_screened: raw.total_screened };
+    out(output);
     break;
   }
 
   // ── token-info ──────────────────────────────────────────────────
   case "token-info": {
-    const query = flags.query || flags.mint || argv.find((a, i) => !a.startsWith("-") && i > 0 && a !== "token-info");
+    const query: string | undefined =
+      typedFlags.query ||
+      typedFlags.mint ||
+      argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-info");
     if (!query) die("Usage: meridian token-info --query <mint_or_symbol>");
     const { getTokenInfo } = await import("./tools/token.js");
     out(await getTokenInfo({ query }));
@@ -369,17 +448,21 @@ switch (subcommand) {
 
   // ── token-holders ─────────────────────────────────────────────
   case "token-holders": {
-    const mint = flags.mint || argv.find((a, i) => !a.startsWith("-") && i > 0 && a !== "token-holders");
+    const mint: string | undefined =
+      typedFlags.mint ||
+      argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-holders");
     if (!mint) die("Usage: meridian token-holders --mint <addr>");
     const { getTokenHolders } = await import("./tools/token.js");
-    const limit = flags.limit ? parseInt(flags.limit) : 20;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 20;
     out(await getTokenHolders({ mint, limit }));
     break;
   }
 
   // ── token-narrative ───────────────────────────────────────────
   case "token-narrative": {
-    const mint = flags.mint || argv.find((a, i) => !a.startsWith("-") && i > 0 && a !== "token-narrative");
+    const mint: string | undefined =
+      typedFlags.mint ||
+      argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-narrative");
     if (!mint) die("Usage: meridian token-narrative --mint <addr>");
     const { getTokenNarrative } = await import("./tools/token.js");
     out(await getTokenNarrative({ mint }));
@@ -388,33 +471,42 @@ switch (subcommand) {
 
   // ── pool-detail ───────────────────────────────────────────────
   case "pool-detail": {
-    if (!flags.pool) die("Usage: meridian pool-detail --pool <addr> [--timeframe 5m]");
+    if (!typedFlags.pool) die("Usage: meridian pool-detail --pool <addr> [--timeframe 5m]");
     const { getPoolDetail } = await import("./tools/screening.js");
-    out(await getPoolDetail({ pool_address: flags.pool, timeframe: flags.timeframe || "5m" }));
+    out(
+      await getPoolDetail({
+        pool_address: typedFlags.pool,
+        timeframe: typedFlags.timeframe || "5m",
+      })
+    );
     break;
   }
 
   // ── search-pools ──────────────────────────────────────────────
   case "search-pools": {
-    const query = flags.query || argv.find((a, i) => !a.startsWith("-") && i > 0 && a !== "search-pools");
+    const query: string | undefined =
+      typedFlags.query ||
+      argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "search-pools");
     if (!query) die("Usage: meridian search-pools --query <name_or_symbol>");
     const { searchPools } = await import("./tools/dlmm.js");
-    const limit = flags.limit ? parseInt(flags.limit) : 10;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 10;
     out(await searchPools({ query, limit }));
     break;
   }
 
   // ── active-bin ────────────────────────────────────────────────
   case "active-bin": {
-    if (!flags.pool) die("Usage: meridian active-bin --pool <addr>");
+    if (!typedFlags.pool) die("Usage: meridian active-bin --pool <addr>");
     const { getActiveBin } = await import("./tools/dlmm.js");
-    out(await getActiveBin({ pool_address: flags.pool }));
+    out(await getActiveBin({ pool_address: typedFlags.pool }));
     break;
   }
 
   // ── wallet-positions ──────────────────────────────────────────
   case "wallet-positions": {
-    const wallet = flags.wallet || argv.find((a, i) => !a.startsWith("-") && i > 0 && a !== "wallet-positions");
+    const wallet: string | undefined =
+      typedFlags.wallet ||
+      argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "wallet-positions");
     if (!wallet) die("Usage: meridian wallet-positions --wallet <addr>");
     const { getWalletPositions } = await import("./tools/dlmm.js");
     out(await getWalletPositions({ wallet_address: wallet }));
@@ -423,68 +515,79 @@ switch (subcommand) {
 
   // ── deploy ───────────────────────────────────────────────────────
   case "deploy": {
-    if (!flags.pool) die("Usage: meridian deploy --pool <addr> --amount <sol>");
-    const amountX = flags["amount-x"] ? parseFloat(flags["amount-x"]) : undefined;
-    if (!flags.amount && !amountX) die("--amount or --amount-x is required");
+    if (!typedFlags.pool) die("Usage: meridian deploy --pool <addr> --amount <sol>");
+    const amountX: number | undefined = typedFlags["amount-x"]
+      ? parseFloat(typedFlags["amount-x"])
+      : undefined;
+    if (!typedFlags.amount && !amountX) die("--amount or --amount-x is required");
 
     const { executeTool } = await import("./tools/executor.js");
-    out(await executeTool("deploy_position", {
-      pool_address: flags.pool,
-      amount_y: flags.amount ? parseFloat(flags.amount) : undefined,
-      amount_x: amountX,
-      strategy: flags.strategy,
-      single_sided_x: argv.includes("--single-sided-x"),
-      bins_below: flags["bins-below"] ? parseInt(flags["bins-below"]) : undefined,
-      bins_above: flags["bins-above"] ? parseInt(flags["bins-above"]) : undefined,
-      allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
-    }));
+    out(
+      await executeTool("deploy_position", {
+        pool_address: typedFlags.pool,
+        amount_y: typedFlags.amount ? parseFloat(typedFlags.amount) : undefined,
+        amount_x: amountX,
+        strategy: typedFlags.strategy,
+        single_sided_x: argv.includes("--single-sided-x"),
+        bins_below: typedFlags["bins-below"] ? parseInt(typedFlags["bins-below"]) : undefined,
+        bins_above: typedFlags["bins-above"] ? parseInt(typedFlags["bins-above"]) : undefined,
+        allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
+      })
+    );
     break;
   }
 
   // ── claim ────────────────────────────────────────────────────────
   case "claim": {
-    if (!flags.position) die("Usage: meridian claim --position <addr>");
+    if (!typedFlags.position) die("Usage: meridian claim --position <addr>");
     const { executeTool } = await import("./tools/executor.js");
-    out(await executeTool("claim_fees", { position_address: flags.position }));
+    out(await executeTool("claim_fees", { position_address: typedFlags.position }));
     break;
   }
 
   // ── close ────────────────────────────────────────────────────────
   case "close": {
-    if (!flags.position) die("Usage: meridian close --position <addr>");
+    if (!typedFlags.position) die("Usage: meridian close --position <addr>");
     const { executeTool } = await import("./tools/executor.js");
-    out(await executeTool("close_position", {
-      position_address: flags.position,
-      skip_swap: flags["skip-swap"] ?? false,
-    }));
+    out(
+      await executeTool("close_position", {
+        position_address: typedFlags.position,
+        skip_swap: typedFlags["skip-swap"] ?? false,
+      })
+    );
     break;
   }
 
   // ── swap ─────────────────────────────────────────────────────────
   case "swap": {
-    if (!flags.from || !flags.to || !flags.amount) die("Usage: meridian swap --from <mint> --to <mint> --amount <n>");
+    if (!typedFlags.from || !typedFlags.to || !typedFlags.amount)
+      die("Usage: meridian swap --from <mint> --to <mint> --amount <n>");
     const { executeTool } = await import("./tools/executor.js");
-    out(await executeTool("swap_token", {
-      input_mint: flags.from,
-      output_mint: flags.to,
-      amount: parseFloat(flags.amount),
-    }));
+    out(
+      await executeTool("swap_token", {
+        input_mint: typedFlags.from,
+        output_mint: typedFlags.to,
+        amount: parseFloat(typedFlags.amount),
+      })
+    );
     break;
   }
 
   // ── screen ───────────────────────────────────────────────────────
   case "screen": {
     const { runScreeningCycle } = await import("./index.js");
-    const report = await runScreeningCycle({ silent });
-    out({ done: true, report: report || "No action taken" });
+    const report: string | undefined = await runScreeningCycle({ silent });
+    const output: CycleOutput = { done: true, report: report || "No action taken" };
+    out(output);
     break;
   }
 
   // ── manage ───────────────────────────────────────────────────────
   case "manage": {
     const { runManagementCycle } = await import("./index.js");
-    const report = await runManagementCycle({ silent });
-    out({ done: true, report: report || "No action taken" });
+    const report: string | undefined = await runManagementCycle({ silent });
+    const output: CycleOutput = { done: true, report: report || "No action taken" };
+    out(output);
     break;
   }
 
@@ -492,15 +595,21 @@ switch (subcommand) {
   case "config": {
     if (sub2 === "get" || !sub2) {
       const { config } = await import("./config.js");
-      out(config);
+      out(config as unknown as Record<string, unknown>);
     } else if (sub2 === "set") {
-      const key = argv.filter(a => !a.startsWith("-"))[2];
-      const rawVal = argv.filter(a => !a.startsWith("-"))[3];
+      const key: string | undefined = argv.filter((a: string) => !a.startsWith("-"))[2];
+      const rawVal: string | undefined = argv.filter((a: string) => !a.startsWith("-"))[3];
       if (!key || rawVal === undefined) die("Usage: meridian config set <key> <value>");
-      let value = rawVal;
-      try { value = JSON.parse(rawVal); } catch { /* keep as string */ }
+      let value: unknown = rawVal;
+      try {
+        value = JSON.parse(rawVal);
+      } catch {
+        /* keep as string */
+      }
       const { executeTool } = await import("./tools/executor.js");
-      out(await executeTool("update_config", { changes: { [key]: value }, reason: "CLI config set" }));
+      out(
+        await executeTool("update_config", { changes: { [key]: value }, reason: "CLI config set" })
+      );
     } else {
       die(`Unknown config subcommand: ${sub2}. Use: get, set`);
     }
@@ -509,10 +618,10 @@ switch (subcommand) {
 
   // ── study ────────────────────────────────────────────────────────
   case "study": {
-    if (!flags.pool) die("Usage: meridian study --pool <addr> [--limit 4]");
+    if (!typedFlags.pool) die("Usage: meridian study --pool <addr> [--limit 4]");
     const { studyTopLPers } = await import("./tools/study.js");
-    const limit = flags.limit ? parseInt(flags.limit) : 4;
-    out(await studyTopLPers({ pool_address: flags.pool, limit }));
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 4;
+    out(await studyTopLPers({ pool_address: typedFlags.pool, limit }));
     break;
   }
 
@@ -527,24 +636,28 @@ switch (subcommand) {
   // ── lessons ──────────────────────────────────────────────────────
   case "lessons": {
     if (sub2 === "add") {
-      const text = argv.filter(a => !a.startsWith("-")).slice(2).join(" ");
+      const text: string = argv
+        .filter((a: string) => !a.startsWith("-"))
+        .slice(2)
+        .join(" ");
       if (!text) die("Usage: meridian lessons add <text>");
       const { addLesson } = await import("./lessons.js");
       addLesson(text, [], { pinned: false, role: null });
-      out({ saved: true, rule: text, outcome: "manual", role: null });
+      const output: LessonsAddOutput = { saved: true, rule: text, outcome: "manual", role: null };
+      out(output);
     } else {
       const { listLessons } = await import("./lessons.js");
-      const limit = flags.limit ? parseInt(flags.limit) : 50;
-      out(listLessons({ limit }));
+      const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 50;
+      out(listLessons({ limit }) as unknown as LessonsListOutput);
     }
     break;
   }
 
   // ── pool-memory ──────────────────────────────────────────────────
   case "pool-memory": {
-    if (!flags.pool) die("Usage: meridian pool-memory --pool <addr>");
+    if (!typedFlags.pool) die("Usage: meridian pool-memory --pool <addr>");
     const { getPoolMemory } = await import("./pool-memory.js");
-    out(getPoolMemory({ pool_address: flags.pool }));
+    out(getPoolMemory({ pool_address: typedFlags.pool }) as unknown as PoolMemoryOutput);
     break;
   }
 
@@ -552,17 +665,40 @@ switch (subcommand) {
   case "evolve": {
     const { config } = await import("./config.js");
     const { evolveThresholds } = await import("./lessons.js");
-    const fs2 = await import("fs");
-    const lessonsFile = "./lessons.json";
-    let perfData = [];
-    if (fs2.existsSync(lessonsFile)) {
-      try { perfData = JSON.parse(fs2.readFileSync(lessonsFile, "utf8")).performance || []; } catch { /* no data */ }
+    const fs2: typeof fs = await import("fs");
+    const lessonsFile: string = "./lessons.json";
+    interface LessonsData {
+      performance?: Array<Record<string, unknown>>;
     }
-    const result = evolveThresholds(perfData, config);
+    let perfData: Array<Record<string, unknown>> = [];
+    if (fs2.existsSync(lessonsFile)) {
+      try {
+        const data: LessonsData = JSON.parse(fs2.readFileSync(lessonsFile, "utf8")) as LessonsData;
+        perfData = data.performance || [];
+      } catch {
+        /* no data */
+      }
+    }
+    const result = evolveThresholds(
+      perfData as unknown as import("./types/lessons.js").PerformanceRecord[],
+      config
+    );
     if (!result) {
-      out({ evolved: false, reason: `Need at least 5 closed positions (have ${perfData.length})` });
+      const output: EvolveOutput = {
+        evolved: false,
+        reason: `Need at least 5 closed positions (have ${perfData.length})`,
+      };
+      out(output);
     } else {
-      out({ evolved: Object.keys(result.changes).length > 0, changes: result.changes, rationale: result.rationale });
+      const rationaleStr = Object.entries(result.rationale)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("; ");
+      const output: EvolveOutput = {
+        evolved: Object.keys(result.changes).length > 0,
+        changes: result.changes,
+        rationale: rationaleStr,
+      };
+      out(output);
     }
     break;
   }
@@ -570,13 +706,18 @@ switch (subcommand) {
   // ── blacklist ────────────────────────────────────────────────────
   case "blacklist": {
     if (sub2 === "add") {
-      if (!flags.mint) die("Usage: meridian blacklist add --mint <addr> --reason <text>");
-      if (!flags.reason) die("--reason is required");
+      if (!typedFlags.mint) die("Usage: meridian blacklist add --mint <addr> --reason <text>");
+      if (!typedFlags.reason) die("--reason is required");
       const { addToBlacklist } = await import("./token-blacklist.js");
-      out(addToBlacklist({ mint: flags.mint, reason: flags.reason }));
+      out(
+        addToBlacklist({
+          mint: typedFlags.mint,
+          reason: typedFlags.reason,
+        }) as unknown as BlacklistAddOutput
+      );
     } else if (sub2 === "list" || !sub2) {
       const { listBlacklist } = await import("./token-blacklist.js");
-      out(listBlacklist());
+      out(listBlacklist() as unknown as BlacklistListOutput);
     } else {
       die(`Unknown blacklist subcommand: ${sub2}. Use: add, list`);
     }
@@ -586,40 +727,61 @@ switch (subcommand) {
   // ── performance ──────────────────────────────────────────────────
   case "performance": {
     const { getPerformanceHistory, getPerformanceSummary } = await import("./lessons.js");
-    const limit = flags.limit ? parseInt(flags.limit) : 200;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 200;
     const history = getPerformanceHistory({ hours: 999999, limit });
     const summary = getPerformanceSummary();
-    out({ summary, ...history });
+    const output: PerformanceOutput = {
+      summary: summary as PerformanceOutput["summary"],
+      count: history.count,
+      positions: history.positions,
+    };
+    out(output);
     break;
   }
 
   // ── withdraw-liquidity ─────────────────────────────────────────
   case "withdraw-liquidity": {
-    if (!flags.position) die("Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]");
-    if (!flags.pool) die("--pool is required");
-    const { withdrawLiquidity } = await import("./tools/dlmm.js");
-    out(await withdrawLiquidity({
-      position_address: flags.position,
-      pool_address: flags.pool,
-      bps: flags.bps ? parseInt(flags.bps) : 10000,
-      claim_fees: !argv.includes("--no-claim"),
-    }));
+    if (!typedFlags.position)
+      die("Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]");
+    if (!typedFlags.pool) die("--pool is required");
+    const dlmmModule = await import("./tools/dlmm.js");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const withdrawLiquidity = (dlmmModule as Record<string, unknown>).withdrawLiquidity as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    out(
+      await withdrawLiquidity({
+        position_address: typedFlags.position,
+        pool_address: typedFlags.pool,
+        bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
+        claim_fees: !argv.includes("--no-claim"),
+      })
+    );
     break;
   }
 
   // ── add-liquidity ──────────────────────────────────────────────
   case "add-liquidity": {
-    if (!flags.position) die("Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>]");
-    if (!flags.pool) die("--pool is required");
-    const { addLiquidity } = await import("./tools/dlmm.js");
-    out(await addLiquidity({
-      position_address: flags.position,
-      pool_address: flags.pool,
-      amount_x: flags["amount-x"] ? parseFloat(flags["amount-x"]) : 0,
-      amount_y: flags["amount-y"] ? parseFloat(flags["amount-y"]) : 0,
-      strategy: flags.strategy || "spot",
-      single_sided_x: argv.includes("--single-sided-x"),
-    }));
+    if (!typedFlags.position)
+      die(
+        "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>]"
+      );
+    if (!typedFlags.pool) die("--pool is required");
+    const dlmmModule = await import("./tools/dlmm.js");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addLiquidity = (dlmmModule as Record<string, unknown>).addLiquidity as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    out(
+      await addLiquidity({
+        position_address: typedFlags.position,
+        pool_address: typedFlags.pool,
+        amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
+        amount_y: typedFlags["amount-y"] ? parseFloat(typedFlags["amount-y"]) : 0,
+        strategy: typedFlags.strategy || "spot",
+        single_sided_x: argv.includes("--single-sided-x"),
+      })
+    );
     break;
   }
 
