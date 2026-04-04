@@ -53,6 +53,7 @@ export interface CondensedPool {
   bundle_pct?: number;
   sniper_pct?: number;
   suspicious_pct?: number;
+  new_wallet_pct?: number;
   smart_money_buy?: boolean;
   dev_sold_all?: boolean;
   dex_boost?: boolean;
