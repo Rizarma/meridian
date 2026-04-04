@@ -8,11 +8,22 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { config } from "./config.js";
+import type {
+  PoolMemoryDB,
+  PoolMemoryEntry,
+  PoolMemoryInput,
+  PoolMemoryResult,
+  PositionSnapshotInput,
+  PoolNoteResult,
+} from "./types/pool-memory.js";
 
 const POOL_MEMORY_FILE = "./pool-memory.json";
 const MAX_NOTE_LENGTH = 280;
 
-function sanitizeStoredNote(text, maxLen = MAX_NOTE_LENGTH) {
+function sanitizeStoredNote(
+  text: string | null | undefined,
+  maxLen = MAX_NOTE_LENGTH
+): string | null {
   if (text == null) return null;
   const cleaned = String(text)
     .replace(/[\r\n\t]+/g, " ")
@@ -23,32 +34,39 @@ function sanitizeStoredNote(text, maxLen = MAX_NOTE_LENGTH) {
   return cleaned || null;
 }
 
-function load() {
+function load(): PoolMemoryDB {
   if (!fs.existsSync(POOL_MEMORY_FILE)) return {};
   try {
-    return JSON.parse(fs.readFileSync(POOL_MEMORY_FILE, "utf8"));
+    return JSON.parse(fs.readFileSync(POOL_MEMORY_FILE, "utf8")) as PoolMemoryDB;
   } catch {
     return {};
   }
 }
 
-function save(data) {
+function save(data: PoolMemoryDB): void {
   fs.writeFileSync(POOL_MEMORY_FILE, JSON.stringify(data, null, 2));
 }
 
-function isOorCloseReason(reason) {
-  const text = String(reason || "").trim().toLowerCase();
+function isOorCloseReason(reason: string | null | undefined): boolean {
+  const text = String(reason || "")
+    .trim()
+    .toLowerCase();
   return text === "oor" || text.includes("out of range") || text.includes("oor");
 }
 
-function setPoolCooldown(entry, hours, reason) {
+function setPoolCooldown(entry: PoolMemoryEntry, hours: number, reason: string): string {
   const cooldownUntil = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
   entry.cooldown_until = cooldownUntil;
   entry.cooldown_reason = reason;
   return cooldownUntil;
 }
 
-function setBaseMintCooldown(db, baseMint, hours, reason) {
+function setBaseMintCooldown(
+  db: PoolMemoryDB,
+  baseMint: string | null | undefined,
+  hours: number,
+  reason: string
+): string | null {
   if (!baseMint) return null;
   const cooldownUntil = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
   for (const entry of Object.values(db)) {
@@ -65,22 +83,8 @@ function setBaseMintCooldown(db, baseMint, hours, reason) {
 /**
  * Record a closed deploy into pool-memory.json.
  * Called automatically from recordPerformance() in lessons.js.
- *
- * @param {string} poolAddress
- * @param {Object} deployData
- * @param {string} deployData.pool_name
- * @param {string} deployData.base_mint
- * @param {string} deployData.deployed_at
- * @param {string} deployData.closed_at
- * @param {number} deployData.pnl_pct
- * @param {number} deployData.pnl_usd
- * @param {number} deployData.range_efficiency
- * @param {number} deployData.minutes_held
- * @param {string} deployData.close_reason
- * @param {string} deployData.strategy
- * @param {number} deployData.volatility
  */
-export function recordPoolDeploy(poolAddress, deployData) {
+export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): void {
   if (!poolAddress) return;
 
   const db = load();
@@ -121,12 +125,11 @@ export function recordPoolDeploy(poolAddress, deployData) {
   // Recompute aggregates
   const withPnl = entry.deploys.filter((d) => d.pnl_pct != null);
   if (withPnl.length > 0) {
-    entry.avg_pnl_pct = Math.round(
-      (withPnl.reduce((s, d) => s + d.pnl_pct, 0) / withPnl.length) * 100
-    ) / 100;
-    entry.win_rate = Math.round(
-      (withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100
-    ) / 100;
+    entry.avg_pnl_pct =
+      Math.round((withPnl.reduce((s, d) => s + (d.pnl_pct ?? 0), 0) / withPnl.length) * 100) / 100;
+    entry.win_rate =
+      Math.round((withPnl.filter((d) => (d.pnl_pct ?? 0) >= 0).length / withPnl.length) * 100) /
+      100;
   }
 
   if (deployData.base_mint && !entry.base_mint) {
@@ -153,15 +156,21 @@ export function recordPoolDeploy(poolAddress, deployData) {
     const mintCooldownUntil = setBaseMintCooldown(db, entry.base_mint, oorCooldownHours, reason);
     log("pool-memory", `Cooldown set for ${entry.name} until ${poolCooldownUntil} (${reason})`);
     if (entry.base_mint && mintCooldownUntil) {
-      log("pool-memory", `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${reason})`);
+      log(
+        "pool-memory",
+        `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${reason})`
+      );
     }
   }
 
   save(db);
-  log("pool-memory", `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`);
+  log(
+    "pool-memory",
+    `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`
+  );
 }
 
-export function isPoolOnCooldown(poolAddress) {
+export function isPoolOnCooldown(poolAddress: string): boolean {
   if (!poolAddress) return false;
   const db = load();
   const entry = db[poolAddress];
@@ -169,14 +178,15 @@ export function isPoolOnCooldown(poolAddress) {
   return new Date(entry.cooldown_until) > new Date();
 }
 
-export function isBaseMintOnCooldown(baseMint) {
+export function isBaseMintOnCooldown(baseMint: string): boolean {
   if (!baseMint) return false;
   const db = load();
   const now = new Date();
-  return Object.values(db).some((entry) =>
-    entry?.base_mint === baseMint &&
-    entry?.base_mint_cooldown_until &&
-    new Date(entry.base_mint_cooldown_until) > now
+  return Object.values(db).some(
+    (entry) =>
+      entry?.base_mint === baseMint &&
+      entry?.base_mint_cooldown_until &&
+      new Date(entry.base_mint_cooldown_until) > now
   );
 }
 
@@ -186,8 +196,8 @@ export function isBaseMintOnCooldown(baseMint) {
  * Tool handler: get_pool_memory
  * Returns deploy history and summary for a pool.
  */
-export function getPoolMemory({ pool_address }) {
-  if (!pool_address) return { error: "pool_address required" };
+export function getPoolMemory({ pool_address }: { pool_address: string }): PoolMemoryResult {
+  if (!pool_address) return { error: "pool_address required", pool_address: "", known: false };
 
   const db = load();
   const entry = db[pool_address];
@@ -224,7 +234,7 @@ export function getPoolMemory({ pool_address }) {
  * Builds a trend dataset while position is still open — not just at close.
  * Keeps last 48 snapshots per pool (~4h at 5min intervals).
  */
-export function recordPositionSnapshot(poolAddress, snapshot) {
+export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSnapshotInput): void {
   if (!poolAddress) return;
   const db = load();
 
@@ -245,7 +255,7 @@ export function recordPositionSnapshot(poolAddress, snapshot) {
 
   if (!db[poolAddress].snapshots) db[poolAddress].snapshots = [];
 
-  db[poolAddress].snapshots.push({
+  db[poolAddress].snapshots!.push({
     ts: new Date().toISOString(),
     position: snapshot.position,
     pnl_pct: snapshot.pnl_pct ?? null,
@@ -257,8 +267,8 @@ export function recordPositionSnapshot(poolAddress, snapshot) {
   });
 
   // Keep last 48 snapshots (~4h at 5min intervals)
-  if (db[poolAddress].snapshots.length > 48) {
-    db[poolAddress].snapshots = db[poolAddress].snapshots.slice(-48);
+  if (db[poolAddress].snapshots!.length > 48) {
+    db[poolAddress].snapshots = db[poolAddress].snapshots!.slice(-48);
   }
 
   save(db);
@@ -268,25 +278,31 @@ export function recordPositionSnapshot(poolAddress, snapshot) {
  * Recall focused context for a specific pool — used before screening or management.
  * Returns a short formatted string ready for injection into the agent goal.
  */
-export function recallForPool(poolAddress) {
+export function recallForPool(poolAddress: string): string | null {
   if (!poolAddress) return null;
   const db = load();
   const entry = db[poolAddress];
   if (!entry) return null;
 
-  const lines = [];
+  const lines: string[] = [];
 
   // Deploy history summary
   if (entry.total_deploys > 0) {
-    lines.push(`POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`);
+    lines.push(
+      `POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`
+    );
   }
 
   if (entry.cooldown_until && new Date(entry.cooldown_until) > new Date()) {
-    lines.push(`POOL COOLDOWN: active until ${entry.cooldown_until}${entry.cooldown_reason ? ` (${entry.cooldown_reason})` : ""}`);
+    lines.push(
+      `POOL COOLDOWN: active until ${entry.cooldown_until}${entry.cooldown_reason ? ` (${entry.cooldown_reason})` : ""}`
+    );
   }
 
   if (entry.base_mint_cooldown_until && new Date(entry.base_mint_cooldown_until) > new Date()) {
-    lines.push(`TOKEN COOLDOWN: active until ${entry.base_mint_cooldown_until}${entry.base_mint_cooldown_reason ? ` (${entry.base_mint_cooldown_reason})` : ""}`);
+    lines.push(
+      `TOKEN COOLDOWN: active until ${entry.base_mint_cooldown_until}${entry.base_mint_cooldown_reason ? ` (${entry.base_mint_cooldown_reason})` : ""}`
+    );
   }
 
   // Recent snapshot trend (last 6 = ~30min)
@@ -294,11 +310,14 @@ export function recallForPool(poolAddress) {
   if (snaps.length >= 2) {
     const first = snaps[0];
     const last = snaps[snaps.length - 1];
-    const pnlTrend = last.pnl_pct != null && first.pnl_pct != null
-      ? (last.pnl_pct - first.pnl_pct).toFixed(2)
-      : null;
-    const oorCount = snaps.filter(s => s.in_range === false).length;
-    lines.push(`RECENT TREND: PnL drift ${pnlTrend !== null ? (pnlTrend >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`);
+    const pnlTrend =
+      last.pnl_pct != null && first.pnl_pct != null
+        ? (last.pnl_pct - first.pnl_pct).toFixed(2)
+        : null;
+    const oorCount = snaps.filter((s) => s.in_range === false).length;
+    lines.push(
+      `RECENT TREND: PnL drift ${pnlTrend !== null ? (parseFloat(pnlTrend) >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`
+    );
   }
 
   // Notes
@@ -315,10 +334,17 @@ export function recallForPool(poolAddress) {
  * Tool handler: add_pool_note
  * Agent can annotate a pool with a freeform note.
  */
-export function addPoolNote({ pool_address, note }) {
-  if (!pool_address) return { error: "pool_address required" };
+export function addPoolNote({
+  pool_address,
+  note,
+}: {
+  pool_address: string;
+  note: string;
+}): PoolNoteResult {
+  if (!pool_address)
+    return { error: "pool_address required", saved: false, pool_address: "", note: "" };
   const safeNote = sanitizeStoredNote(note);
-  if (!safeNote) return { error: "note required" };
+  if (!safeNote) return { error: "note required", saved: false, pool_address, note: "" };
 
   const db = load();
 
