@@ -456,7 +456,7 @@ export async function executeTool(name: string, args: unknown): Promise<ToolExec
         }
         // Auto-swap base token back to SOL unless user said to hold
         if (!closeArgs.skip_swap && result.base_mint) {
-          void (async () => {
+          await (async () => {
             try {
               const balances = (await getWalletBalances()) as WalletBalances;
               const baseMint = result.base_mint as string;
@@ -489,7 +489,7 @@ export async function executeTool(name: string, args: unknown): Promise<ToolExec
         config.management.autoSwapAfterClaim &&
         result.base_mint
       ) {
-        void (async () => {
+        await (async () => {
           try {
             const balances = (await getWalletBalances()) as WalletBalances;
             const baseMint = result.base_mint as string;
