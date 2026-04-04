@@ -129,6 +129,11 @@ function isSystemRoleError(error) {
   return /invalid message role:\s*system/i.test(message);
 }
 
+function isToolChoiceRequiredError(error) {
+  const message = String(error?.message || error?.error?.message || error || "");
+  return /tool_choice/i.test(message) && /required/i.test(message);
+}
+
 /**
  * Core ReAct agent loop.
  *
@@ -171,7 +176,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       let usedModel = activeModel;
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
       const ACTION_INTENTS = /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
-      const toolChoice = (step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool)) ? "required" : "auto";
+      let toolChoice = (step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool)) ? "required" : "auto";
 
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -188,6 +193,12 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             providerMode = "user_embedded";
             messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
             log("agent", "Provider rejected system role — retrying with embedded system instructions");
+            attempt -= 1;
+            continue;
+          }
+          if (toolChoice === "required" && isToolChoiceRequiredError(error)) {
+            toolChoice = "auto";
+            log("agent", "Provider rejected tool_choice=required — retrying with tool_choice=auto");
             attempt -= 1;
             continue;
           }
