@@ -77,6 +77,16 @@ export interface TokenConfig {
   USDT: string;
 }
 
+export interface DarwinConfig {
+  enabled: boolean;
+  windowDays?: number;
+  minSamples?: number;
+  boostFactor?: number;
+  decayFactor?: number;
+  weightFloor?: number;
+  weightCeiling?: number;
+}
+
 export interface Config {
   risk: RiskConfig;
   screening: ScreeningConfig;
@@ -85,6 +95,7 @@ export interface Config {
   schedule: ScheduleConfig;
   llm: LlmConfig;
   tokens: TokenConfig;
+  darwin: DarwinConfig;
 }
 
 export interface UserConfigPartial {

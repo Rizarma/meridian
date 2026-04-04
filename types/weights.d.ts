@@ -46,3 +46,19 @@ export interface PerformanceRecord {
   deployed_at?: string;
   signal_snapshot?: Record<string, unknown>;
 }
+
+export interface RecalculateConfig {
+  darwin?: {
+    windowDays?: number;
+    minSamples?: number;
+    boostFactor?: number;
+    decayFactor?: number;
+    weightFloor?: number;
+    weightCeiling?: number;
+  };
+}
+
+export interface RecalculateResult {
+  changes: WeightChange[];
+  weights: Record<string, number>;
+}
