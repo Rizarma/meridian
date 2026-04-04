@@ -18,11 +18,11 @@
     "prepack": "npm run build",
     "postinstall": "node scripts/patch-anchor.js",
     "typecheck": "tsc --noEmit",
-    "format:changed": "node scripts/biome-changed.js",
-    "format:check": "node scripts/biome-changed.js check",
+    "format:changed": "node dist/scripts/biome-changed.js",
+    "format:check": "node dist/scripts/biome-changed.js check",
     "format:all": "biome format --write .",
-    "lint:changed": "node scripts/biome-lint-changed.js",
-    "lint:check": "node scripts/biome-lint-changed.js check",
+    "lint:changed": "node dist/scripts/biome-lint-changed.js",
+    "lint:check": "node dist/scripts/biome-lint-changed.js check",
     "check": "pnpm format:check && pnpm typecheck"
   },
   "dependencies": {

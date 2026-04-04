@@ -1,11 +1,11 @@
-import { execSync } from "child_process";
+import { execSync, type ExecSyncOptions } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
 
 /**
  * Get list of changed files (staged + unstaged) that match given extensions
  */
-function getChangedFiles(extensions = [".js", ".ts", ".mjs", ".cjs"]) {
+function getChangedFiles(extensions: string[] = [".js", ".ts", ".mjs", ".cjs"]): string[] {
   try {
     // Get staged files
     const staged = execSync("git diff --cached --name-only --diff-filter=ACM", {
@@ -44,7 +44,7 @@ function getChangedFiles(extensions = [".js", ".ts", ".mjs", ".cjs"]) {
 /**
  * Run Biome on specific files
  */
-function runBiome(files, command = "format") {
+function runBiome(files: string[], command: string = "format"): number {
   if (files.length === 0) {
     console.log("No changed files to process.");
     return 0;
@@ -55,16 +55,16 @@ function runBiome(files, command = "format") {
 
   try {
     const fileList = files.join(" ");
-    /** @type {import('child_process').ExecSyncOptions} */
-    const options = {
+    const options: ExecSyncOptions = {
       stdio: "inherit",
-      // @ts-ignore - shell can be boolean but types expect string
-      shell: true,
     };
     execSync(`pnpm biome ${command} --write ${fileList}`, options);
     return 0;
-  } catch (/** @type {any} */ error) {
-    return error.status || 1;
+  } catch (error: unknown) {
+    const exitCode = error && typeof error === "object" && "status" in error 
+      ? (error.status as number) 
+      : 1;
+    return exitCode || 1;
   }
 }
 
