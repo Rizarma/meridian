@@ -191,7 +191,8 @@ meridian <command> [flags]
 Or run without installing:
 
 ```bash
-npx tsx cli.ts <command> [flags]
+pnpm build
+node dist/cli.js <command> [flags]
 ```
 
 **Positions & PnL**
