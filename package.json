@@ -9,11 +9,13 @@
   },
   "scripts": {
     "setup": "node setup.js",
-    "start": "node index.js",
-    "dev": "DRY_RUN=true node index.js",
-    "test:screen": "node test/test-screening.js",
-    "test:agent": "DRY_RUN=true node test/test-agent.js",
-    "postinstall": "node scripts/patch-anchor.js"
+    "build": "tsc && node build.js",
+    "start": "npm run build && node dist/index.js",
+    "dev": "npm run build && cross-env DRY_RUN=true node dist/index.js",
+    "test:screen": "npm run build && node dist/test/test-screening.js",
+    "test:agent": "npm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
+    "postinstall": "node scripts/patch-anchor.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
@@ -23,11 +25,16 @@
     "bn.js": "^5.2.1",
     "bs58": "^5.0.0",
     "dotenv": "^17.3.1",
-    "node-cron": "^3.0.3",
     "jsonrepair": "^3.13.3",
+    "node-cron": "^3.0.3",
     "openai": "^4.73.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "cross-env": "^10.1.0",
+    "typescript": "^6.0.2"
   }
 }
