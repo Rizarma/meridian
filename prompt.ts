@@ -1,18 +1,18 @@
 /**
  * Build a specialized system prompt based on the agent's current role.
- *
- * @param {string} agentType - "SCREENER" | "MANAGER" | "GENERAL"
- * @param {Object} portfolio - Current wallet balances
- * @param {Object} positions - Current open positions
- * @param {Object} stateSummary - Local state summary
- * @param {string} lessons - Formatted lessons
- * @param {Object} perfSummary - Performance summary
- * @returns {string} - Complete system prompt
  */
 import { config } from "./config.js";
+import type { AgentType } from "./types/prompt.d.ts";
 
-export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null) {
-  const s = config.screening;
+export function buildSystemPrompt(
+  agentType: AgentType,
+  portfolio: unknown,
+  positions: unknown,
+  stateSummary: unknown = null,
+  lessons: string | null = null,
+  perfSummary: unknown = null
+): string {
+  const s: typeof config.screening = config.screening;
 
   // MANAGER gets a leaner prompt — positions are pre-loaded in the goal, not repeated here
   if (agentType === "MANAGER") {
@@ -46,16 +46,24 @@ Open Positions: ${JSON.stringify(positions, null, 2)}
 Memory: ${JSON.stringify(stateSummary, null, 2)}
 Performance: ${perfSummary ? JSON.stringify(perfSummary, null, 2) : "No closed positions yet"}
 
-Config: ${JSON.stringify({
-  screening: config.screening,
-  management: config.management,
-  schedule: config.schedule,
-}, null, 2)}
+Config: ${JSON.stringify(
+    {
+      screening: config.screening,
+      management: config.management,
+      schedule: config.schedule,
+    },
+    null,
+    2
+  )}
 
-${lessons ? `═══════════════════════════════════════════
+${
+  lessons
+    ? `═══════════════════════════════════════════
  LESSONS LEARNED
 ═══════════════════════════════════════════
-${lessons}` : ""}
+${lessons}`
+    : ""
+}
 
 ═══════════════════════════════════════════
  BEHAVIORAL CORE
@@ -129,22 +137,6 @@ DEPLOY RULES:
 - Pick ONE pool. Deploy or explain why none qualify.
 
 ${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
-`;
-  } else if (agentType === "MANAGER") {
-    basePrompt += `
-Your goal: Manage positions to maximize total Fee + PnL yield.
-
-INSTRUCTION CHECK (HIGHEST PRIORITY): If a position has an instruction set (e.g. "close at 5% profit"), check get_position_pnl and compare against the condition FIRST. If the condition IS MET → close immediately. No further analysis, no hesitation. BIAS TO HOLD does NOT apply when an instruction condition is met.
-
-BIAS TO HOLD: Unless an instruction fires, a pool is dying, volume has collapsed, or yield has vanished, hold.
-
-Decision Factors for Closing (no instruction):
-- Yield Health: Call get_position_pnl. Is the current Fee/TVL still one of the best available?
-- Price Context: Is the token price stabilizing or trending? If it's out of range, will it come back?
-- Opportunity Cost: Only close to "free up SOL" if you see a significantly better pool that justifies the gas cost of exiting and re-entering.
-
-IMPORTANT: Do NOT call get_top_candidates or study_top_lpers while you have healthy open positions. Focus exclusively on managing what you have.
-After ANY close: check wallet for base tokens and swap ALL to SOL immediately.
 `;
   } else {
     basePrompt += `

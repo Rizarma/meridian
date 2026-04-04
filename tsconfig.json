@@ -20,9 +20,11 @@
   },
   "include": [
     "*.js",
+    "*.ts",
     "*.d.ts",
     "types/**/*.d.ts",
     "tools/**/*.js",
+    "tools/**/*.ts",
     "test/**/*.js",
     "scripts/**/*.js"
   ],

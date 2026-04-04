@@ -1,37 +1,5 @@
 // types/api.d.ts
 
-// Token info from Jupiter API
-export interface TokenAudit {
-  bot_holders_pct?: number;
-  top_holders_pct?: number;
-  common_funder?: boolean;
-  funded_same_window?: boolean;
-}
-
-export interface TokenStats1h {
-  price_change?: number;
-  net_buyers?: number;
-}
-
-export interface TokenInfo {
-  address: string;
-  symbol?: string;
-  name?: string;
-  launchpad?: string | null;
-  global_fees_sol?: number;
-  audit?: TokenAudit;
-  stats_1h?: TokenStats1h;
-}
-
-export interface TokenInfoResult {
-  results?: TokenInfo[];
-}
-
-export interface TokenNarrative {
-  narrative?: string;
-  source?: string;
-}
-
 // Smart wallet types
 export interface SmartWallet {
   address: string;

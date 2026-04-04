@@ -11,12 +11,19 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import type {
+  SignalWeights,
+  WeightHistoryEntry,
+  WeightChange,
+  WeightConfig,
+  PerformanceRecord,
+} from "./types/weights.d.ts";
 
 const WEIGHTS_FILE = "./signal-weights.json";
 
 // ─── Signal Definitions ─────────────────────────────────────────
 
-const SIGNAL_NAMES = [
+const SIGNAL_NAMES: string[] = [
   "organic_score",
   "fee_tvl_ratio",
   "volume",
@@ -29,10 +36,12 @@ const SIGNAL_NAMES = [
   "volatility",
 ];
 
-const DEFAULT_WEIGHTS = Object.fromEntries(SIGNAL_NAMES.map((s) => [s, 1.0]));
+const DEFAULT_WEIGHTS: Record<string, number> = Object.fromEntries(
+  SIGNAL_NAMES.map((s) => [s, 1.0])
+);
 
 // Signals where higher values generally indicate better candidates
-const HIGHER_IS_BETTER = new Set([
+const HIGHER_IS_BETTER: Set<string> = new Set([
   "organic_score",
   "fee_tvl_ratio",
   "volume",
@@ -42,16 +51,16 @@ const HIGHER_IS_BETTER = new Set([
 ]);
 
 // Boolean signals — compared by win rate when present vs absent
-const BOOLEAN_SIGNALS = new Set(["smart_wallets_present"]);
+const BOOLEAN_SIGNALS: Set<string> = new Set(["smart_wallets_present"]);
 
 // Categorical signals — compared by win rate across categories
-const CATEGORICAL_SIGNALS = new Set(["narrative_quality"]);
+const CATEGORICAL_SIGNALS: Set<string> = new Set(["narrative_quality"]);
 
 // ─── Persistence ─────────────────────────────────────────────────
 
-export function loadWeights() {
+export function loadWeights(): SignalWeights {
   if (!fs.existsSync(WEIGHTS_FILE)) {
-    const initial = {
+    const initial: SignalWeights = {
       weights: { ...DEFAULT_WEIGHTS },
       last_recalc: null,
       recalc_count: 0,
@@ -62,9 +71,10 @@ export function loadWeights() {
     return initial;
   }
   try {
-    return JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8"));
+    return JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8")) as SignalWeights;
   } catch (err) {
-    log("signal_weights_error", `Failed to read signal-weights.json: ${err.message}`);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("signal_weights_error", `Failed to read signal-weights.json: ${errorMsg}`);
     return {
       weights: { ...DEFAULT_WEIGHTS },
       last_recalc: null,
@@ -74,34 +84,47 @@ export function loadWeights() {
   }
 }
 
-export function saveWeights(data) {
+export function saveWeights(data: SignalWeights): void {
   try {
     fs.writeFileSync(WEIGHTS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
-    log("signal_weights_error", `Failed to write signal-weights.json: ${err.message}`);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("signal_weights_error", `Failed to write signal-weights.json: ${errorMsg}`);
   }
 }
 
 // ─── Core Algorithm ──────────────────────────────────────────────
 
+interface RecalculateResult {
+  changes: WeightChange[];
+  weights: Record<string, number>;
+}
+
+interface RecalculateConfig {
+  darwin?: WeightConfig;
+}
+
 /**
  * Recalculate signal weights based on actual position performance.
  *
- * @param {Array}  perfData - Array of performance records (from lessons.json)
- * @param {Object} cfg      - Live config object (reads cfg.darwin for tuning)
- * @returns {{ changes: Array, weights: Object }}
+ * @param perfData - Array of performance records (from lessons.json)
+ * @param cfg - Live config object (reads cfg.darwin for tuning)
+ * @returns Object containing changes and weights
  */
-export function recalculateWeights(perfData, cfg = {}) {
+export function recalculateWeights(
+  perfData: PerformanceRecord[],
+  cfg: RecalculateConfig = {}
+): RecalculateResult {
   const darwin = cfg.darwin || {};
-  const windowDays    = darwin.windowDays    ?? 60;
-  const minSamples    = darwin.minSamples    ?? 10;
-  const boostFactor   = darwin.boostFactor   ?? 1.05;
-  const decayFactor   = darwin.decayFactor   ?? 0.95;
-  const weightFloor   = darwin.weightFloor   ?? 0.3;
+  const windowDays = darwin.windowDays ?? 60;
+  const minSamples = darwin.minSamples ?? 10;
+  const boostFactor = darwin.boostFactor ?? 1.05;
+  const decayFactor = darwin.decayFactor ?? 0.95;
+  const weightFloor = darwin.weightFloor ?? 0.3;
   const weightCeiling = darwin.weightCeiling ?? 2.5;
 
   const data = loadWeights();
-  const weights = data.weights || { ...DEFAULT_WEIGHTS };
+  const weights: Record<string, number> = data.weights || { ...DEFAULT_WEIGHTS };
 
   // Ensure all signals exist (handles new signals added after initial creation)
   for (const name of SIGNAL_NAMES) {
@@ -119,21 +142,27 @@ export function recalculateWeights(perfData, cfg = {}) {
   });
 
   if (recent.length < minSamples) {
-    log("signal_weights", `Only ${recent.length} records in ${windowDays}d window (need ${minSamples}), skipping recalc`);
+    log(
+      "signal_weights",
+      `Only ${recent.length} records in ${windowDays}d window (need ${minSamples}), skipping recalc`
+    );
     return { changes: [], weights };
   }
 
   // Classify wins and losses
-  const wins   = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
+  const wins = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
   const losses = recent.filter((p) => (p.pnl_usd ?? 0) <= 0);
 
   if (wins.length === 0 || losses.length === 0) {
-    log("signal_weights", `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`);
+    log(
+      "signal_weights",
+      `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`
+    );
     return { changes: [], weights };
   }
 
   // Compute predictive lift for each signal
-  const lifts = {};
+  const lifts: Record<string, number> = {};
   for (const signal of SIGNAL_NAMES) {
     const lift = computeLift(signal, wins, losses, minSamples);
     if (lift !== null) lifts[signal] = lift;
@@ -147,13 +176,13 @@ export function recalculateWeights(perfData, cfg = {}) {
   }
 
   // Split into quartiles
-  const q1End    = Math.ceil(ranked.length * 0.25);
-  const q3Start  = Math.floor(ranked.length * 0.75);
-  const topQuartile    = new Set(ranked.slice(0, q1End).map(([name]) => name));
+  const q1End = Math.ceil(ranked.length * 0.25);
+  const q3Start = Math.floor(ranked.length * 0.75);
+  const topQuartile = new Set(ranked.slice(0, q1End).map(([name]) => name));
   const bottomQuartile = new Set(ranked.slice(q3Start).map(([name]) => name));
 
   // Apply boosts and decays
-  const changes = [];
+  const changes: WeightChange[] = [];
   for (const [signal, lift] of ranked) {
     const prev = weights[signal];
     let next = prev;
@@ -167,8 +196,14 @@ export function recalculateWeights(perfData, cfg = {}) {
     next = Math.round(next * 1000) / 1000;
 
     if (next !== prev) {
-      const dir = next > prev ? "boosted" : "decayed";
-      changes.push({ signal, from: prev, to: next, lift: Math.round(lift * 1000) / 1000, action: dir });
+      const dir: "boosted" | "decayed" = next > prev ? "boosted" : "decayed";
+      changes.push({
+        signal,
+        from: prev,
+        to: next,
+        lift: Math.round(lift * 1000) / 1000,
+        action: dir,
+      });
       weights[signal] = next;
       log("signal_weights", `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)})`);
     }
@@ -191,23 +226,47 @@ export function recalculateWeights(perfData, cfg = {}) {
   }
   saveWeights(data);
 
-  log("signal_weights", changes.length > 0
-    ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
-    : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`);
+  log(
+    "signal_weights",
+    changes.length > 0
+      ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
+      : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`
+  );
 
   return { changes, weights };
 }
 
 // ─── Lift Computation ────────────────────────────────────────────
 
-function computeLift(signal, wins, losses, minSamples) {
-  if (BOOLEAN_SIGNALS.has(signal))      return computeBooleanLift(signal, wins, losses, minSamples);
-  if (CATEGORICAL_SIGNALS.has(signal))  return computeCategoricalLift(signal, wins, losses, minSamples);
+interface WinLossEntry {
+  w: boolean;
+  snap: PerformanceRecord;
+}
+
+interface CategoricalBucket {
+  wins: number;
+  total: number;
+}
+
+function computeLift(
+  signal: string,
+  wins: PerformanceRecord[],
+  losses: PerformanceRecord[],
+  minSamples: number
+): number | null {
+  if (BOOLEAN_SIGNALS.has(signal)) return computeBooleanLift(signal, wins, losses, minSamples);
+  if (CATEGORICAL_SIGNALS.has(signal))
+    return computeCategoricalLift(signal, wins, losses, minSamples);
   return computeNumericLift(signal, wins, losses, minSamples);
 }
 
-function computeNumericLift(signal, wins, losses, minSamples) {
-  const winVals  = extractNumeric(signal, wins);
+function computeNumericLift(
+  signal: string,
+  wins: PerformanceRecord[],
+  losses: PerformanceRecord[],
+  minSamples: number
+): number | null {
+  const winVals = extractNumeric(signal, wins);
   const lossVals = extractNumeric(signal, losses);
   if (winVals.length + lossVals.length < minSamples) return null;
   if (winVals.length === 0 || lossVals.length === 0) return null;
@@ -218,53 +277,80 @@ function computeNumericLift(signal, wins, losses, minSamples) {
   const range = max - min;
   if (range === 0) return 0;
 
-  const normalize = (v) => (v - min) / range;
-  const winMean  = mean(winVals.map(normalize));
+  const normalize = (v: number): number => (v - min) / range;
+  const winMean = mean(winVals.map(normalize));
   const lossMean = mean(lossVals.map(normalize));
 
   return HIGHER_IS_BETTER.has(signal) ? winMean - lossMean : Math.abs(winMean - lossMean);
 }
 
-function computeBooleanLift(signal, wins, losses, minSamples) {
-  const allEntries = [...wins.map((w) => ({ w: true, snap: w })), ...losses.map((l) => ({ w: false, snap: l }))];
-  let trueWins = 0, trueTotal = 0, falseWins = 0, falseTotal = 0;
+function computeBooleanLift(
+  signal: string,
+  wins: PerformanceRecord[],
+  losses: PerformanceRecord[],
+  minSamples: number
+): number | null {
+  const allEntries: WinLossEntry[] = [
+    ...wins.map((w) => ({ w: true, snap: w })),
+    ...losses.map((l) => ({ w: false, snap: l })),
+  ];
+  let trueWins = 0,
+    trueTotal = 0,
+    falseWins = 0,
+    falseTotal = 0;
 
   for (const { w, snap } of allEntries) {
     const val = snap.signal_snapshot?.[signal];
     if (val === undefined || val === null) continue;
-    if (val) { trueTotal++; if (w) trueWins++; }
-    else      { falseTotal++; if (w) falseWins++; }
+    if (val) {
+      trueTotal++;
+      if (w) trueWins++;
+    } else {
+      falseTotal++;
+      if (w) falseWins++;
+    }
   }
 
   if (trueTotal + falseTotal < minSamples) return null;
   if (trueTotal === 0 || falseTotal === 0) return null;
-  return (trueWins / trueTotal) - (falseWins / falseTotal);
+  return trueWins / trueTotal - falseWins / falseTotal;
 }
 
-function computeCategoricalLift(signal, wins, losses, minSamples) {
-  const allEntries = [...wins.map((w) => ({ w: true, snap: w })), ...losses.map((l) => ({ w: false, snap: l }))];
-  const buckets = {};
+function computeCategoricalLift(
+  signal: string,
+  wins: PerformanceRecord[],
+  losses: PerformanceRecord[],
+  minSamples: number
+): number | null {
+  const allEntries: WinLossEntry[] = [
+    ...wins.map((w) => ({ w: true, snap: w })),
+    ...losses.map((l) => ({ w: false, snap: l })),
+  ];
+  const buckets: Record<string, CategoricalBucket> = {};
 
   for (const { w, snap } of allEntries) {
     const val = snap.signal_snapshot?.[signal];
     if (val === undefined || val === null) continue;
-    if (!buckets[val]) buckets[val] = { wins: 0, total: 0 };
-    buckets[val].total++;
-    if (w) buckets[val].wins++;
+    const key = String(val);
+    if (!buckets[key]) buckets[key] = { wins: 0, total: 0 };
+    buckets[key].total++;
+    if (w) buckets[key].wins++;
   }
 
   const totalSamples = Object.values(buckets).reduce((s, b) => s + b.total, 0);
   if (totalSamples < minSamples) return null;
 
-  const rates = Object.values(buckets).filter((b) => b.total >= 2).map((b) => b.wins / b.total);
+  const rates = Object.values(buckets)
+    .filter((b) => b.total >= 2)
+    .map((b) => b.wins / b.total);
   if (rates.length < 2) return null;
   return Math.max(...rates) - Math.min(...rates);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function extractNumeric(signal, entries) {
-  const vals = [];
+function extractNumeric(signal: string, entries: PerformanceRecord[]): number[] {
+  const vals: number[] = [];
   for (const entry of entries) {
     const snap = entry.signal_snapshot;
     if (!snap) continue;
@@ -274,26 +360,24 @@ function extractNumeric(signal, entries) {
   return vals;
 }
 
-function mean(arr) {
+function mean(arr: number[]): number {
   if (arr.length === 0) return 0;
   return arr.reduce((s, v) => s + v, 0) / arr.length;
 }
 
 // ─── Summary for LLM Prompt Injection ────────────────────────────
 
-export function getWeightsSummary() {
+export function getWeightsSummary(): string {
   const data = loadWeights();
   const w = data.weights || {};
 
-  const lines = ["Signal Weights (Darwinian — learned from past positions):"];
-  const sorted = SIGNAL_NAMES
-    .filter((s) => w[s] != null)
-    .sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
+  const lines: string[] = ["Signal Weights (Darwinian — learned from past positions):"];
+  const sorted = SIGNAL_NAMES.filter((s) => w[s] != null).sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
 
   for (const signal of sorted) {
     const val = w[signal] ?? 1.0;
     const label = interpretWeight(val);
-    const bar   = weightBar(val);
+    const bar = weightBar(val);
     lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}`);
   }
 
@@ -306,7 +390,7 @@ export function getWeightsSummary() {
   return lines.join("\n");
 }
 
-function interpretWeight(val) {
+function interpretWeight(val: number): string {
   if (val >= 1.8) return "[STRONG]";
   if (val >= 1.2) return "[above avg]";
   if (val >= 0.8) return "[neutral]";
@@ -314,8 +398,8 @@ function interpretWeight(val) {
   return "[weak]";
 }
 
-function weightBar(val) {
-  const filled  = Math.round(((val - 0.3) / (2.5 - 0.3)) * 10);
+function weightBar(val: number): string {
+  const filled = Math.round(((val - 0.3) / (2.5 - 0.3)) * 10);
   const clamped = Math.max(0, Math.min(10, filled));
   return "#".repeat(clamped) + ".".repeat(10 - clamped);
 }
