@@ -22,8 +22,8 @@ export type LogCategory =
 export interface LogAction {
   tool: string;
   success: boolean;
-  args?: Record<string, unknown>;
-  result?: Record<string, unknown>;
+  args?: Record<string, unknown> | unknown;
+  result?: Record<string, unknown> | unknown;
   duration_ms?: number;
   error?: string;
 }

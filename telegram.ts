@@ -2,58 +2,79 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import type {
+  TelegramNotifyDeploy,
+  TelegramNotifyClose,
+  TelegramNotifySwap,
+  TelegramNotifyOOR,
+  LiveMessageState,
+  LiveMessageAPI,
+  TelegramMessage,
+  TelegramUpdate,
+} from "./types/telegram.d.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
-const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
-const ALLOWED_USER_IDS = new Set(
+const TOKEN: string | null = process.env.TELEGRAM_BOT_TOKEN || null;
+const BASE: string | null = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
+const ALLOWED_USER_IDS: Set<string> = new Set(
   String(process.env.TELEGRAM_ALLOWED_USER_IDS || "")
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean)
 );
 
-let chatId   = process.env.TELEGRAM_CHAT_ID || null;
-let _offset  = 0;
+let chatId: string | null = process.env.TELEGRAM_CHAT_ID || null;
+let _offset = 0;
 let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
 
 // ─── chatId persistence ──────────────────────────────────────────
-function loadChatId() {
+function loadChatId(): void {
   try {
     if (fs.existsSync(USER_CONFIG_PATH)) {
-      const cfg = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+      const cfg = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as {
+        telegramChatId?: string;
+      };
       if (cfg.telegramChatId) chatId = cfg.telegramChatId;
     }
-  } catch { /**/ }
+  } catch {
+    /**/
+  }
 }
 
-function saveChatId(id) {
+function saveChatId(id: string): void {
   try {
-    let cfg = fs.existsSync(USER_CONFIG_PATH)
-      ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
+    const cfg: { telegramChatId?: string } & Record<string, unknown> = fs.existsSync(
+      USER_CONFIG_PATH
+    )
+      ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as {
+          telegramChatId?: string;
+        } & Record<string, unknown>)
       : {};
     cfg.telegramChatId = id;
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
   } catch (e) {
-    log("telegram_error", `Failed to persist chatId: ${e.message}`);
+    log("telegram_error", `Failed to persist chatId: ${(e as Error).message}`);
   }
 }
 
 loadChatId();
 
-function isAuthorizedIncomingMessage(msg) {
+function isAuthorizedIncomingMessage(msg: TelegramMessage): boolean {
   const incomingChatId = String(msg.chat?.id || "");
   const senderUserId = msg.from?.id != null ? String(msg.from.id) : null;
   const chatType = msg.chat?.type || "unknown";
 
   if (!chatId) {
     if (!_warnedMissingChatId) {
-      log("telegram_warn", "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety.");
+      log(
+        "telegram_warn",
+        "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety."
+      );
       _warnedMissingChatId = true;
     }
     return false;
@@ -63,7 +84,10 @@ function isAuthorizedIncomingMessage(msg) {
 
   if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
     if (!_warnedMissingAllowedUsers) {
-      log("telegram_warn", "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control.");
+      log(
+        "telegram_warn",
+        "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control."
+      );
       _warnedMissingAllowedUsers = true;
     }
     return false;
@@ -77,12 +101,12 @@ function isAuthorizedIncomingMessage(msg) {
 }
 
 // ─── Core send ───────────────────────────────────────────────────
-export function isEnabled() {
+export function isEnabled(): boolean {
   return !!TOKEN;
 }
 
-async function postTelegram(method, body) {
-  if (!TOKEN || !chatId) return null;
+async function postTelegram(method: string, body: Record<string, unknown>): Promise<unknown> {
+  if (!TOKEN || !chatId || !BASE) return null;
   try {
     const res = await fetch(`${BASE}/${method}`, {
       method: "POST",
@@ -96,22 +120,22 @@ async function postTelegram(method, body) {
     }
     return await res.json();
   } catch (e) {
-    log("telegram_error", `${method} failed: ${e.message}`);
+    log("telegram_error", `${method} failed: ${(e as Error).message}`);
     return null;
   }
 }
 
-export async function sendMessage(text) {
+export async function sendMessage(text: string): Promise<void> {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
+  await postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
 }
 
-export async function sendHTML(html) {
+export async function sendHTML(html: string): Promise<void> {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
+  await postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
 }
 
-export async function editMessage(text, messageId) {
+export async function editMessage(text: string, messageId: number): Promise<unknown> {
   if (!TOKEN || !chatId || !messageId) return null;
   return postTelegram("editMessageText", {
     message_id: messageId,
@@ -119,19 +143,23 @@ export async function editMessage(text, messageId) {
   });
 }
 
-export function hasActiveLiveMessage() {
+export function hasActiveLiveMessage(): boolean {
   return _liveMessageDepth > 0;
 }
 
-function createTypingIndicator() {
+interface TypingIndicator {
+  stop(): void;
+}
+
+function createTypingIndicator(): TypingIndicator {
   if (!TOKEN || !chatId) {
     return { stop() {} };
   }
 
   let stopped = false;
-  let timer = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  async function tick() {
+  async function tick(): Promise<void> {
     if (stopped) return;
     await postTelegram("sendChatAction", { action: "typing" });
     timer = setTimeout(() => {
@@ -150,8 +178,8 @@ function createTypingIndicator() {
   };
 }
 
-function toolLabel(name) {
-  const labels = {
+function toolLabel(name: string): string {
+  const labels: Record<string, string> = {
     get_token_info: "get token info",
     get_token_narrative: "get token narrative",
     get_token_holders: "get token holders",
@@ -174,7 +202,22 @@ function toolLabel(name) {
   return labels[name] || name.replace(/_/g, " ");
 }
 
-function summarizeToolResult(name, result) {
+interface ToolResult {
+  error?: string;
+  reason?: string;
+  blocked?: boolean;
+  position?: string;
+  success?: boolean;
+  claimed_amount?: number;
+  applied?: Record<string, unknown>;
+  candidates?: unknown[];
+  total_positions?: number;
+  positions?: unknown[];
+  sol?: number;
+  lpers?: unknown[];
+}
+
+function summarizeToolResult(name: string, result: ToolResult | null): string {
   if (!result) return "";
   if (result.error) return result.error;
   if (result.reason && result.blocked) return result.reason;
@@ -182,7 +225,7 @@ function summarizeToolResult(name, result) {
     case "deploy_position":
       return result.position ? `position ${String(result.position).slice(0, 8)}...` : "submitted";
     case "close_position":
-      return result.success ? "closed" : (result.reason || "failed");
+      return result.success ? "closed" : result.reason || "failed";
     case "claim_fees":
       return result.claimed_amount != null ? `claimed ${result.claimed_amount}` : "done";
     case "update_config":
@@ -201,11 +244,14 @@ function summarizeToolResult(name, result) {
   }
 }
 
-export async function createLiveMessage(title, intro = "Starting...") {
+export async function createLiveMessage(
+  title: string,
+  intro = "Starting..."
+): Promise<LiveMessageAPI | null> {
   if (!TOKEN || !chatId) return null;
   const typing = createTypingIndicator();
 
-  const state = {
+  const state: LiveMessageState = {
     title,
     intro,
     toolLines: [],
@@ -216,37 +262,39 @@ export async function createLiveMessage(title, intro = "Starting...") {
     flushRequested: false,
   };
 
-  function render() {
-    const sections = [state.title];
+  function render(): string {
+    const sections: string[] = [state.title];
     if (state.intro) sections.push(state.intro);
     if (state.toolLines.length > 0) sections.push(state.toolLines.join("\n"));
     if (state.footer) sections.push(state.footer);
     return sections.join("\n\n").slice(0, 4096);
   }
 
-  async function flushNow() {
+  async function flushNow(): Promise<void> {
     state.flushTimer = null;
     state.flushRequested = false;
     const text = render();
     if (!state.messageId) {
-      const sent = await sendMessage(text);
+      const sent = (await sendMessage(text)) as unknown as {
+        result?: { message_id?: number };
+      } | null;
       state.messageId = sent?.result?.message_id ?? null;
       return;
     }
     await editMessage(text, state.messageId);
   }
 
-  function scheduleFlush(delay = 300) {
+  function scheduleFlush(delay = 300): void {
     if (state.flushTimer) {
       state.flushRequested = true;
       return;
     }
     state.flushTimer = setTimeout(() => {
-      state.flushPromise = flushNow().catch(() => null);
+      state.flushPromise = flushNow().catch(() => undefined);
     }, delay);
   }
 
-  async function upsertToolLine(name, icon, suffix = "") {
+  async function upsertToolLine(name: string, icon: string, suffix = ""): Promise<void> {
     const label = toolLabel(name);
     const line = `${icon} ${label}${suffix ? ` ${suffix}` : ""}`;
     const idx = state.toolLines.findIndex((entry) => entry.includes(` ${label}`));
@@ -259,19 +307,19 @@ export async function createLiveMessage(title, intro = "Starting...") {
   await flushNow();
 
   return {
-    async toolStart(name) {
+    async toolStart(name: string): Promise<void> {
       await upsertToolLine(name, "ℹ️", "...");
     },
-    async toolFinish(name, result, success) {
+    async toolFinish(name: string, result: unknown, success: boolean): Promise<void> {
       const icon = success ? "✅" : "❌";
-      const summary = summarizeToolResult(name, result);
+      const summary = summarizeToolResult(name, result as ToolResult);
       await upsertToolLine(name, icon, summary ? `— ${summary}` : "");
     },
-    async note(text) {
+    async note(text: string): Promise<void> {
       state.intro = text;
       scheduleFlush();
     },
-    async finalize(finalText) {
+    async finalize(finalText: string): Promise<void> {
       if (state.flushTimer) {
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
@@ -282,7 +330,7 @@ export async function createLiveMessage(title, intro = "Starting...") {
       _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
       typing.stop();
     },
-    async fail(errorText) {
+    async fail(errorText: string): Promise<void> {
       if (state.flushTimer) {
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
@@ -296,17 +344,18 @@ export async function createLiveMessage(title, intro = "Starting...") {
   };
 }
 
-
 // ─── Long polling ────────────────────────────────────────────────
-async function poll(onMessage) {
+async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
   while (_polling) {
     try {
-      const res = await fetch(
-        `${BASE}/getUpdates?offset=${_offset}&timeout=30`,
-        { signal: AbortSignal.timeout(35_000) }
-      );
-      if (!res.ok) { await sleep(5000); continue; }
-      const data = await res.json();
+      const res = await fetch(`${BASE}/getUpdates?offset=${_offset}&timeout=30`, {
+        signal: AbortSignal.timeout(35_000),
+      });
+      if (!res.ok) {
+        await sleep(5000);
+        continue;
+      }
+      const data = (await res.json()) as { result?: TelegramUpdate[] };
       for (const update of data.result || []) {
         _offset = update.update_id + 1;
         const msg = update.message;
@@ -315,70 +364,82 @@ async function poll(onMessage) {
         await onMessage(msg);
       }
     } catch (e) {
-      if (!e.message?.includes("aborted")) {
-        log("telegram_error", `Poll error: ${e.message}`);
+      if (!(e as Error).message?.includes("aborted")) {
+        log("telegram_error", `Poll error: ${(e as Error).message}`);
       }
       await sleep(5000);
     }
   }
 }
 
-export function startPolling(onMessage) {
+export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>): void {
   if (!TOKEN) return;
   _polling = true;
   poll(onMessage); // fire-and-forget
   log("telegram", "Bot polling started");
 }
 
-export function stopPolling() {
+export function stopPolling(): void {
   _polling = false;
 }
 
 // ─── Notification helpers ────────────────────────────────────────
-export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, binStep, baseFee }) {
+export async function notifyDeploy({
+  pair,
+  amountSol,
+  position,
+  tx,
+  priceRange,
+  binStep,
+  baseFee,
+}: TelegramNotifyDeploy): Promise<void> {
   if (hasActiveLiveMessage()) return;
   const priceStr = priceRange
     ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
-  const poolStr = (binStep || baseFee)
-    ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
-    : "";
+  const poolStr =
+    binStep || baseFee
+      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
+      : "";
   await sendHTML(
     `✅ <b>Deployed</b> ${pair}\n` +
-    `Amount: ${amountSol} SOL\n` +
-    priceStr +
-    poolStr +
-    `Position: <code>${position?.slice(0, 8)}...</code>\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
+      `Amount: ${amountSol} SOL\n` +
+      priceStr +
+      poolStr +
+      `Position: <code>${position?.slice(0, 8)}...</code>\n` +
+      `Tx: <code>${tx?.slice(0, 16)}...</code>`
   );
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct }) {
+export async function notifyClose({ pair, pnlUsd, pnlPct }: TelegramNotifyClose): Promise<void> {
   if (hasActiveLiveMessage()) return;
   const sign = pnlUsd >= 0 ? "+" : "";
   await sendHTML(
     `🔒 <b>Closed</b> ${pair}\n` +
-    `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`
+      `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`
   );
 }
 
-export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
+export async function notifySwap({
+  inputSymbol,
+  outputSymbol,
+  amountIn,
+  amountOut,
+  tx,
+}: TelegramNotifySwap): Promise<void> {
   if (hasActiveLiveMessage()) return;
   await sendHTML(
     `🔄 <b>Swapped</b> ${inputSymbol} → ${outputSymbol}\n` +
-    `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
+      `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
+      `Tx: <code>${tx?.slice(0, 16)}...</code>`
   );
 }
 
-export async function notifyOutOfRange({ pair, minutesOOR }) {
+export async function notifyOutOfRange({ pair, minutesOOR }: TelegramNotifyOOR): Promise<void> {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `⚠️ <b>Out of Range</b> ${pair}\n` +
-    `Been OOR for ${minutesOOR} minutes`
-  );
+  await sendHTML(`⚠️ <b>Out of Range</b> ${pair}\n` + `Been OOR for ${minutesOOR} minutes`);
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

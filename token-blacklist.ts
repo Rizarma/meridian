@@ -7,19 +7,20 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import type { BlacklistEntry, BlacklistDB } from "./types/blocklist.d.ts";
 
 const BLACKLIST_FILE = "./token-blacklist.json";
 
-function load() {
+function load(): BlacklistDB {
   if (!fs.existsSync(BLACKLIST_FILE)) return {};
   try {
-    return JSON.parse(fs.readFileSync(BLACKLIST_FILE, "utf8"));
+    return JSON.parse(fs.readFileSync(BLACKLIST_FILE, "utf8")) as BlacklistDB;
   } catch {
     return {};
   }
 }
 
-function save(data) {
+function save(data: BlacklistDB): void {
   fs.writeFileSync(BLACKLIST_FILE, JSON.stringify(data, null, 2));
 }
 
@@ -29,7 +30,7 @@ function save(data) {
  * Returns true if the mint is on the blacklist.
  * Used in screening.js before returning pools to the LLM.
  */
-export function isBlacklisted(mint) {
+export function isBlacklisted(mint: string): boolean {
   if (!mint) return false;
   const db = load();
   return !!db[mint];
@@ -40,7 +41,18 @@ export function isBlacklisted(mint) {
 /**
  * Tool handler: add_to_blacklist
  */
-export function addToBlacklist({ mint, symbol, reason }) {
+export function addToBlacklist({
+  mint,
+  symbol,
+  reason,
+}: {
+  mint: string;
+  symbol?: string;
+  reason?: string;
+}):
+  | { blacklisted: true; mint: string; symbol: string; reason: string }
+  | { already_blacklisted: true; mint: string; symbol: string; reason: string }
+  | { error: string } {
   if (!mint) return { error: "mint required" };
 
   const db = load();
@@ -63,13 +75,22 @@ export function addToBlacklist({ mint, symbol, reason }) {
 
   save(db);
   log("blacklist", `Blacklisted ${symbol || mint}: ${reason}`);
-  return { blacklisted: true, mint, symbol, reason };
+  return {
+    blacklisted: true,
+    mint,
+    symbol: symbol || "UNKNOWN",
+    reason: reason || "no reason provided",
+  };
 }
 
 /**
  * Tool handler: remove_from_blacklist
  */
-export function removeFromBlacklist({ mint }) {
+export function removeFromBlacklist({
+  mint,
+}: {
+  mint: string;
+}): { removed: true; mint: string; was: BlacklistEntry } | { error: string } {
   if (!mint) return { error: "mint required" };
 
   const db = load();
@@ -88,7 +109,10 @@ export function removeFromBlacklist({ mint }) {
 /**
  * Tool handler: list_blacklist
  */
-export function listBlacklist() {
+export function listBlacklist(): {
+  count: number;
+  blacklist: Array<BlacklistEntry & { mint: string }>;
+} {
   const db = load();
   const entries = Object.entries(db).map(([mint, info]) => ({
     mint,
