@@ -197,12 +197,6 @@ Shows all closed position performance history with summary stats.
 Output: { summary: { total_positions_closed, total_pnl_usd, avg_pnl_pct, win_rate_pct, total_lessons }, count, positions: [...] }
 \`\`\`
 
-### meridian discord-signals [clear]
-Shows pending Discord signal queue from the discord-listener process.
-\`\`\`
-Output: { count, pending, processed, signals: [{id, symbol, pool, author, channel, queued_at, rug_score, status}] }
-\`\`\`
-
 ### meridian start [--dry-run]
 Starts the autonomous agent with cron jobs (management + screening).
 
@@ -596,45 +590,6 @@ switch (subcommand) {
     const history = getPerformanceHistory({ hours: 999999, limit });
     const summary = getPerformanceSummary();
     out({ summary, ...history });
-    break;
-  }
-
-  // ── discord-signals ──────────────────────────────────────────────
-  case "discord-signals": {
-    const sigFile = path.join(process.cwd(), "discord-signals.json");
-    if (!fs.existsSync(sigFile)) {
-      out({ count: 0, pending: 0, signals: [], message: "No discord-signals.json found. Is the listener running?" });
-      break;
-    }
-    let signals = [];
-    try { signals = JSON.parse(fs.readFileSync(sigFile, "utf8")); } catch { die("Failed to parse discord-signals.json"); }
-
-    if (sub2 === "clear") {
-      // Remove processed/old signals (keep pending ones)
-      const pending = signals.filter(s => s.status === "pending");
-      fs.writeFileSync(sigFile, JSON.stringify(pending, null, 2));
-      out({ cleared: signals.length - pending.length, remaining: pending.length });
-      break;
-    }
-
-    const pending = signals.filter(s => s.status === "pending");
-    const processed = signals.filter(s => s.status !== "pending");
-    out({
-      count: signals.length,
-      pending: pending.length,
-      processed: processed.length,
-      signals: signals.map(s => ({
-        id: s.id,
-        symbol: s.base_symbol,
-        pool: s.pool_address,
-        author: s.discord_author,
-        channel: s.discord_channel,
-        queued_at: s.queued_at,
-        rug_score: s.rug_score,
-        status: s.status,
-        snippet: s.discord_message_snippet?.slice(0, 60),
-      })),
-    });
     break;
   }
 

@@ -55,13 +55,13 @@ Agents are powered via **OpenRouter** and can be swapped for any compatible mode
 ```bash
 git clone https://github.com/yunus-0x/meridian
 cd meridian
-npm install
+pnpm install
 ```
 
 ### 2. Run the setup wizard
 
 ```bash
-npm run setup
+pnpm run setup
 ```
 
 The wizard walks you through creating `.env` (API keys, wallet, RPC, Telegram) and `user-config.json` (risk preset, deploy size, thresholds, models). Takes about 2 minutes.
@@ -93,8 +93,8 @@ See [Config reference](#config-reference) below.
 ### 3. Run
 
 ```bash
-npm run dev    # dry run — no on-chain transactions
-npm start      # live mode
+pnpm run dev    # dry run — no on-chain transactions
+pnpm start      # live mode
 ```
 
 On startup Meridian fetches your wallet balance, open positions, and top pool candidates, then begins autonomous cycles immediately.
@@ -106,7 +106,7 @@ On startup Meridian fetches your wallet balance, open positions, and top pool ca
 ### Autonomous agent
 
 ```bash
-npm start
+pnpm start
 ```
 
 Starts the full autonomous agent with cron-based screening + management cycles and an interactive REPL. The prompt shows a live countdown to the next cycle:
@@ -184,7 +184,7 @@ Run screening or management on a timer inside Claude Code:
 The `meridian` CLI gives you direct access to every tool with JSON output — useful for scripting, debugging, or piping into other tools.
 
 ```bash
-npm install -g .   # install globally (once)
+pnpm install -g .   # install globally (once)
 meridian <command> [flags]
 ```
 
@@ -263,13 +263,6 @@ meridian blacklist list
 meridian blacklist add --mint <addr> --reason "reason"
 ```
 
-**Discord signals**
-
-```bash
-meridian discord-signals
-meridian discord-signals clear
-```
-
 **Balance**
 
 ```bash
@@ -282,63 +275,6 @@ meridian balance
 |---|---|
 | `--dry-run` | Skip all on-chain transactions |
 | `--silent` | Suppress Telegram notifications for this run |
-
----
-
-## Discord listener
-
-The Discord listener watches configured channels (e.g. LP Army) for Solana token calls and queues them as signals for the screener agent.
-
-### Setup
-
-```bash
-cd discord-listener
-npm install
-```
-
-Add to your root `.env`:
-
-```env
-DISCORD_USER_TOKEN=your_discord_account_token   # from browser DevTools → Network
-DISCORD_GUILD_ID=the_server_id
-DISCORD_CHANNEL_IDS=channel1,channel2            # comma-separated
-DISCORD_MIN_FEES_SOL=5                           # minimum pool fees to pass pre-check
-```
-
-> This uses a selfbot (personal account automation, not a bot token). Use responsibly.
-
-### Run
-
-```bash
-cd discord-listener
-npm start
-```
-
-Or run it in a separate terminal alongside the main agent. Signals are written to `discord-signals.json` and picked up automatically by `/screen` and `node cli.js screen`.
-
-### Signal pipeline
-
-Each incoming token address passes through a pre-check pipeline before being queued:
-1. **Dedup** — ignores addresses seen in the last 10 minutes
-2. **Blacklist** — rejects blacklisted token mints
-3. **Pool resolution** — resolves the address to a Meteora DLMM pool
-4. **Rug check** — checks deployer against `deployer-blacklist.json`
-5. **Fees check** — rejects pools below `DISCORD_MIN_FEES_SOL`
-
-Signals that pass all checks are queued with status `pending`. The screener picks up pending signals and processes them as priority candidates before running the normal screening cycle.
-
-### Deployer blacklist
-
-Add known rug/farm deployer wallet addresses to `deployer-blacklist.json`:
-
-```json
-{
-  "_note": "Known farm/rug deployers — add addresses to auto-reject their pools",
-  "addresses": [
-    "WaLLeTaDDressHere"
-  ]
-}
-```
 
 ---
 
