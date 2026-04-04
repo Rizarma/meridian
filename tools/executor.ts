@@ -171,20 +171,28 @@ const toolMap: ToolMap = {
   list_blocked_deployers: listBlockedDevs,
   add_lesson: (args: unknown) => {
     const { rule, tags, pinned, role } = args as AddLessonArgs;
-    addLesson(rule, tags || [], { pinned: !!pinned, role: role || null });
+    addLesson(rule, tags || [], {
+      pinned: !!pinned,
+      role: (role as "SCREENER" | "MANAGER" | "GENERAL") || null,
+    });
     return { saved: true, rule, pinned: !!pinned, role: role || "all" };
   },
   pin_lesson: (args: unknown) => {
     const { id } = args as LessonIdArgs;
-    return pinLesson(id);
+    return pinLesson(Number(id));
   },
   unpin_lesson: (args: unknown) => {
     const { id } = args as LessonIdArgs;
-    return unpinLesson(id);
+    return unpinLesson(Number(id));
   },
   list_lessons: (args: unknown) => {
     const { role, pinned, tag, limit } = (args as ListLessonsArgs) || {};
-    return listLessons({ role, pinned, tag, limit });
+    return listLessons({
+      role: role as "SCREENER" | "MANAGER" | "GENERAL" | undefined,
+      pinned,
+      tag,
+      limit: limit ? Number(limit) : undefined,
+    });
   },
   clear_lessons: (args: unknown) => {
     const { mode, keyword } = args as ClearLessonsArgs;
