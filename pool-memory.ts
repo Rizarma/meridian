@@ -381,6 +381,8 @@ export function addPoolNote({
       total_deploys: 0,
       avg_pnl_pct: 0,
       win_rate: 0,
+      adjusted_win_rate: 0,
+      adjusted_win_rate_sample_count: 0,
       last_deployed_at: null,
       last_outcome: null,
       notes: [],
