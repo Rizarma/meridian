@@ -8,6 +8,7 @@
 import fs from "fs";
 import { config } from "./config.js";
 import { log } from "./logger.js";
+import { registerTool } from "./tools/registry.js";
 import type {
   PoolMemoryDB,
   PoolMemoryEntry,
@@ -398,3 +399,16 @@ export function addPoolNote({
   log("pool-memory", `Note added to ${pool_address.slice(0, 8)}: ${safeNote}`);
   return { saved: true, pool_address, note: safeNote };
 }
+
+// Tool registrations
+registerTool({
+  name: "get_pool_memory",
+  handler: getPoolMemory,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "add_pool_note",
+  handler: addPoolNote,
+  roles: ["GENERAL"],
+});

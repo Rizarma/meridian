@@ -9,6 +9,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { LESSONS_FILE, USER_CONFIG_PATH } from "./paths.js";
+import { registerTool } from "./tools/registry.js";
 import type { Config } from "./types/config.js";
 import type {
   EvolutionResult,
@@ -770,3 +771,83 @@ export function getPerformanceSummary(): PerformanceMetrics | null {
     total_lessons: data.lessons.length,
   };
 }
+
+// Tool registrations
+registerTool({
+  name: "add_lesson",
+  handler: (args: unknown) => {
+    const { rule, tags, pinned, role } = args as {
+      rule: string;
+      tags?: string[];
+      pinned?: boolean;
+      role?: "SCREENER" | "MANAGER" | "GENERAL";
+    };
+    addLesson(rule, tags || [], {
+      pinned: !!pinned,
+      role: role || null,
+    });
+    return { saved: true, rule, pinned: !!pinned, role: role || "all" };
+  },
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "pin_lesson",
+  handler: (args: unknown) => {
+    const { id } = args as { id: number | string };
+    return pinLesson(Number(id));
+  },
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "unpin_lesson",
+  handler: (args: unknown) => {
+    const { id } = args as { id: number | string };
+    return unpinLesson(Number(id));
+  },
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "list_lessons",
+  handler: (args: unknown) => {
+    const { role, pinned, tag, limit } =
+      (args as { role?: string; pinned?: boolean; tag?: string; limit?: number }) || {};
+    return listLessons({
+      role: role as "SCREENER" | "MANAGER" | "GENERAL" | undefined,
+      pinned,
+      tag,
+      limit: limit ? Number(limit) : undefined,
+    });
+  },
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "clear_lessons",
+  handler: (args: unknown) => {
+    const { mode, keyword } = args as { mode?: string; keyword?: string };
+    if (mode === "all") {
+      const n = clearAllLessons();
+      return { cleared: n, mode: "all" };
+    }
+    if (mode === "performance") {
+      const n = clearPerformance();
+      return { cleared: n, mode: "performance" };
+    }
+    if (mode === "keyword") {
+      if (!keyword) return { error: "keyword required for mode=keyword" };
+      const n = removeLessonsByKeyword(keyword);
+      return { cleared: n, mode: "keyword", keyword };
+    }
+    return { error: "invalid mode" };
+  },
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "get_performance_history",
+  handler: getPerformanceHistory,
+  roles: ["GENERAL"],
+});

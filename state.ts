@@ -19,6 +19,8 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "./src/config/constants.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "./src/domain/exit-rules.js";
+import { registerTool } from "./tools/registry.js";
+import type { SetPositionNoteArgs } from "./types/executor.js";
 import type { SignalSnapshot } from "./types/signals.js";
 import type {
   BinRange,
@@ -581,3 +583,18 @@ export function syncOpenPositions(active_addresses: string[]): void {
 
   if (changed) save(state);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Registrations
+// ═══════════════════════════════════════════════════════════════════════════
+
+registerTool({
+  name: "set_position_note",
+  handler: (args: unknown) => {
+    const { position_address, instruction } = args as SetPositionNoteArgs;
+    const ok = setPositionInstruction(position_address, instruction || null);
+    if (!ok) return { error: `Position ${position_address} not found in state` };
+    return { saved: true, position: position_address, instruction: instruction || null };
+  },
+  roles: ["GENERAL"],
+});

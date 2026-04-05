@@ -4,12 +4,13 @@
  */
 
 import type {
+  HistoricalPosition,
+  LPerHistoricalSample,
+  LPerSummary,
   StudyOptions,
   StudyResult,
-  LPerSummary,
-  LPerHistoricalSample,
-  HistoricalPosition,
 } from "../types/index.js";
+import { registerTool } from "./registry.js";
 
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
 const LPAGENT_KEYS = (process.env.LPAGENT_API_KEY || "")
@@ -157,3 +158,16 @@ function avg(arr: number[]): number | null {
 function isNum(n: unknown): n is number {
   return typeof n === "number" && isFinite(n);
 }
+
+// Tool registrations
+registerTool({
+  name: "get_top_lpers",
+  handler: studyTopLPers,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "study_top_lpers",
+  handler: studyTopLPers,
+  roles: ["GENERAL"],
+});

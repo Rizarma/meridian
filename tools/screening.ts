@@ -1,24 +1,25 @@
 import { config } from "../config.js";
-import { isBlacklisted } from "../token-blacklist.js";
-import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
+import { getBlockedDevs, isDevBlocked } from "../dev-blocklist.js";
 import { log } from "../logger.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import type {
-  DiscoverPoolsInput,
-  DiscoverPoolsResult,
-  CondensedPool,
-  TopCandidatesInput,
-  TopCandidatesResult,
-  PoolDetailInput,
-  RawPoolData,
-} from "../types/screening.js";
+import { isBlacklisted } from "../token-blacklist.js";
 import type { Config } from "../types/config.js";
 import type {
   OKXAdvancedResult,
-  OKXPriceResult,
   OKXClusterResult,
+  OKXPriceResult,
   OKXRiskFlags,
 } from "../types/okx.js";
+import type {
+  CondensedPool,
+  DiscoverPoolsInput,
+  DiscoverPoolsResult,
+  PoolDetailInput,
+  RawPoolData,
+  TopCandidatesInput,
+  TopCandidatesResult,
+} from "../types/screening.js";
+import { registerTool } from "./registry.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -421,3 +422,22 @@ function round(n: number | null | undefined): number | null {
 function fix(n: number | null | undefined, decimals: number): number | null {
   return n != null ? Number(n.toFixed(decimals)) : null;
 }
+
+// Tool registrations
+registerTool({
+  name: "discover_pools",
+  handler: discoverPools,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_top_candidates",
+  handler: getTopCandidates,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_pool_detail",
+  handler: getPoolDetail,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});

@@ -7,7 +7,8 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
-import type { BlacklistEntry, BlacklistDB } from "./types/blocklist.d.ts";
+import { registerTool } from "./tools/registry.js";
+import type { BlacklistDB, BlacklistEntry } from "./types/blocklist.d.ts";
 
 const BLACKLIST_FILE = "./token-blacklist.json";
 
@@ -124,3 +125,22 @@ export function listBlacklist(): {
     blacklist: entries,
   };
 }
+
+// Tool registrations
+registerTool({
+  name: "add_to_blacklist",
+  handler: addToBlacklist,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "remove_from_blacklist",
+  handler: removeFromBlacklist,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "list_blacklist",
+  handler: listBlacklist,
+  roles: ["GENERAL"],
+});
