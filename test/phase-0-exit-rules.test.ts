@@ -8,201 +8,192 @@
  * before refactoring to ensure no regressions.
  */
 
+import {
+  evaluateExitConditions,
+  evaluateManagementExitRules,
+  shouldCloseLowYield,
+  shouldCloseOOR,
+  shouldStopLoss,
+  shouldTakeProfit,
+} from "../src/domain/exit-rules.js";
+import type { EnrichedPosition } from "../types/dlmm.js";
+import type { ManagementConfig, PositionData, TrackedPosition } from "../types/state.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
 
 // ============================================================================
-// Types (mirrored from types/state.d.ts)
+// Helper to create minimal TrackedPosition mock
 // ============================================================================
 
-interface PositionData {
-  pnl_pct: number;
-  pnl_pct_suspicious?: boolean;
-  in_range: boolean;
-  active_bin?: number;
-  upper_bin?: number;
-  fee_per_tvl_24h?: number;
-  age_minutes?: number;
-  unclaimed_fees_usd?: number | null;
-}
-
-interface ManagementConfig {
-  trailingTakeProfit?: boolean;
-  trailingTriggerPct?: number;
-  trailingDropPct?: number;
-  stopLossPct?: number;
-  takeProfitFeePct?: number;
-  outOfRangeWaitMinutes?: number;
-  outOfRangeBinsToClose?: number;
-  minFeePerTvl24h?: number;
-  minAgeBeforeYieldCheck?: number;
-  minClaimAmount?: number;
-}
-
-interface ExitAction {
-  action: "CLOSE" | "STAY" | "CLAIM" | "STOP_LOSS" | "TRAILING_TP" | "OUT_OF_RANGE" | "LOW_YIELD";
-  rule?: number;
-  reason: string;
-  needs_confirmation?: boolean;
-}
-
-interface PositionState {
-  out_of_range_since: string | null;
-  minutes_out_of_range: number;
-  trailing_active: boolean;
-  peak_pnl_pct: number;
-}
-
-// ============================================================================
-// Mock evaluateExitConditions - mimics logic from index.ts and state.ts
-// ============================================================================
-
-/**
- * Mock implementation of exit condition evaluation.
- *
- * Based on:
- * - index.ts lines 317-359: Rule evaluation order
- * - state.ts lines 473-584: updatePnlAndCheckExits logic
- *
- * Exit rule priority (from index.ts):
- * 1. Stop loss (pnl_pct <= stopLossPct)
- * 2. Take profit (pnl_pct >= takeProfitFeePct)
- * 3. Pumped far above range (active_bin > upper_bin + outOfRangeBinsToClose)
- * 4. Stale above range (OOR for >= outOfRangeWaitMinutes)
- * 5. Low yield (fee_per_tvl_24h < minFeePerTvl24h after 60m)
- * 6. Claim fees (unclaimed_fees_usd >= minClaimAmount) [IMPLEMENTED]
- */
-function evaluateExitConditions(
-  positionData: PositionData,
-  positionState: PositionState,
-  config: ManagementConfig
-): ExitAction {
-  const {
-    pnl_pct,
-    pnl_pct_suspicious,
-    in_range,
-    active_bin,
-    upper_bin,
-    fee_per_tvl_24h,
-    age_minutes,
-  } = positionData;
-  const { out_of_range_since, minutes_out_of_range, trailing_active, peak_pnl_pct } = positionState;
-
-  // Rule 1: Stop loss
-  // From index.ts line 318: if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct <= config.management.stopLossPct)
-  if (
-    !pnl_pct_suspicious &&
-    pnl_pct != null &&
-    config.stopLossPct != null &&
-    pnl_pct <= config.stopLossPct
-  ) {
-    return {
-      action: "CLOSE",
-      rule: 1,
-      reason: `Stop loss: PnL ${pnl_pct.toFixed(2)}% <= ${config.stopLossPct}%`,
-    };
-  }
-
-  // Rule 2: Take profit
-  // From index.ts line 323: if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct >= config.management.takeProfitFeePct)
-  if (
-    !pnl_pct_suspicious &&
-    pnl_pct != null &&
-    config.takeProfitFeePct != null &&
-    pnl_pct >= config.takeProfitFeePct
-  ) {
-    return {
-      action: "CLOSE",
-      rule: 2,
-      reason: "take profit",
-    };
-  }
-
-  // Rule 3: Pumped far above range
-  // From index.ts lines 328-335: if (p.active_bin > p.upper_bin + config.management.outOfRangeBinsToClose)
-  if (
-    active_bin != null &&
-    upper_bin != null &&
-    config.outOfRangeBinsToClose != null &&
-    active_bin > upper_bin + config.outOfRangeBinsToClose
-  ) {
-    return {
-      action: "CLOSE",
-      rule: 3,
-      reason: "pumped far above range",
-    };
-  }
-
-  // Rule 4: Stale above range (OOR)
-  // From index.ts lines 337-344: if (p.active_bin > p.upper_bin && (p.minutes_out_of_range ?? 0) >= config.management.outOfRangeWaitMinutes)
-  if (
-    active_bin != null &&
-    upper_bin != null &&
-    active_bin > upper_bin &&
-    minutes_out_of_range != null &&
-    config.outOfRangeWaitMinutes != null &&
-    minutes_out_of_range >= config.outOfRangeWaitMinutes
-  ) {
-    return {
-      action: "CLOSE",
-      rule: 4,
-      reason: `OOR: out of range for ${minutes_out_of_range}m (limit: ${config.outOfRangeWaitMinutes}m)`,
-    };
-  }
-
-  // Rule 5: Low yield
-  // From index.ts lines 347-353 and state.ts lines 568-581
-  // Production requires age_minutes >= minAgeForYieldCheck (not null check)
-  const minAgeForYieldCheck = config.minAgeBeforeYieldCheck ?? 60;
-  if (
-    fee_per_tvl_24h != null &&
-    config.minFeePerTvl24h != null &&
-    fee_per_tvl_24h < config.minFeePerTvl24h &&
-    age_minutes != null &&
-    age_minutes >= minAgeForYieldCheck
-  ) {
-    return {
-      action: "CLOSE",
-      rule: 5,
-      reason: `Low yield: fee/TVL ${fee_per_tvl_24h.toFixed(2)}% < min ${config.minFeePerTvl24h}%`,
-    };
-  }
-
-  // Rule 6: Claim fees
-  // From index.ts line 356: if ((p.unclaimed_fees_usd ?? 0) >= config.management.minClaimAmount)
-  const unclaimedFees = positionData.unclaimed_fees_usd ?? 0;
-  if (config.minClaimAmount != null && unclaimedFees >= config.minClaimAmount) {
-    return {
-      action: "CLAIM",
-      rule: 6,
-      reason: `Claim fees: $${unclaimedFees.toFixed(2)} >= $${config.minClaimAmount}`,
-    };
-  }
-
-  // Trailing take profit check (from state.ts lines 541-553)
-  // Note: This runs after stop loss but the mock follows index.ts ordering
-  if (config.trailingTakeProfit && trailing_active && !pnl_pct_suspicious) {
-    const dropFromPeak = peak_pnl_pct - pnl_pct;
-    if (dropFromPeak >= (config.trailingDropPct ?? 0)) {
-      return {
-        action: "TRAILING_TP",
-        reason: `Trailing TP: peak ${peak_pnl_pct.toFixed(2)}% → current ${pnl_pct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${config.trailingDropPct}%)`,
-        needs_confirmation: true,
-      };
-    }
-  }
-
-  // No exit triggered
+function createTrackedPositionMock(overrides: Partial<TrackedPosition> = {}): TrackedPosition {
   return {
-    action: "STAY",
-    reason: "Position healthy",
+    position: "test-position",
+    pool: "test-pool",
+    pool_name: "TEST/SOL",
+    strategy: "spot",
+    bin_range: { min: 80, max: 120, active: 100, bins_below: 20, bins_above: 20 },
+    amount_sol: 1.0,
+    amount_x: 1000,
+    active_bin_at_deploy: 100,
+    bin_step: 100,
+    volatility: 2,
+    fee_tvl_ratio: 0.05,
+    initial_fee_tvl_24h: 0.05,
+    organic_score: 80,
+    initial_value_usd: 100,
+    signal_snapshot: null,
+    deployed_at: new Date().toISOString(),
+    out_of_range_since: null,
+    last_claim_at: null,
+    total_fees_claimed_usd: 0,
+    rebalance_count: 0,
+    closed: false,
+    closed_at: null,
+    notes: [],
+    peak_pnl_pct: 0,
+    pending_peak_pnl_pct: null,
+    pending_peak_started_at: null,
+    trailing_active: false,
+    instruction: null,
+    ...overrides,
   };
 }
 
 // ============================================================================
-// Test Suite: Exit Rules
+// Test Suite: Individual Rule Functions
 // ============================================================================
 
-describe("Exit Rules - Stop Loss", () => {
+describe("Exit Rules - shouldStopLoss", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+  };
+
+  test("returns true when PnL <= stopLossPct", () => {
+    expect(shouldStopLoss(-25, false, baseConfig)).toBe(true);
+    expect(shouldStopLoss(-30, false, baseConfig)).toBe(true);
+  });
+
+  test("returns false when PnL > stopLossPct", () => {
+    expect(shouldStopLoss(-20, false, baseConfig)).toBe(false);
+    expect(shouldStopLoss(0, false, baseConfig)).toBe(false);
+    expect(shouldStopLoss(10, false, baseConfig)).toBe(false);
+  });
+
+  test("returns false when PnL is suspicious", () => {
+    expect(shouldStopLoss(-30, true, baseConfig)).toBe(false);
+  });
+
+  test("returns false when PnL is null", () => {
+    expect(shouldStopLoss(null, false, baseConfig)).toBe(false);
+    expect(shouldStopLoss(undefined, false, baseConfig)).toBe(false);
+  });
+
+  test("returns false when stopLossPct is not configured", () => {
+    expect(shouldStopLoss(-30, false, {})).toBe(false);
+  });
+});
+
+describe("Exit Rules - shouldTakeProfit", () => {
+  const baseConfig: ManagementConfig = {
+    takeProfitFeePct: 10,
+  };
+
+  test("returns true when PnL >= takeProfitFeePct", () => {
+    expect(shouldTakeProfit(10, false, baseConfig)).toBe(true);
+    expect(shouldTakeProfit(15, false, baseConfig)).toBe(true);
+  });
+
+  test("returns false when PnL < takeProfitFeePct", () => {
+    expect(shouldTakeProfit(5, false, baseConfig)).toBe(false);
+    expect(shouldTakeProfit(0, false, baseConfig)).toBe(false);
+    expect(shouldTakeProfit(-10, false, baseConfig)).toBe(false);
+  });
+
+  test("returns false when PnL is suspicious", () => {
+    expect(shouldTakeProfit(15, true, baseConfig)).toBe(false);
+  });
+
+  test("returns false when PnL is null", () => {
+    expect(shouldTakeProfit(null, false, baseConfig)).toBe(false);
+    expect(shouldTakeProfit(undefined, false, baseConfig)).toBe(false);
+  });
+
+  test("returns false when takeProfitFeePct is not configured", () => {
+    expect(shouldTakeProfit(15, false, {})).toBe(false);
+  });
+});
+
+describe("Exit Rules - shouldCloseOOR", () => {
+  const baseConfig: ManagementConfig = {
+    outOfRangeWaitMinutes: 30,
+  };
+
+  test("returns true when OOR time exceeds threshold", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 35 * 60000).toISOString(),
+    });
+    expect(shouldCloseOOR(position, baseConfig)).toBe(true);
+  });
+
+  test("returns false when OOR time is within threshold", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 15 * 60000).toISOString(),
+    });
+    expect(shouldCloseOOR(position, baseConfig)).toBe(false);
+  });
+
+  test("returns false when not out of range", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: null,
+    });
+    expect(shouldCloseOOR(position, baseConfig)).toBe(false);
+  });
+
+  test("returns true exactly at threshold", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 30 * 60000).toISOString(),
+    });
+    expect(shouldCloseOOR(position, baseConfig)).toBe(true);
+  });
+});
+
+describe("Exit Rules - shouldCloseLowYield", () => {
+  const baseConfig: ManagementConfig = {
+    minFeePerTvl24h: 0.001,
+    minAgeBeforeYieldCheck: 60,
+  };
+
+  test("returns true when fee/TVL below threshold after min age", () => {
+    expect(shouldCloseLowYield(0.0005, 90, baseConfig)).toBe(true);
+  });
+
+  test("returns false when fee/TVL above threshold", () => {
+    expect(shouldCloseLowYield(0.002, 90, baseConfig)).toBe(false);
+  });
+
+  test("returns false before min age threshold", () => {
+    expect(shouldCloseLowYield(0.0005, 30, baseConfig)).toBe(false);
+  });
+
+  test("returns false when age is null", () => {
+    expect(shouldCloseLowYield(0.0005, null, baseConfig)).toBe(false);
+    expect(shouldCloseLowYield(0.0005, undefined, baseConfig)).toBe(false);
+  });
+
+  test("returns false when feePerTvl24h is null", () => {
+    expect(shouldCloseLowYield(null, 90, baseConfig)).toBe(false);
+    expect(shouldCloseLowYield(undefined, 90, baseConfig)).toBe(false);
+  });
+
+  test("returns true at exact min age threshold", () => {
+    expect(shouldCloseLowYield(0.0005, 60, baseConfig)).toBe(true);
+  });
+});
+
+// ============================================================================
+// Test Suite: evaluateExitConditions (state.ts usage)
+// ============================================================================
+
+describe("Exit Rules - evaluateExitConditions Stop Loss", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -210,223 +201,148 @@ describe("Exit Rules - Stop Loss", () => {
     minFeePerTvl24h: 0.001,
   };
 
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
+  const basePosition = createTrackedPositionMock();
 
-  test("triggers at threshold (pnl_pct <= stopLossPct)", () => {
+  test("triggers stop loss at threshold (pnl_pct <= stopLossPct)", () => {
     const positionData: PositionData = {
       pnl_pct: -25,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(1);
-    expect(result.reason.includes("Stop loss")).toBeTruthy();
+    expect(result?.action).toBe("STOP_LOSS");
+    expect(result?.reason.includes("Stop loss")).toBe(true);
   });
 
-  test("triggers below threshold (pnl_pct < stopLossPct)", () => {
+  test("triggers stop loss below threshold (pnl_pct < stopLossPct)", () => {
     const positionData: PositionData = {
       pnl_pct: -30,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(1);
+    expect(result?.action).toBe("STOP_LOSS");
   });
 
-  test("does not trigger above threshold (pnl_pct > stopLossPct)", () => {
+  test("does not trigger stop loss above threshold (pnl_pct > stopLossPct)", () => {
     const positionData: PositionData = {
       pnl_pct: -20,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("STAY");
+    expect(result === null).toBe(true);
   });
 
-  test("does not trigger when PnL is suspicious", () => {
+  test("does not trigger stop loss when PnL is suspicious", () => {
     const positionData: PositionData = {
       pnl_pct: -30,
       pnl_pct_suspicious: true,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    // When PnL is suspicious, stop loss is skipped (falls through to STAY)
-    expect(result.action).toBe("STAY");
+    // When PnL is suspicious, stop loss is skipped
+    expect(result?.action === "STOP_LOSS").toBe(false);
   });
 });
 
-describe("Exit Rules - Take Profit", () => {
+describe("Exit Rules - evaluateExitConditions Trailing TP", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
     outOfRangeWaitMinutes: 30,
     minFeePerTvl24h: 0.001,
+    trailingTakeProfit: true,
+    trailingTriggerPct: 3,
+    trailingDropPct: 1.5,
   };
 
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
-
-  test("triggers at threshold (pnl_pct >= takeProfitFeePct)", () => {
+  test("trails when active and drop from peak exceeds threshold", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: true,
+      peak_pnl_pct: 10,
+    });
     const positionData: PositionData = {
-      pnl_pct: 10,
+      pnl_pct: 8, // Dropped 2% from peak of 10%
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(2);
-    expect(result.reason).toBe("take profit");
+    expect(result?.action).toBe("TRAILING_TP");
+    expect(result?.needs_confirmation).toBe(true);
+    expect(result?.reason.includes("Trailing TP")).toBe(true);
   });
 
-  test("triggers above threshold (pnl_pct > takeProfitFeePct)", () => {
+  test("does not trail when not active", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: false,
+      peak_pnl_pct: 10,
+    });
     const positionData: PositionData = {
-      pnl_pct: 15,
+      pnl_pct: 8,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(2);
+    expect(result?.action === "TRAILING_TP").toBe(false);
   });
 
-  test("does not trigger below threshold (pnl_pct < takeProfitFeePct)", () => {
+  test("does not trail when drop is below threshold", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: true,
+      peak_pnl_pct: 10,
+    });
     const positionData: PositionData = {
-      pnl_pct: 5,
+      pnl_pct: 9, // Only dropped 1% from peak
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "TRAILING_TP").toBe(false);
   });
 
-  test("does not trigger when PnL is suspicious", () => {
+  test("does not trail when PnL is suspicious", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: true,
+      peak_pnl_pct: 10,
+    });
     const positionData: PositionData = {
-      pnl_pct: 15,
+      pnl_pct: 8,
       pnl_pct_suspicious: true,
       in_range: true,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    // When PnL is suspicious, take profit is skipped
-    expect(result.action).toBe("STAY");
-  });
-});
-
-describe("Exit Rules - Pumped Far Above Range (Rule 3)", () => {
-  const baseConfig: ManagementConfig = {
-    stopLossPct: -25,
-    takeProfitFeePct: 10,
-    outOfRangeBinsToClose: 20,
-    outOfRangeWaitMinutes: 30,
-    minFeePerTvl24h: 0.001,
-  };
-
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
-
-  test("triggers when active_bin > upper_bin + outOfRangeBinsToClose", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: false,
-      active_bin: 125, // 100 + 20 + 5 = 125
-      upper_bin: 100,
-    };
-
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
-
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(3);
-    expect(result.reason).toBe("pumped far above range");
+    expect(result?.action === "TRAILING_TP").toBe(false);
   });
 
-  test("does not trigger when active_bin == upper_bin + outOfRangeBinsToClose", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: false,
-      active_bin: 120, // Exactly 100 + 20
-      upper_bin: 100,
-    };
-
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
-
-    expect(result.action).toBe("STAY");
-  });
-
-  test("does not trigger when active_bin < upper_bin + outOfRangeBinsToClose", () => {
+  test("returns confirmed trailing exit when in cooldown period", () => {
+    const position = createTrackedPositionMock({
+      confirmed_trailing_exit_until: new Date(Date.now() + 60000).toISOString(),
+      confirmed_trailing_exit_reason: "Trailing TP confirmed earlier",
+    });
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: true,
-      active_bin: 115, // Less than 100 + 20
-      upper_bin: 100,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    expect(result.action).toBe("STAY");
-  });
-
-  test("does not trigger when active_bin is within range", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: true,
-      active_bin: 90,
-      upper_bin: 100,
-    };
-
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
-
-    expect(result.action).toBe("STAY");
-  });
-
-  test("Rule 3 takes priority over Rule 4 (OOR)", () => {
-    // When both Rule 3 and Rule 4 conditions are met, Rule 3 should trigger first
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: false,
-      active_bin: 150, // Far above range (100 + 20 + 30)
-      upper_bin: 100,
-    };
-
-    const positionState: PositionState = {
-      out_of_range_since: "2024-01-01T00:00:00Z",
-      minutes_out_of_range: 35, // Also exceeds OOR wait time
-      trailing_active: false,
-      peak_pnl_pct: 5,
-    };
-
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
-
-    // Rule 3 should trigger before Rule 4
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(3);
+    expect(result?.action).toBe("TRAILING_TP");
+    expect(result?.needs_confirmation).toBe(false);
   });
 });
 
-describe("Exit Rules - Out of Range (OOR)", () => {
+describe("Exit Rules - evaluateExitConditions Out of Range", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -434,91 +350,51 @@ describe("Exit Rules - Out of Range (OOR)", () => {
     minFeePerTvl24h: 0.001,
   };
 
-  test("triggers after wait time exceeded when active_bin > upper_bin", () => {
+  test("triggers OOR close after wait time exceeded", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 35 * 60000).toISOString(),
+    });
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: false,
-      active_bin: 150,
-      upper_bin: 100,
     };
 
-    const positionState: PositionState = {
-      out_of_range_since: "2024-01-01T00:00:00Z",
-      minutes_out_of_range: 35,
-      trailing_active: false,
-      peak_pnl_pct: 5,
-    };
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
-
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(4);
-    expect(result.reason.includes("OOR")).toBeTruthy();
+    expect(result?.action).toBe("OUT_OF_RANGE");
+    expect(result?.reason.includes("Out of range")).toBe(true);
   });
 
-  test("does not trigger if within wait window", () => {
+  test("does not trigger OOR if within wait window", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 15 * 60000).toISOString(),
+    });
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: false,
-      active_bin: 150,
-      upper_bin: 100,
     };
 
-    const positionState: PositionState = {
-      out_of_range_since: "2024-01-01T00:00:00Z",
-      minutes_out_of_range: 15,
-      trailing_active: false,
-      peak_pnl_pct: 5,
-    };
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
-
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "OUT_OF_RANGE").toBe(false);
   });
 
-  test("does not trigger when active_bin <= upper_bin (in range)", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: true,
-      active_bin: 80,
-      upper_bin: 100,
-    };
-
-    const positionState: PositionState = {
+  test("does not trigger OOR when not out of range", () => {
+    const position = createTrackedPositionMock({
       out_of_range_since: null,
-      minutes_out_of_range: 0,
-      trailing_active: false,
-      peak_pnl_pct: 5,
-    };
-
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
-
-    expect(result.action).toBe("STAY");
-  });
-
-  test("triggers exactly at wait time threshold", () => {
+    });
     const positionData: PositionData = {
       pnl_pct: 5,
-      in_range: false,
-      active_bin: 150,
-      upper_bin: 100,
+      in_range: true,
     };
 
-    const positionState: PositionState = {
-      out_of_range_since: "2024-01-01T00:00:00Z",
-      minutes_out_of_range: 30,
-      trailing_active: false,
-      peak_pnl_pct: 5,
-    };
+    const result = evaluateExitConditions(position, positionData, baseConfig);
 
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
-
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(4);
+    expect(result?.action === "OUT_OF_RANGE").toBe(false);
   });
 });
 
-describe("Exit Rules - Low Yield", () => {
+describe("Exit Rules - evaluateExitConditions Low Yield", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -527,14 +403,9 @@ describe("Exit Rules - Low Yield", () => {
     minAgeBeforeYieldCheck: 60,
   };
 
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
+  const basePosition = createTrackedPositionMock();
 
-  test("triggers when fee/TVL below threshold after min age", () => {
+  test("triggers low yield when fee/TVL below threshold after min age", () => {
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: true,
@@ -542,14 +413,13 @@ describe("Exit Rules - Low Yield", () => {
       age_minutes: 90,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(5);
-    expect(result.reason.includes("Low yield")).toBeTruthy();
+    expect(result?.action).toBe("LOW_YIELD");
+    expect(result?.reason.includes("Low yield")).toBe(true);
   });
 
-  test("does not trigger when fee/TVL above threshold", () => {
+  test("does not trigger low yield when fee/TVL above threshold", () => {
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: true,
@@ -557,12 +427,12 @@ describe("Exit Rules - Low Yield", () => {
       age_minutes: 90,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "LOW_YIELD").toBe(false);
   });
 
-  test("does not trigger before min age threshold", () => {
+  test("does not trigger low yield before min age threshold", () => {
     const positionData: PositionData = {
       pnl_pct: 5,
       in_range: true,
@@ -570,43 +440,639 @@ describe("Exit Rules - Low Yield", () => {
       age_minutes: 30,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateExitConditions(basePosition, positionData, baseConfig);
 
-    expect(result.action).toBe("STAY");
-  });
-
-  test("does not trigger when age is null (unknown age, skip yield check)", () => {
-    // Production behavior: (p.age_minutes ?? 0) >= 60
-    // If age_minutes is null, it defaults to 0, and 0 >= 60 is false
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: true,
-      fee_per_tvl_24h: 0.0005,
-      age_minutes: undefined,
-    };
-
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
-
-    // When age is unknown (null), low yield check is skipped
-    expect(result.action).toBe("STAY");
-  });
-
-  test("triggers at exact min age threshold", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
-      in_range: true,
-      fee_per_tvl_24h: 0.0005,
-      age_minutes: 60,
-    };
-
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
-
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(5);
+    expect(result?.action === "LOW_YIELD").toBe(false);
   });
 });
 
-describe("Exit Rules - Claim Fees", () => {
+describe("Exit Rules - evaluateExitConditions Priority Order", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+    minAgeBeforeYieldCheck: 60,
+    trailingTakeProfit: true,
+    trailingTriggerPct: 3,
+    trailingDropPct: 1.5,
+  };
+
+  test("stop loss takes priority over trailing TP", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: true,
+      peak_pnl_pct: 10,
+      out_of_range_since: new Date(Date.now() - 35 * 60000).toISOString(),
+    });
+    const positionData: PositionData = {
+      pnl_pct: -30, // Stop loss condition
+      in_range: false,
+      fee_per_tvl_24h: 0.0005,
+      age_minutes: 90,
+    };
+
+    const result = evaluateExitConditions(position, positionData, baseConfig);
+
+    // Stop loss should trigger first
+    expect(result?.action).toBe("STOP_LOSS");
+  });
+
+  test("trailing TP takes priority over OOR", () => {
+    const position = createTrackedPositionMock({
+      trailing_active: true,
+      peak_pnl_pct: 10,
+      out_of_range_since: new Date(Date.now() - 35 * 60000).toISOString(),
+    });
+    const positionData: PositionData = {
+      pnl_pct: 8, // Trailing drop of 2% >= 1.5%
+      in_range: false,
+    };
+
+    const result = evaluateExitConditions(position, positionData, baseConfig);
+
+    // Trailing TP should trigger before OOR
+    expect(result?.action).toBe("TRAILING_TP");
+  });
+
+  test("OOR takes priority over low yield", () => {
+    const position = createTrackedPositionMock({
+      out_of_range_since: new Date(Date.now() - 35 * 60000).toISOString(),
+    });
+    const positionData: PositionData = {
+      pnl_pct: 5,
+      in_range: false,
+      fee_per_tvl_24h: 0.0005,
+      age_minutes: 90,
+    };
+
+    const result = evaluateExitConditions(position, positionData, baseConfig);
+
+    // OOR should trigger before low yield
+    expect(result?.action).toBe("OUT_OF_RANGE");
+  });
+});
+
+// ============================================================================
+// Test Suite: evaluateManagementExitRules (index.ts usage)
+// ============================================================================
+
+describe("Exit Rules - evaluateManagementExitRules Stop Loss", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+  };
+
+  test("triggers at threshold (pnl_pct <= stopLossPct)", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 100,
+      total_value_true_usd: 100,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: -25,
+      pnl_true_usd: -25,
+      pnl_pct: -25,
+      pnl_pct_derived: -25,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(1);
+    expect(result?.reason).toBe("stop loss");
+  });
+
+  test("does not trigger when PnL is suspicious", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 100,
+      total_value_true_usd: 100,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: -30,
+      pnl_true_usd: -30,
+      pnl_pct: -30,
+      pnl_pct_derived: -30,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: true,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, true);
+
+    expect(result === null).toBe(true);
+  });
+});
+
+describe("Exit Rules - evaluateManagementExitRules Take Profit", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+  };
+
+  test("triggers at threshold (pnl_pct >= takeProfitFeePct)", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 110,
+      total_value_true_usd: 110,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 10,
+      pnl_true_usd: 10,
+      pnl_pct: 10,
+      pnl_pct_derived: 10,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(2);
+    expect(result?.reason).toBe("take profit");
+  });
+
+  test("does not trigger below threshold", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+});
+
+describe("Exit Rules - evaluateManagementExitRules Pumped Far Above Range (Rule 3)", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeBinsToClose: 20,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+  };
+
+  test("triggers when active_bin > upper_bin + outOfRangeBinsToClose", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 125, // 100 + 20 + 5 = 125
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(3);
+    expect(result?.reason).toBe("pumped far above range");
+  });
+
+  test("does not trigger when active_bin == upper_bin + outOfRangeBinsToClose", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 120, // Exactly 100 + 20
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+
+  test("Rule 3 takes priority over Rule 4 (OOR)", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 150, // Far above range (100 + 20 + 30)
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 35, // Also exceeds OOR wait time
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    // Rule 3 should trigger before Rule 4
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(3);
+  });
+});
+
+describe("Exit Rules - evaluateManagementExitRules Out of Range (Rule 4)", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+  };
+
+  test("triggers after wait time exceeded when active_bin > upper_bin", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 110, // Above upper_bin (100) but not above 100 + 20 = 120
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 35,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(4);
+    expect(result?.reason).toBe("OOR");
+  });
+
+  test("does not trigger if within wait window", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 110, // Above upper_bin (100) but not above 100 + 20 = 120
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 15,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+
+  test("does not trigger when active_bin <= upper_bin (in range)", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 90,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+
+  test("triggers exactly at wait time threshold", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 110, // Above upper_bin (100) but not above 100 + 20 = 120
+      in_range: false,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 30,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(4);
+  });
+});
+
+describe("Exit Rules - evaluateManagementExitRules Low Yield", () => {
+  const baseConfig: ManagementConfig = {
+    stopLossPct: -25,
+    takeProfitFeePct: 10,
+    outOfRangeWaitMinutes: 30,
+    minFeePerTvl24h: 0.001,
+    minAgeBeforeYieldCheck: 60,
+  };
+
+  test("triggers when fee/TVL below threshold after min age", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.0005,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(5);
+    expect(result?.reason).toBe("low yield");
+  });
+
+  test("does not trigger when fee/TVL above threshold", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+
+  test("does not trigger before min age threshold", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.0005,
+      age_minutes: 30,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result === null).toBe(true);
+  });
+
+  test("triggers at exact min age threshold", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.0005,
+      age_minutes: 60,
+      minutes_out_of_range: 0,
+      instruction: null,
+    };
+
+    const result = evaluateManagementExitRules(position, baseConfig, false);
+
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(5);
+  });
+});
+
+describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -616,101 +1082,205 @@ describe("Exit Rules - Claim Fees", () => {
     minClaimAmount: 1.0,
   };
 
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
-
   test("triggers when unclaimed_fees_usd >= minClaimAmount", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 1.5,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 1.5,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: 1.5,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("CLAIM");
-    expect(result.rule).toBe(6);
-    expect(result.reason.includes("Claim fees")).toBeTruthy();
+    expect(result?.action).toBe("CLAIM");
   });
 
   test("does not trigger when unclaimed_fees_usd < minClaimAmount", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 0.5,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0.5,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: 0.5,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "CLAIM").toBe(false);
   });
 
   test("does not trigger when unclaimed_fees_usd is 0", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: 0,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "CLAIM").toBe(false);
   });
 
   test("handles null/undefined unclaimed_fees_usd as 0", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: null,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: null,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: null,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result?.action === "CLAIM").toBe(false);
   });
 
   test("Claim action comes after low yield check (priority order)", () => {
     // When both low yield and claim conditions are met, low yield should trigger first
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 1.5, // Above claim threshold
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 1.5,
       fee_per_tvl_24h: 0.0005, // Below threshold (low yield)
       age_minutes: 90, // Above min age
-      unclaimed_fees_usd: 1.5, // Above claim threshold
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    // Rule 5 (low yield) should trigger before Rule 6 (claim)
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(5);
+    // Rule 5 (low yield) should trigger before Claim
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(5);
   });
 
   test("triggers at exact threshold (unclaimed_fees_usd == minClaimAmount)", () => {
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 1.0, // Exactly at threshold
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 1.0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: 1.0, // Exactly at threshold
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("CLAIM");
-    expect(result.rule).toBe(6);
+    expect(result?.action).toBe("CLAIM");
   });
 
   test("does not trigger when minClaimAmount is not configured", () => {
@@ -719,25 +1289,44 @@ describe("Exit Rules - Claim Fees", () => {
       takeProfitFeePct: 10,
       outOfRangeWaitMinutes: 30,
       minFeePerTvl24h: 0.001,
-      // minClaimAmount is undefined
+      // minClaimAmount is undefined - defaults to 5
     };
 
-    const positionData: PositionData = {
-      pnl_pct: 5,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 2.0, // Less than default 5
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
+      pnl_pct: 5,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 2.0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
-      unclaimed_fees_usd: 5.0, // High unclaimed fees
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, configWithoutMinClaim);
+    const result = evaluateManagementExitRules(position, configWithoutMinClaim, false);
 
-    // When minClaimAmount is not set, claim rule should not trigger
-    expect(result.action).toBe("STAY");
+    // When unclaimed fees < default minClaimAmount (5), claim rule should not trigger
+    expect(result?.action === "CLAIM").toBe(false);
   });
 });
 
-describe("Exit Rules - Healthy Position (No Exit)", () => {
+describe("Exit Rules - evaluateManagementExitRules Healthy Position (No Exit)", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -745,68 +1334,140 @@ describe("Exit Rules - Healthy Position (No Exit)", () => {
     minFeePerTvl24h: 0.001,
   };
 
-  const baseState: PositionState = {
-    out_of_range_since: null,
-    minutes_out_of_range: 0,
-    trailing_active: false,
-    peak_pnl_pct: 0,
-  };
-
-  test("returns STAY when position is healthy", () => {
-    const positionData: PositionData = {
+  test("returns null when position is healthy", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 105,
+      total_value_true_usd: 105,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 5,
+      pnl_true_usd: 5,
       pnl_pct: 5,
-      in_range: true,
+      pnl_pct_derived: 5,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
-    expect(result.reason).toBe("Position healthy");
+    expect(result === null).toBe(true);
   });
 
-  test("returns STAY at zero PnL", () => {
-    const positionData: PositionData = {
+  test("returns null at zero PnL", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 100,
+      total_value_true_usd: 100,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 0,
+      pnl_true_usd: 0,
       pnl_pct: 0,
-      in_range: true,
+      pnl_pct_derived: 0,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result === null).toBe(true);
   });
 
-  test("returns STAY with moderate positive PnL", () => {
-    const positionData: PositionData = {
+  test("returns null with moderate positive PnL", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
+      in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 107,
+      total_value_true_usd: 107,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 7,
+      pnl_true_usd: 7,
       pnl_pct: 7,
-      in_range: true,
+      pnl_pct_derived: 7,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result === null).toBe(true);
   });
 
-  test("returns STAY with moderate negative PnL (above stop loss)", () => {
-    const positionData: PositionData = {
-      pnl_pct: -10,
+  test("returns null with moderate negative PnL (above stop loss)", () => {
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 90,
+      total_value_true_usd: 90,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: -10,
+      pnl_true_usd: -10,
+      pnl_pct: -10,
+      pnl_pct_derived: -10,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
       fee_per_tvl_24h: 0.002,
       age_minutes: 90,
+      minutes_out_of_range: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, baseState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
-    expect(result.action).toBe("STAY");
+    expect(result === null).toBe(true);
   });
 });
 
-describe("Exit Rules - Priority Order", () => {
+describe("Exit Rules - evaluateManagementExitRules Priority Order", () => {
   const baseConfig: ManagementConfig = {
     stopLossPct: -25,
     takeProfitFeePct: 10,
@@ -819,43 +1480,73 @@ describe("Exit Rules - Priority Order", () => {
     // If pnl_pct is somehow both <= -25 and >= 10, stop loss should win
     // (This is actually impossible, so we test the boundary)
 
-    const positionData: PositionData = {
-      pnl_pct: -25,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 120,
+      active_bin: 100,
       in_range: true,
-    };
-
-    const positionState: PositionState = {
-      out_of_range_since: null,
+      unclaimed_fees_usd: 0,
+      total_value_usd: 75,
+      total_value_true_usd: 75,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: -25,
+      pnl_true_usd: -25,
+      pnl_pct: -25,
+      pnl_pct_derived: -25,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
       minutes_out_of_range: 0,
-      trailing_active: false,
-      peak_pnl_pct: 0,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
     // Stop loss (rule 1) should trigger before take profit (rule 2)
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(1);
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(1);
   });
 
   test("take profit takes priority over OOR when both conditions met", () => {
-    const positionData: PositionData = {
-      pnl_pct: 15,
+    const position: EnrichedPosition = {
+      position: "test",
+      pool: "test-pool",
+      pair: "TEST/SOL",
+      base_mint: "test-mint",
+      lower_bin: 80,
+      upper_bin: 100,
+      active_bin: 150,
       in_range: false,
-    };
-
-    const positionState: PositionState = {
-      out_of_range_since: "2024-01-01T00:00:00Z",
+      unclaimed_fees_usd: 0,
+      total_value_usd: 115,
+      total_value_true_usd: 115,
+      collected_fees_usd: 0,
+      collected_fees_true_usd: 0,
+      pnl_usd: 15,
+      pnl_true_usd: 15,
+      pnl_pct: 15,
+      pnl_pct_derived: 15,
+      pnl_pct_diff: 0,
+      pnl_pct_suspicious: false,
+      unclaimed_fees_true_usd: 0,
+      fee_per_tvl_24h: 0.002,
+      age_minutes: 90,
       minutes_out_of_range: 35,
-      trailing_active: false,
-      peak_pnl_pct: 15,
+      instruction: null,
     };
 
-    const result = evaluateExitConditions(positionData, positionState, baseConfig);
+    const result = evaluateManagementExitRules(position, baseConfig, false);
 
     // Take profit (rule 2) should trigger before OOR (rule 4)
-    expect(result.action).toBe("CLOSE");
-    expect(result.rule).toBe(2);
+    expect(result?.action).toBe("CLOSE");
+    expect(result?.rule).toBe(2);
   });
 });
 
@@ -865,6 +1556,3 @@ describe("Exit Rules - Priority Order", () => {
 
 // Run tests immediately (characterization tests should run on import)
 runTests();
-
-export type { ExitAction, ManagementConfig, PositionData, PositionState };
-export { evaluateExitConditions };

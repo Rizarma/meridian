@@ -6,111 +6,20 @@
  * - agent.ts lines 29-70 (role-based tool access)
  */
 
+import {
+  detectAllIntents,
+  detectIntent,
+  getRoleForIntent,
+  getToolsForIntent,
+  INTENTS,
+} from "../src/agent/intent.js";
+import {
+  GENERAL_INTENT_ONLY_TOOLS,
+  MANAGER_TOOLS,
+  SCREENER_TOOLS,
+} from "../src/agent/tool-sets.js";
+import type { AgentType } from "../types/agent.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
-
-// Intent patterns for GENERAL role (from agent.ts lines 162-197)
-const INTENT_PATTERNS = [
-  { intent: "deploy", re: /\b(deploy|open|add liquidity|lp into|invest in)\b/i },
-  { intent: "close", re: /\b(close|exit|withdraw|remove liquidity|shut down)\b/i },
-  { intent: "claim", re: /\b(claim|harvest|collect)\b.*\bfee/i },
-  { intent: "swap", re: /\b(swap|convert|sell|exchange)\b/i },
-  { intent: "config", re: /\b(config|setting|threshold|update|set |change)\b/i },
-  { intent: "balance", re: /\b(balance|wallet|sol|how much)\b/i },
-  { intent: "positions", re: /\b(position|portfolio|open|pnl|yield|range)\b/i },
-  { intent: "screen", re: /\b(screen|candidate|find pool|search|research|token)\b/i },
-  {
-    intent: "lessons",
-    re: /\b(lesson|learned|teach|pin|unpin|clear lesson|what did you learn)\b/i,
-  },
-] as const;
-
-// Tool sets for each intent (from agent.ts lines 75-160)
-const INTENT_TOOLS: { [key: string]: Set<string> } = {
-  deploy: new Set([
-    "deploy_position",
-    "get_top_candidates",
-    "get_active_bin",
-    "get_pool_memory",
-    "check_smart_wallets_on_pool",
-    "get_token_holders",
-    "get_token_narrative",
-    "get_token_info",
-    "search_pools",
-    "get_wallet_balance",
-    "get_my_positions",
-    "add_pool_note",
-  ]),
-  close: new Set([
-    "close_position",
-    "get_my_positions",
-    "get_position_pnl",
-    "get_wallet_balance",
-    "swap_token",
-  ]),
-  claim: new Set(["claim_fees", "get_my_positions", "get_position_pnl", "get_wallet_balance"]),
-  swap: new Set(["swap_token", "get_wallet_balance"]),
-  config: new Set(["update_config"]),
-  balance: new Set(["get_wallet_balance", "get_my_positions", "get_wallet_positions"]),
-  positions: new Set([
-    "get_my_positions",
-    "get_position_pnl",
-    "get_wallet_balance",
-    "set_position_note",
-    "get_wallet_positions",
-  ]),
-  screen: new Set([
-    "get_top_candidates",
-    "get_token_holders",
-    "get_token_narrative",
-    "get_token_info",
-    "search_pools",
-    "check_smart_wallets_on_pool",
-    "get_my_positions",
-  ]),
-  lessons: new Set(["add_lesson", "pin_lesson", "unpin_lesson", "list_lessons", "clear_lessons"]),
-};
-const MANAGER_TOOLS: Set<string> = new Set([
-  "close_position",
-  "claim_fees",
-  "swap_token",
-  "get_position_pnl",
-  "get_my_positions",
-  "get_wallet_balance",
-]);
-
-const SCREENER_TOOLS: Set<string> = new Set([
-  "deploy_position",
-  "get_active_bin",
-  "get_top_candidates",
-  "check_smart_wallets_on_pool",
-  "get_token_holders",
-  "get_token_narrative",
-  "get_token_info",
-  "search_pools",
-  "get_pool_memory",
-  "get_wallet_balance",
-  "get_my_positions",
-]);
-
-const GENERAL_INTENT_ONLY_TOOLS: Set<string> = new Set([
-  "self_update",
-  "update_config",
-  "add_to_blacklist",
-  "remove_from_blacklist",
-  "block_deployer",
-  "unblock_deployer",
-  "add_pool_note",
-  "set_position_note",
-  "add_smart_wallet",
-  "remove_smart_wallet",
-  "add_lesson",
-  "pin_lesson",
-  "unpin_lesson",
-  "clear_lessons",
-  "add_strategy",
-  "remove_strategy",
-  "set_active_strategy",
-]);
 
 // Mock config for safety checks
 interface MockScreeningConfig {
@@ -162,9 +71,9 @@ interface RoleCheckResult {
   reason?: string;
 }
 
-type AgentRole = "SCREENER" | "MANAGER" | "GENERAL";
+type AgentRole = AgentType;
 
-// Role-based tool access check mimicking agent.ts getToolsForRole logic (lines 199-216)
+// Role-based tool access check using real intent module
 function checkToolAccess(role: AgentRole, toolName: string, goal: string = ""): RoleCheckResult {
   // SCREENER role can only access SCREENER_TOOLS
   if (role === "SCREENER") {
@@ -188,37 +97,36 @@ function checkToolAccess(role: AgentRole, toolName: string, goal: string = ""): 
     };
   }
 
-  // GENERAL role: match intent from goal, combine matched tool sets (agent.ts lines 203-215)
+  // GENERAL role: use real intent detection from intent module
   if (role === "GENERAL") {
-    const matched = new Set<string>();
-    for (const { intent, re } of INTENT_PATTERNS) {
-      if (re.test(goal)) {
-        const toolSet = INTENT_TOOLS[intent];
-        if (toolSet) {
-          for (const t of toolSet) matched.add(t);
+    // Get ALL matching intents (production behavior: union tools from every matching intent)
+    const matchedIntents = detectAllIntents(goal);
+
+    // If any intents matched, union their tools and check against the union
+    if (matchedIntents.length > 0) {
+      const matchedTools = new Set<string>();
+      for (const intent of matchedIntents) {
+        for (const tool of getToolsForIntent(intent)) {
+          matchedTools.add(tool);
         }
       }
-    }
-
-    // If no intent matched, fall back to all non-restricted tools
-    if (matched.size === 0) {
-      const hasRestrictedTool = GENERAL_INTENT_ONLY_TOOLS.has(toolName);
-      if (!hasRestrictedTool) {
+      if (matchedTools.has(toolName)) {
         return { allowed: true };
       }
       return {
         allowed: false,
-        reason: `Tool '${toolName}' requires specific intent in goal for GENERAL role.`,
+        reason: `Tool '${toolName}' not available for matched intents [${matchedIntents.join(", ")}] in GENERAL role.`,
       };
     }
 
-    // Check if tool is in matched intent set
-    if (matched.has(toolName)) {
+    // If no intent matched, fall back to all non-restricted tools
+    const hasRestrictedTool = GENERAL_INTENT_ONLY_TOOLS.has(toolName);
+    if (!hasRestrictedTool) {
       return { allowed: true };
     }
     return {
       allowed: false,
-      reason: `Tool '${toolName}' not available for the matched intent in GENERAL role.`,
+      reason: `Tool '${toolName}' requires specific intent in goal for GENERAL role.`,
     };
   }
 
@@ -690,6 +598,89 @@ describe("Role-Based Tool Access", () => {
 });
 
 // ============================================================================
+// Test Suite: Real Intent Module Integration
+// ============================================================================
+
+describe("Real Intent Module Integration", () => {
+  test("INTENTS array is exported and populated", () => {
+    expect(INTENTS !== undefined && INTENTS !== null).toBe(true);
+    expect(INTENTS.length > 0).toBe(true);
+    expect(INTENTS.some((i) => i.intent === "deploy")).toBe(true);
+    expect(INTENTS.some((i) => i.intent === "close")).toBe(true);
+    expect(INTENTS.some((i) => i.intent === "config")).toBe(true);
+  });
+
+  test("detectIntent returns correct intent for deploy patterns", () => {
+    expect(detectIntent("deploy into a pool")).toBe("deploy");
+    expect(detectIntent("open a new position")).toBe("deploy");
+    expect(detectIntent("add liquidity to this pool")).toBe("deploy");
+    expect(detectIntent("lp into this token")).toBe("deploy");
+    expect(detectIntent("invest in this pool")).toBe("deploy");
+  });
+
+  test("detectIntent returns correct intent for close patterns", () => {
+    expect(detectIntent("close my position")).toBe("close");
+    expect(detectIntent("exit this pool")).toBe("close");
+    expect(detectIntent("withdraw my liquidity")).toBe("close");
+    expect(detectIntent("remove liquidity now")).toBe("close");
+    expect(detectIntent("shut down this position")).toBe("close");
+  });
+
+  test("detectIntent returns correct intent for claim patterns", () => {
+    expect(detectIntent("claim my fees")).toBe("claim");
+    expect(detectIntent("harvest the fees")).toBe("claim");
+    expect(detectIntent("collect fees from position")).toBe("claim");
+  });
+
+  test("detectIntent returns correct intent for config patterns", () => {
+    expect(detectIntent("change the config")).toBe("config");
+    expect(detectIntent("update settings")).toBe("config");
+    expect(detectIntent("set threshold to 100")).toBe("config");
+  });
+
+  test("detectIntent returns null for unmatched goals", () => {
+    expect(detectIntent("hello")).toBe(null);
+    expect(detectIntent("random text")).toBe(null);
+    expect(detectIntent("")).toBe(null);
+  });
+
+  test("getToolsForIntent returns correct tools for deploy intent", () => {
+    const tools = getToolsForIntent("deploy");
+    expect(tools.includes("deploy_position")).toBe(true);
+    expect(tools.includes("get_top_candidates")).toBe(true);
+    expect(tools.includes("get_active_bin")).toBe(true);
+    expect(tools.includes("close_position")).toBe(false);
+  });
+
+  test("getToolsForIntent returns correct tools for close intent", () => {
+    const tools = getToolsForIntent("close");
+    expect(tools.includes("close_position")).toBe(true);
+    expect(tools.includes("get_my_positions")).toBe(true);
+    expect(tools.includes("swap_token")).toBe(true);
+    expect(tools.includes("deploy_position")).toBe(false);
+  });
+
+  test("getToolsForIntent returns empty array for unknown intent", () => {
+    const tools = getToolsForIntent("unknown_intent");
+    expect(tools.length === 0).toBe(true);
+  });
+
+  test("getRoleForIntent returns correct role for each intent", () => {
+    expect(getRoleForIntent("deploy")).toBe("SCREENER");
+    expect(getRoleForIntent("close")).toBe("MANAGER");
+    expect(getRoleForIntent("claim")).toBe("MANAGER");
+    expect(getRoleForIntent("swap")).toBe("MANAGER");
+    expect(getRoleForIntent("config")).toBe("GENERAL");
+    expect(getRoleForIntent("balance")).toBe("GENERAL");
+    expect(getRoleForIntent("lessons")).toBe("GENERAL");
+  });
+
+  test("getRoleForIntent returns null for unknown intent", () => {
+    expect(getRoleForIntent("unknown")).toBe(null);
+  });
+});
+
+// ============================================================================
 // Run tests if this file is executed directly
 // ============================================================================
 
@@ -709,10 +700,4 @@ export type {
   RoleCheckResult,
   SafetyCheckResult,
 };
-export {
-  checkToolAccess,
-  GENERAL_INTENT_ONLY_TOOLS,
-  MANAGER_TOOLS,
-  runDeploySafetyChecks,
-  SCREENER_TOOLS,
-};
+export { checkToolAccess, runDeploySafetyChecks };

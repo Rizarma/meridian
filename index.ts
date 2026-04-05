@@ -11,6 +11,13 @@ import { log } from "./logger.js";
 import { addPoolNote, recallForPool, recordPositionSnapshot } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import {
+  TRAILING_DROP_CONFIRM_DELAY_MS,
+  TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
+  TRAILING_PEAK_CONFIRM_DELAY_MS,
+  TRAILING_PEAK_CONFIRM_TOLERANCE,
+} from "./src/config/constants.js";
+import { evaluateManagementExitRules } from "./src/domain/exit-rules.js";
+import {
   getLastBriefingDate,
   getTrackedPosition,
   queuePeakConfirmation,
@@ -98,11 +105,7 @@ let _screeningBusy = false; // prevents overlapping screening cycles
 let _screeningLastTriggered = 0; // epoch ms — prevents management from spamming screening
 let _pollTriggeredAt = 0; // epoch ms — cooldown for poller-triggered management
 const _peakConfirmTimers: Map<string, NodeJS.Timeout> = new Map();
-const TRAILING_PEAK_CONFIRM_DELAY_MS = 15_000;
-const TRAILING_PEAK_CONFIRM_TOLERANCE = 0.85;
 const _trailingDropConfirmTimers = new Map<string, NodeJS.Timeout>();
-const TRAILING_DROP_CONFIRM_DELAY_MS = 15_000;
-const TRAILING_DROP_CONFIRM_TOLERANCE_PCT = 1.0;
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -314,47 +317,10 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
         return false;
       })();
 
-      // Rule 1: stop loss
-      if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct <= config.management.stopLossPct) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 1, reason: "stop loss" });
-        continue;
-      }
-      // Rule 2: take profit
-      if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct >= config.management.takeProfitFeePct) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 2, reason: "take profit" });
-        continue;
-      }
-      // Rule 3: pumped far above range
-      if (
-        p.active_bin != null &&
-        p.upper_bin != null &&
-        p.active_bin > p.upper_bin + config.management.outOfRangeBinsToClose
-      ) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 3, reason: "pumped far above range" });
-        continue;
-      }
-      // Rule 4: stale above range
-      if (
-        p.active_bin != null &&
-        p.upper_bin != null &&
-        p.active_bin > p.upper_bin &&
-        (p.minutes_out_of_range ?? 0) >= config.management.outOfRangeWaitMinutes
-      ) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 4, reason: "OOR" });
-        continue;
-      }
-      // Rule 5: fee yield too low
-      if (
-        p.fee_per_tvl_24h != null &&
-        p.fee_per_tvl_24h < config.management.minFeePerTvl24h &&
-        (p.age_minutes ?? 0) >= 60
-      ) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 5, reason: "low yield" });
-        continue;
-      }
-      // Claim rule
-      if ((p.unclaimed_fees_usd ?? 0) >= config.management.minClaimAmount) {
-        actionMap.set(p.position, { action: "CLAIM" });
+      // Use extracted exit-rules module for deterministic rule checks
+      const exitDecision = evaluateManagementExitRules(p, config.management, pnlSuspect);
+      if (exitDecision) {
+        actionMap.set(p.position, exitDecision);
         continue;
       }
       actionMap.set(p.position, { action: "STAY" });

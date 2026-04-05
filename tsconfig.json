@@ -26,7 +26,8 @@
     "tools/**/*.js",
     "tools/**/*.ts",
     "scripts/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
