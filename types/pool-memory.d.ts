@@ -36,6 +36,8 @@ export interface PoolMemoryEntry {
   total_deploys: number;
   avg_pnl_pct: number;
   win_rate: number;
+  adjusted_win_rate: number;
+  adjusted_win_rate_sample_count: number;
   last_deployed_at: string | null;
   last_outcome: "profit" | "loss" | null;
   notes: PoolNote[];
@@ -72,6 +74,8 @@ export interface PoolMemoryResult {
   total_deploys?: number;
   avg_pnl_pct?: number;
   win_rate?: number;
+  adjusted_win_rate?: number;
+  adjusted_win_rate_sample_count?: number;
   last_deployed_at?: string | null;
   last_outcome?: "profit" | "loss" | null;
   cooldown_until?: string | null;

@@ -41,6 +41,13 @@ export interface TrackedPosition {
   pending_peak_started_at: string | null;
   trailing_active: boolean;
   instruction?: string | null;
+  // Trailing drop confirmation fields
+  pending_trailing_current_pnl_pct?: number | null;
+  pending_trailing_peak_pnl_pct?: number | null;
+  pending_trailing_drop_pct?: number | null;
+  pending_trailing_started_at?: string | null;
+  confirmed_trailing_exit_reason?: string | null;
+  confirmed_trailing_exit_until?: string | null;
 }
 
 export interface StateEvent {
@@ -79,6 +86,9 @@ export interface ManagementConfig {
 export interface ExitAction {
   action: "STOP_LOSS" | "TRAILING_TP" | "OUT_OF_RANGE" | "LOW_YIELD";
   reason: string;
+  needs_confirmation?: boolean;
+  peak_pnl_pct?: number;
+  current_pnl_pct?: number;
 }
 
 export interface PeakConfirmation {
@@ -86,6 +96,12 @@ export interface PeakConfirmation {
   peak?: number;
   rejected?: boolean;
   pendingPeak?: number;
+  pending: boolean;
+}
+
+export interface TrailingConfirmation {
+  confirmed: boolean;
+  rejected?: boolean;
   pending: boolean;
 }
 

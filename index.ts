@@ -1,51 +1,54 @@
 import "dotenv/config";
-import cron from "node-cron";
 import type { ScheduledTask } from "node-cron";
-import readline from "readline";
+import cron from "node-cron";
 import type { Interface as ReadlineInterface } from "readline";
+import readline from "readline";
 import { agentLoop } from "./agent.js";
-import type { AgentResult, AgentType } from "./types/index.js";
-import { log } from "./logger.js";
-import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
-import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
-import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
-import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
-import { registerCronRestarter } from "./tools/executor.js";
-import {
-  startPolling,
-  stopPolling,
-  sendMessage,
-  sendHTML,
-  notifyOutOfRange,
-  isEnabled as telegramEnabled,
-  createLiveMessage,
-} from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
+import { computeDeployAmount, config, reloadScreeningThresholds } from "./config.js";
+import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
+import { log } from "./logger.js";
+import { addPoolNote, recallForPool, recordPositionSnapshot } from "./pool-memory.js";
+import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import {
   getLastBriefingDate,
-  setLastBriefingDate,
   getTrackedPosition,
+  queuePeakConfirmation,
+  queueTrailingDropConfirmation,
+  resolvePendingPeak,
+  resolvePendingTrailingDrop,
+  setLastBriefingDate,
   setPositionInstruction,
   updatePnlAndCheckExits,
-  queuePeakConfirmation,
-  resolvePendingPeak,
 } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
-import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
-import { checkSmartWalletsOnPool } from "./smart-wallets.js";
-import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
+import {
+  createLiveMessage,
+  notifyOutOfRange,
+  sendHTML,
+  sendMessage,
+  startPolling,
+  stopPolling,
+  isEnabled as telegramEnabled,
+} from "./telegram.js";
+import { closePosition, getActiveBin, getMyPositions } from "./tools/dlmm.js";
+import { registerCronRestarter } from "./tools/executor.js";
+import { getTopCandidates } from "./tools/screening.js";
+import { getTokenInfo, getTokenNarrative } from "./tools/token.js";
+import { getWalletBalances } from "./tools/wallet.js";
 import type {
-  CycleTimers,
   ActionDecision,
-  TelegramMessage,
+  AgentResult,
+  AgentType,
+  CondensedPool,
   CronTask,
   CronTaskList,
-  ReconCandidate,
   CycleOptions,
-  LiveMessageHandler,
-  CondensedPool,
+  CycleTimers,
   EnrichedPosition,
+  LiveMessageHandler,
+  ReconCandidate,
+  TelegramMessage,
 } from "./types/index.js";
 
 log("startup", "DLMM LP Agent starting...");
@@ -97,6 +100,9 @@ let _pollTriggeredAt = 0; // epoch ms — cooldown for poller-triggered manageme
 const _peakConfirmTimers: Map<string, NodeJS.Timeout> = new Map();
 const TRAILING_PEAK_CONFIRM_DELAY_MS = 15_000;
 const TRAILING_PEAK_CONFIRM_TOLERANCE = 0.85;
+const _trailingDropConfirmTimers = new Map<string, NodeJS.Timeout>();
+const TRAILING_DROP_CONFIRM_DELAY_MS = 15_000;
+const TRAILING_DROP_CONFIRM_TOLERANCE_PCT = 1.0;
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -138,6 +144,40 @@ function schedulePeakConfirmation(positionAddress: string): void {
   }, TRAILING_PEAK_CONFIRM_DELAY_MS);
 
   _peakConfirmTimers.set(positionAddress, timer);
+}
+
+function scheduleTrailingDropConfirmation(positionAddress: string) {
+  if (!positionAddress || _trailingDropConfirmTimers.has(positionAddress)) return;
+
+  const timer = setTimeout(async () => {
+    _trailingDropConfirmTimers.delete(positionAddress);
+    try {
+      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
+      const position = result?.positions?.find((p) => p.position === positionAddress);
+      const resolved = resolvePendingTrailingDrop(
+        positionAddress,
+        position?.pnl_pct ?? null,
+        config.management.trailingDropPct,
+        TRAILING_DROP_CONFIRM_TOLERANCE_PCT
+      );
+      if (resolved?.confirmed) {
+        log(
+          "state",
+          `[Trailing recheck] Confirmed trailing exit for ${positionAddress} — triggering management`
+        );
+        runManagementCycle({ silent: true }).catch((e) =>
+          log("cron_error", `Trailing recheck management failed: ${e.message}`)
+        );
+      }
+    } catch (error: any) {
+      log(
+        "state_warn",
+        `Trailing drop confirmation failed for ${positionAddress}: ${error.message}`
+      );
+    }
+  }, TRAILING_DROP_CONFIRM_DELAY_MS);
+
+  _trailingDropConfirmTimers.set(positionAddress, timer);
 }
 
 async function runBriefing(): Promise<void> {
@@ -219,6 +259,20 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
       }
       const exit = updatePnlAndCheckExits(p.position, p, config.management);
       if (exit) {
+        // Trailing TP needs confirmation before closing
+        if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
+          if (
+            queueTrailingDropConfirmation(
+              p.position,
+              exit.peak_pnl_pct,
+              exit.current_pnl_pct,
+              config.management.trailingDropPct
+            )
+          ) {
+            scheduleTrailingDropConfirmation(p.position);
+          }
+          continue;
+        }
         exitMap.set(p.position, exit.reason);
         log("state", `Exit alert for ${p.pair}: ${exit.reason}`);
       }
@@ -829,6 +883,20 @@ Summarize the current portfolio health, total fees earned, and performance of al
         }
         const exit = updatePnlAndCheckExits(p.position, p, config.management);
         if (exit) {
+          // Trailing TP needs confirmation - queue it and continue polling
+          if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
+            if (
+              queueTrailingDropConfirmation(
+                p.position,
+                exit.peak_pnl_pct,
+                exit.current_pnl_pct,
+                config.management.trailingDropPct
+              )
+            ) {
+              scheduleTrailingDropConfirmation(p.position);
+            }
+            continue;
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {
@@ -915,6 +983,172 @@ const _telegramQueue: TelegramMessage[] = []; // queued messages received while 
 const sessionHistory: Array<{ role: string; content: string }> = []; // persists conversation across REPL turns
 const MAX_HISTORY = 20; // keep last 20 messages (10 exchanges)
 
+// TTY interface reference for prompt refresh (null in non-TTY mode)
+let _ttyInterface: readline.Interface | null = null;
+
+function refreshPrompt(): void {
+  if (!_ttyInterface) return;
+  _ttyInterface.setPrompt(buildPrompt());
+  _ttyInterface.prompt(true);
+}
+
+async function drainTelegramQueue(): Promise<void> {
+  while (_telegramQueue.length > 0 && !_managementBusy && !_screeningBusy && !busy) {
+    const queued = _telegramQueue.shift();
+    if (queued) await telegramHandler(queued);
+  }
+}
+
+async function telegramHandler(msg: TelegramMessage): Promise<void> {
+  const text = msg?.text?.trim();
+  if (!text) return;
+  if (_managementBusy || _screeningBusy || busy) {
+    if (_telegramQueue.length < 5) {
+      _telegramQueue.push(msg);
+      sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(
+        () => {}
+      );
+    } else {
+      sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/briefing") {
+    try {
+      const briefing = await generateBriefing();
+      await sendHTML(briefing);
+    } catch (e) {
+      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/positions") {
+    try {
+      const result = await getMyPositions({ force: true });
+      const positions = result.positions || [];
+      const totalPositions = result.total_positions ?? 0;
+      if (totalPositions === 0) {
+        await sendMessage("No open positions.");
+        return;
+      }
+      const cur = config.management.solMode ? "◎" : "$";
+      const lines = positions.map((p, i) => {
+        const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
+        const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
+        const oor = !p.in_range ? " ⚠️OOR" : "";
+        return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
+      });
+      await sendMessage(
+        `📊 Open Positions (${totalPositions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`
+      );
+    } catch (e) {
+      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    }
+    return;
+  }
+
+  const closeMatch = text.match(/^\/close\s+(\d+)$/i);
+  if (closeMatch) {
+    try {
+      const idx = parseInt(closeMatch[1]) - 1;
+      const result = await getMyPositions({ force: true });
+      const positions = result.positions || [];
+      if (idx < 0 || idx >= positions.length) {
+        await sendMessage(`Invalid number. Use /positions first.`);
+        return;
+      }
+      const pos = positions[idx];
+      await sendMessage(`Closing ${pos.pair}...`);
+      const closeResult = await closePosition({ position_address: pos.position });
+      if (closeResult.success) {
+        const closeTxs = closeResult.close_txs?.length ? closeResult.close_txs : closeResult.txs;
+        const claimNote = closeResult.claim_txs?.length
+          ? `\nClaim txs: ${closeResult.claim_txs.join(", ")}`
+          : "";
+        await sendMessage(
+          `✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${closeResult.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`
+        );
+      } else {
+        await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
+      }
+    } catch (e) {
+      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    }
+    return;
+  }
+
+  const setMatch = text.match(/^\/set\s+(\d+)\s+(.+)$/i);
+  if (setMatch) {
+    try {
+      const idx = parseInt(setMatch[1]) - 1;
+      const note = setMatch[2].trim();
+      const result = await getMyPositions({ force: true });
+      const positions = result.positions || [];
+      if (idx < 0 || idx >= positions.length) {
+        await sendMessage(`Invalid number. Use /positions first.`);
+        return;
+      }
+      const pos = positions[idx];
+      setPositionInstruction(pos.position, note);
+      await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
+    } catch (e) {
+      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    }
+    return;
+  }
+
+  busy = true;
+  let liveMessage: LiveMessageHandler | null = null;
+  try {
+    log("telegram", `Incoming: ${text}`);
+    const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
+    const isDeployRequest =
+      !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
+    const agentRole: AgentType = isDeployRequest ? "SCREENER" : "GENERAL";
+    const agentModel =
+      agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
+    liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
+    const { content } = await agentLoop(
+      text,
+      config.llm.maxSteps,
+      sessionHistory as unknown as Parameters<typeof agentLoop>[2],
+      agentRole,
+      agentModel,
+      null,
+      {
+        requireTool: true,
+        interactive: true,
+        onToolStart: async ({ name }: { name: string }) => {
+          await liveMessage?.toolStart(name);
+        },
+        onToolFinish: async ({
+          name,
+          result,
+          success,
+        }: {
+          name: string;
+          result: unknown;
+          success: boolean;
+        }) => {
+          await liveMessage?.toolFinish(name, result, success);
+        },
+      }
+    );
+    appendHistory(text, content);
+    if (liveMessage) await liveMessage.finalize(stripThink(content));
+    else await sendMessage(stripThink(content));
+  } catch (e) {
+    if (liveMessage) await liveMessage.fail((e as Error).message).catch(() => {});
+    else await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+  } finally {
+    busy = false;
+    refreshPrompt();
+    drainTelegramQueue().catch(() => {});
+  }
+}
+
 function appendHistory(userMsg: string, assistantMsg: string): void {
   sessionHistory.push({ role: "user", content: userMsg });
   sessionHistory.push({ role: "assistant", content: assistantMsg });
@@ -935,6 +1169,9 @@ if (isTTY) {
     output: process.stdout,
     prompt: buildPrompt(),
   });
+
+  // Store reference for prompt refresh
+  _ttyInterface = rl;
 
   // Update prompt countdown every 10 seconds
   setInterval(() => {
@@ -1037,165 +1274,6 @@ if (isTTY) {
   // Always start autonomous cycles on launch
   launchCron();
   maybeRunMissedBriefing().catch(() => {});
-
-  // Telegram bot — queue messages received while busy, drain after each task
-  async function drainTelegramQueue(): Promise<void> {
-    while (_telegramQueue.length > 0 && !_managementBusy && !_screeningBusy && !busy) {
-      const queued = _telegramQueue.shift();
-      if (queued) await telegramHandler(queued);
-    }
-  }
-
-  async function telegramHandler(msg: TelegramMessage): Promise<void> {
-    const text = msg?.text?.trim();
-    if (!text) return;
-    if (_managementBusy || _screeningBusy || busy) {
-      if (_telegramQueue.length < 5) {
-        _telegramQueue.push(msg);
-        sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(
-          () => {}
-        );
-      } else {
-        sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch(() => {});
-      }
-      return;
-    }
-
-    if (text === "/briefing") {
-      try {
-        const briefing = await generateBriefing();
-        await sendHTML(briefing);
-      } catch (e) {
-        await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
-      }
-      return;
-    }
-
-    if (text === "/positions") {
-      try {
-        const result = await getMyPositions({ force: true });
-        const positions = result.positions || [];
-        const totalPositions = result.total_positions ?? 0;
-        if (totalPositions === 0) {
-          await sendMessage("No open positions.");
-          return;
-        }
-        const cur = config.management.solMode ? "◎" : "$";
-        const lines = positions.map((p, i) => {
-          const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
-          const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
-          const oor = !p.in_range ? " ⚠️OOR" : "";
-          return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
-        });
-        await sendMessage(
-          `📊 Open Positions (${totalPositions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`
-        );
-      } catch (e) {
-        await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
-      }
-      return;
-    }
-
-    const closeMatch = text.match(/^\/close\s+(\d+)$/i);
-    if (closeMatch) {
-      try {
-        const idx = parseInt(closeMatch[1]) - 1;
-        const result = await getMyPositions({ force: true });
-        const positions = result.positions || [];
-        if (idx < 0 || idx >= positions.length) {
-          await sendMessage(`Invalid number. Use /positions first.`);
-          return;
-        }
-        const pos = positions[idx];
-        await sendMessage(`Closing ${pos.pair}...`);
-        const closeResult = await closePosition({ position_address: pos.position });
-        if (closeResult.success) {
-          const closeTxs = closeResult.close_txs?.length ? closeResult.close_txs : closeResult.txs;
-          const claimNote = closeResult.claim_txs?.length
-            ? `\nClaim txs: ${closeResult.claim_txs.join(", ")}`
-            : "";
-          await sendMessage(
-            `✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${closeResult.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`
-          );
-        } else {
-          await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
-        }
-      } catch (e) {
-        await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
-      }
-      return;
-    }
-
-    const setMatch = text.match(/^\/set\s+(\d+)\s+(.+)$/i);
-    if (setMatch) {
-      try {
-        const idx = parseInt(setMatch[1]) - 1;
-        const note = setMatch[2].trim();
-        const result = await getMyPositions({ force: true });
-        const positions = result.positions || [];
-        if (idx < 0 || idx >= positions.length) {
-          await sendMessage(`Invalid number. Use /positions first.`);
-          return;
-        }
-        const pos = positions[idx];
-        setPositionInstruction(pos.position, note);
-        await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
-      } catch (e) {
-        await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
-      }
-      return;
-    }
-
-    busy = true;
-    let liveMessage: LiveMessageHandler | null = null;
-    try {
-      log("telegram", `Incoming: ${text}`);
-      const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
-      const isDeployRequest =
-        !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
-      const agentRole: AgentType = isDeployRequest ? "SCREENER" : "GENERAL";
-      const agentModel =
-        agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
-      liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
-      const { content } = await agentLoop(
-        text,
-        config.llm.maxSteps,
-        sessionHistory as unknown as Parameters<typeof agentLoop>[2],
-        agentRole,
-        agentModel,
-        null,
-        {
-          requireTool: true,
-          interactive: true,
-          onToolStart: async ({ name }: { name: string }) => {
-            await liveMessage?.toolStart(name);
-          },
-          onToolFinish: async ({
-            name,
-            result,
-            success,
-          }: {
-            name: string;
-            result: unknown;
-            success: boolean;
-          }) => {
-            await liveMessage?.toolFinish(name, result, success);
-          },
-        }
-      );
-      appendHistory(text, content);
-      if (liveMessage) await liveMessage.finalize(stripThink(content));
-      else await sendMessage(stripThink(content));
-    } catch (e) {
-      if (liveMessage) await liveMessage.fail((e as Error).message).catch(() => {});
-      else await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
-    } finally {
-      busy = false;
-      rl.setPrompt(buildPrompt());
-      rl.prompt(true);
-      drainTelegramQueue().catch(() => {});
-    }
-  }
 
   startPolling(telegramHandler);
 
@@ -1434,6 +1512,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
   log("startup", "Non-TTY mode — starting cron cycles immediately.");
   startCronJobs();
   maybeRunMissedBriefing().catch(() => {});
+  startPolling(telegramHandler);
   (async () => {
     try {
       const startupStep3 =
