@@ -16,6 +16,7 @@ export interface ScreeningConfig {
   maxMcap: number;
   minBinStep: number;
   maxBinStep: number;
+  maxVolatility: number | null;
   timeframe: string;
   category: string;
   minTokenFeesSol: number;
@@ -117,6 +118,7 @@ export interface UserConfigPartial {
   maxMcap?: number;
   minBinStep?: number;
   maxBinStep?: number;
+  maxVolatility?: number | null;
   timeframe?: string;
   category?: string;
   minTokenFeesSol?: number;
