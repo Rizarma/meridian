@@ -10,6 +10,15 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import {
+  MAX_INSTRUCTION_LENGTH,
+  MAX_RECENT_EVENTS,
+  SYNC_GRACE_PERIOD_MS,
+  TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
+  TRAILING_EXIT_COOLDOWN_MS,
+  TRAILING_PEAK_CONFIRM_TOLERANCE,
+} from "./src/config/constants.js";
+import { evaluateExitConditions, shouldActivateTrailingTP } from "./src/domain/exit-rules.js";
 import type { SignalSnapshot } from "./types/signals.js";
 import type {
   BinRange,
@@ -25,10 +34,6 @@ import type {
 } from "./types/state.js";
 
 const STATE_FILE = "./state.json";
-
-const MAX_RECENT_EVENTS = 20;
-const MAX_INSTRUCTION_LENGTH = 280;
-const SYNC_GRACE_MS: number = 5 * 60_000; // don't auto-close positions deployed < 5 min ago
 
 /** Parameters for tracking a new position */
 export interface TrackPositionParams {
@@ -297,7 +302,7 @@ export function queuePeakConfirmation(
 export function resolvePendingPeak(
   position_address: string,
   currentPnlPct: number | null,
-  toleranceRatio: number = 0.85
+  toleranceRatio: number = TRAILING_PEAK_CONFIRM_TOLERANCE
 ): PeakConfirmation {
   const state = load();
   const pos = state.positions[position_address];
@@ -367,7 +372,7 @@ export function resolvePendingTrailingDrop(
   position_address: string,
   currentPnlPct: number | null,
   trailingDropPct: number | null,
-  tolerancePct: number = 1.0
+  tolerancePct: number = TRAILING_DROP_CONFIRM_TOLERANCE_PCT
 ): TrailingConfirmation {
   const state = load();
   const pos = state.positions[position_address];
@@ -399,7 +404,9 @@ export function resolvePendingTrailingDrop(
   if (dropDiff <= tolerancePct && dropFromPeak >= (trailingDropPct ?? 0) * 0.9) {
     // Set confirmed exit with 5-minute cooldown
     pos.confirmed_trailing_exit_reason = `Trailing TP: peak ${pendingPeak.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}%)`;
-    pos.confirmed_trailing_exit_until = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    pos.confirmed_trailing_exit_until = new Date(
+      Date.now() + TRAILING_EXIT_COOLDOWN_MS
+    ).toISOString();
     save(state);
     log(
       "state",
@@ -469,13 +476,14 @@ export function getStateSummary(): StateSummary {
 /**
  * Check all exit conditions for a position (trailing TP, stop loss, OOR, low yield).
  * Updates peak_pnl_pct, trailing_active, and OOR state.
+ * Delegates exit condition evaluation to exit-rules module.
  */
 export function updatePnlAndCheckExits(
   position_address: string,
   positionData: PositionData,
   mgmtConfig: ManagementConfig
 ): ExitAction | null {
-  const { pnl_pct: currentPnlPct, pnl_pct_suspicious, in_range, fee_per_tvl_24h } = positionData;
+  const { in_range } = positionData;
   const state = load();
   const pos = state.positions[position_address];
   if (!pos || pos.closed) return null;
@@ -499,11 +507,7 @@ export function updatePnlAndCheckExits(
   let changed = false;
 
   // Activate trailing TP once trigger threshold is reached
-  if (
-    mgmtConfig.trailingTakeProfit &&
-    !pos.trailing_active &&
-    (pos.peak_pnl_pct ?? 0) >= (mgmtConfig.trailingTriggerPct ?? 0)
-  ) {
+  if (shouldActivateTrailingTP(pos, mgmtConfig)) {
     pos.trailing_active = true;
     changed = true;
     log(
@@ -525,62 +529,8 @@ export function updatePnlAndCheckExits(
 
   if (changed) save(state);
 
-  // ── Stop loss ──────────────────────────────────────────────────
-  if (
-    !pnl_pct_suspicious &&
-    currentPnlPct != null &&
-    mgmtConfig.stopLossPct != null &&
-    currentPnlPct <= mgmtConfig.stopLossPct
-  ) {
-    return {
-      action: "STOP_LOSS",
-      reason: `Stop loss: PnL ${currentPnlPct.toFixed(2)}% <= ${mgmtConfig.stopLossPct}%`,
-    };
-  }
-
-  // ── Trailing TP ────────────────────────────────────────────────
-  if (!pnl_pct_suspicious && pos.trailing_active) {
-    const dropFromPeak = pos.peak_pnl_pct - currentPnlPct;
-    if (dropFromPeak >= (mgmtConfig.trailingDropPct ?? 0)) {
-      return {
-        action: "TRAILING_TP",
-        reason: `Trailing TP: peak ${pos.peak_pnl_pct.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${mgmtConfig.trailingDropPct}%)`,
-        needs_confirmation: true,
-        peak_pnl_pct: pos.peak_pnl_pct,
-        current_pnl_pct: currentPnlPct,
-      };
-    }
-  }
-
-  // ── Out of range too long ──────────────────────────────────────
-  if (pos.out_of_range_since) {
-    const minutesOOR = Math.floor(
-      (Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000
-    );
-    if (minutesOOR >= (mgmtConfig.outOfRangeWaitMinutes ?? 30)) {
-      return {
-        action: "OUT_OF_RANGE",
-        reason: `Out of range for ${minutesOOR}m (limit: ${mgmtConfig.outOfRangeWaitMinutes}m)`,
-      };
-    }
-  }
-
-  // ── Low yield (only after position has had time to accumulate fees) ───
-  const { age_minutes } = positionData;
-  const minAgeForYieldCheck = mgmtConfig.minAgeBeforeYieldCheck ?? 60;
-  if (
-    fee_per_tvl_24h != null &&
-    mgmtConfig.minFeePerTvl24h != null &&
-    fee_per_tvl_24h < mgmtConfig.minFeePerTvl24h &&
-    (age_minutes == null || age_minutes >= minAgeForYieldCheck)
-  ) {
-    return {
-      action: "LOW_YIELD",
-      reason: `Low yield: fee/TVL ${fee_per_tvl_24h.toFixed(2)}% < min ${mgmtConfig.minFeePerTvl24h}% (age: ${age_minutes ?? "?"}m)`,
-    };
-  }
-
-  return null;
+  // Delegate exit condition evaluation to exit-rules module
+  return evaluateExitConditions(pos, positionData, mgmtConfig);
 }
 
 // ─── Briefing Tracking ─────────────────────────────────────────
@@ -617,7 +567,7 @@ export function syncOpenPositions(active_addresses: string[]): void {
 
     // Grace period: newly deployed positions may not be indexed yet
     const deployedAt = pos.deployed_at ? new Date(pos.deployed_at).getTime() : 0;
-    if (Date.now() - deployedAt < SYNC_GRACE_MS) {
+    if (Date.now() - deployedAt < SYNC_GRACE_PERIOD_MS) {
       log("state", `Position ${posId} not on-chain yet — within grace period, skipping auto-close`);
       continue;
     }

@@ -81,6 +81,10 @@ export interface ManagementConfig {
   outOfRangeWaitMinutes?: number;
   minFeePerTvl24h?: number;
   minAgeBeforeYieldCheck?: number;
+  // Fields needed by evaluateManagementExitRules
+  takeProfitFeePct?: number;
+  outOfRangeBinsToClose?: number;
+  minClaimAmount?: number;
 }
 
 export interface ExitAction {
