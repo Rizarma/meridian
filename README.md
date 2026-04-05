@@ -191,7 +191,8 @@ meridian <command> [flags]
 Or run without installing:
 
 ```bash
-node cli.js <command> [flags]
+pnpm build
+node dist/cli.js <command> [flags]
 ```
 
 **Positions & PnL**
@@ -359,40 +360,7 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `screeningModel` | `openai/gpt-oss-20b:free` | LLM for screening cycles |
 | `generalModel` | `openai/gpt-oss-20b:free` | LLM for REPL / chat |
 
-<<<<<<< HEAD
-> Override model at runtime: `node cli.js config set screeningModel anthropic/claude-opus-4-5`
-
----
-
-## Telegram
-
-**Setup:**
-
-1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token
-2. Add `TELEGRAM_BOT_TOKEN=<token>` to your `.env`
-3. Set the exact Telegram chat and allowed controller user IDs in `.env`
-
-Meridian no longer auto-registers the first chat for safety. You must set:
-
-```env
-TELEGRAM_BOT_TOKEN=<token>
-TELEGRAM_CHAT_ID=<target chat id>
-TELEGRAM_ALLOWED_USER_IDS=<comma-separated Telegram user ids allowed to control the bot>
-```
-
-Security notes:
-- If `TELEGRAM_CHAT_ID` is not set, inbound Telegram control is ignored.
-- If the target chat is a group/supergroup and `TELEGRAM_ALLOWED_USER_IDS` is empty, inbound control is ignored.
-- Notifications still go to the configured chat, but command/control is limited to the allowed user IDs.
-
-**Notifications sent:**
-- After every management cycle: full agent report (reasoning + decisions)
-- After every screening cycle: full agent report (what it found, whether it deployed)
-- When a position goes out of range past `outOfRangeWaitMinutes`
-- On deploy: pair, amount, position address, tx hash
-- On close: pair and PnL
-
-You can also chat with the agent via Telegram using the same free-form interface as the REPL: `"check wallet 7tB8..."`, `"who are the top LPers in pool ABC..."`, `"close all positions"`, etc. Only explicitly allowed Telegram user IDs can issue commands.
+> Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-5`
 
 ---
 
@@ -404,14 +372,14 @@ After every closed position the agent runs `studyTopLPers` on candidate pools, a
 
 Add a lesson manually:
 ```bash
-node cli.js lessons add "Never deploy into pump.fun tokens under 2h old"
+meridian lessons add "Never deploy into pump.fun tokens under 2h old"
 ```
 
 ### Threshold evolution
 
 After 5+ positions have been closed, run:
 ```bash
-node cli.js evolve
+meridian evolve
 ```
 
 This analyzes closed position performance (win rate, avg PnL, fee yields) and automatically adjusts screening thresholds in `user-config.json`. Changes take effect immediately.
@@ -429,7 +397,7 @@ Opt-in collective intelligence — share lessons and pool outcomes, receive crow
 ### Setup
 
 ```bash
-node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
+npx tsx -e "import('./hive-mind.ts').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
 ```
 
 Get `YOUR_TOKEN` from the private Telegram discussion. This saves your credentials to `user-config.json` automatically.
@@ -464,42 +432,47 @@ Any OpenAI-compatible endpoint works.
 ## Architecture
 
 ```
-index.js            Main entry: REPL + cron orchestration + Telegram bot polling
-agent.js            ReAct loop: LLM → tool call → repeat
-config.js           Runtime config from user-config.json + .env
-prompt.js           System prompt builder (SCREENER / MANAGER / GENERAL roles)
-state.js            Position registry (state.json)
-lessons.js          Learning engine: records performance, derives lessons, evolves thresholds
-pool-memory.js      Per-pool deploy history + snapshots
-strategy-library.js Saved LP strategies
-telegram.js         Telegram bot: polling + notifications
-hive-mind.js        Optional collective intelligence server sync
-smart-wallets.js    KOL/alpha wallet tracker
-token-blacklist.js  Permanent token blacklist
-cli.js              Direct CLI — every tool as a subcommand with JSON output
+index.ts              Main entry: REPL + cron orchestration + Telegram bot polling
+agent.ts              ReAct loop: LLM → tool call → repeat
+config.ts             Runtime config from user-config.json + .env
+prompt.ts             System prompt builder (SCREENER / MANAGER / GENERAL roles)
+state.ts              Position registry (state.json)
+lessons.ts            Learning engine: records performance, derives lessons, evolves thresholds
+pool-memory.ts        Per-pool deploy history + snapshots
+strategy-library.ts   Saved LP strategies
+telegram.ts           Telegram bot: polling + notifications
+hive-mind.ts          Optional collective intelligence server sync
+smart-wallets.ts      KOL/alpha wallet tracker
+token-blacklist.ts    Permanent token blacklist
+cli.ts                Direct CLI — every tool as a subcommand with JSON output
+setup.ts              Interactive setup wizard
 
 tools/
-  definitions.js    Tool schemas (OpenAI format)
-  executor.js       Tool dispatch + safety checks
-  dlmm.js           Meteora DLMM SDK wrapper
-  screening.js      Pool discovery
-  wallet.js         SOL/token balances + Jupiter swap
-  token.js          Token info, holders, narrative
-  study.js          Top LPer study via LPAgent API
+  definitions.ts      Tool schemas (OpenAI format)
+  executor.ts         Tool dispatch + safety checks
+  dlmm.ts             Meteora DLMM SDK wrapper
+  screening.ts        Pool discovery
+  wallet.ts           SOL/token balances + Jupiter swap
+  token.ts            Token info, holders, narrative
+  study.ts            Top LPer study via LPAgent API
+  okx.ts              OKX OnchainOS integration
+
+types/
+  *.d.ts              TypeScript type definitions
 
 discord-listener/
-  index.js          Selfbot Discord listener
-  pre-checks.js     Signal pre-check pipeline
+  index.ts            Selfbot Discord listener
+  pre-checks.ts       Signal pre-check pipeline
 
 .claude/
   agents/
-    screener.md     Claude Code screener sub-agent
-    manager.md      Claude Code manager sub-agent
+    screener.md       Claude Code screener sub-agent
+    manager.md        Claude Code manager sub-agent
   commands/
-    screen.md       /screen slash command
-    manage.md       /manage slash command
-    balance.md      /balance slash command
-    positions.md    /positions slash command
+    screen.md         /screen slash command
+    manage.md         /manage slash command
+    balance.md        /balance slash command
+    positions.md      /positions slash command
     candidates.md   /candidates slash command
     study-pool.md   /study-pool slash command
     pool-ohlcv.md   /pool-ohlcv slash command

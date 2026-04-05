@@ -3,17 +3,27 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Autonomous DLMM LP agent for Meteora on Solana",
-  "main": "index.js",
+  "main": "dist/index.js",
   "bin": {
-    "meridian": "cli.js"
+    "meridian": "dist/cli.js"
   },
   "scripts": {
-    "setup": "node setup.js",
-    "start": "node index.js",
-    "dev": "DRY_RUN=true node index.js",
-    "test:screen": "node test/test-screening.js",
-    "test:agent": "DRY_RUN=true node test/test-agent.js",
-    "postinstall": "node scripts/patch-anchor.js"
+    "setup": "pnpm run build && node dist/setup.js",
+    "build": "tsc && node build.js",
+    "start": "pnpm run build && node dist/index.js",
+    "dev": "pnpm run build && cross-env DRY_RUN=true node dist/index.js",
+    "test:screen": "pnpm run build && node dist/test/test-screening.js",
+    "test:agent": "pnpm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
+    "prepare": "pnpm run build",
+    "prepack": "pnpm run build",
+    "postinstall": "node scripts/patch-anchor.js",
+    "typecheck": "tsc --noEmit",
+    "format:changed": "node dist/scripts/biome-changed.js",
+    "format:check": "node dist/scripts/biome-changed.js check",
+    "format:all": "biome format --write .",
+    "lint:changed": "node dist/scripts/biome-lint-changed.js",
+    "lint:check": "node dist/scripts/biome-lint-changed.js check",
+    "check": "pnpm format:check && pnpm typecheck"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
@@ -23,11 +33,24 @@
     "bn.js": "^5.2.1",
     "bs58": "^5.0.0",
     "dotenv": "^17.3.1",
-    "node-cron": "^3.0.3",
     "jsonrepair": "^3.13.3",
+    "node-cron": "^3.0.3",
     "openai": "^4.73.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/**",
+    "scripts/patch-anchor.js",
+    "README.md",
+    ".env.example",
+    "user-config.example.json"
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "2.4.10",
+    "@types/node": "^25.5.2",
+    "cross-env": "^10.1.0",
+    "typescript": "^6.0.2"
   }
 }
