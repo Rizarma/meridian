@@ -1,11 +1,32 @@
 import "dotenv/config";
+
+// ═══════════════════════════════════════════
+//  SIDE-EFFECT IMPORTS: Tool self-registration
+//  discover.ts scans tools/ directory and auto-imports all tool modules
+// ═══════════════════════════════════════════
+import "./tools/discover.js";
+
+// Import other modules that register tools (outside tools/ directory)
+import "./dev-blocklist.js";
+import "./lessons.js";
+import "./pool-memory.js";
+import "./smart-wallets.js";
+import "./state.js";
+import "./strategy-library.js";
+import "./token-blacklist.js";
+
 import type { ScheduledTask } from "node-cron";
 import cron from "node-cron";
 import type { Interface as ReadlineInterface } from "readline";
 import readline from "readline";
 import { agentLoop } from "./agent.js";
 import { generateBriefing } from "./briefing.js";
-import { computeDeployAmount, config, reloadScreeningThresholds } from "./config.js";
+import {
+  computeDeployAmount,
+  config,
+  registerCronRestarter,
+  reloadScreeningThresholds,
+} from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { log } from "./logger.js";
 import { addPoolNote, recallForPool, recordPositionSnapshot } from "./pool-memory.js";
@@ -39,7 +60,6 @@ import {
   isEnabled as telegramEnabled,
 } from "./telegram.js";
 import { closePosition, getActiveBin, getMyPositions } from "./tools/dlmm.js";
-import { registerCronRestarter } from "./tools/executor.js";
 import { getTopCandidates } from "./tools/screening.js";
 import { getTokenInfo, getTokenNarrative } from "./tools/token.js";
 import { getWalletBalances } from "./tools/wallet.js";
