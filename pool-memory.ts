@@ -6,15 +6,15 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
 import { config } from "./config.js";
+import { log } from "./logger.js";
 import type {
   PoolMemoryDB,
   PoolMemoryEntry,
   PoolMemoryInput,
   PoolMemoryResult,
-  PositionSnapshotInput,
   PoolNoteResult,
+  PositionSnapshotInput,
 } from "./types/pool-memory.js";
 
 const POOL_MEMORY_FILE = "./pool-memory.json";
@@ -28,10 +28,22 @@ function sanitizeStoredNote(
   const cleaned = String(text)
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/[<>`]/g, "")
+    .replace(/[<>\`]/g, "")
     .trim()
     .slice(0, maxLen);
   return cleaned || null;
+}
+
+function isAdjustedWinRateExcludedReason(reason: string | undefined): boolean {
+  const text = String(reason || "")
+    .trim()
+    .toLowerCase();
+  return (
+    text.includes("out of range") ||
+    text.includes("pumped far above range") ||
+    text === "oor" ||
+    text.includes("oor")
+  );
 }
 
 function load(): PoolMemoryDB {
@@ -97,6 +109,8 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       total_deploys: 0,
       avg_pnl_pct: 0,
       win_rate: 0,
+      adjusted_win_rate: 0,
+      adjusted_win_rate_sample_count: 0,
       last_deployed_at: null,
       last_outcome: null,
       notes: [],
@@ -130,6 +144,14 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     entry.win_rate =
       Math.round((withPnl.filter((d) => (d.pnl_pct ?? 0) >= 0).length / withPnl.length) * 100) /
       100;
+
+    const adjusted = withPnl.filter((d) => !isAdjustedWinRateExcludedReason(d.close_reason));
+    entry.adjusted_win_rate_sample_count = adjusted.length;
+    entry.adjusted_win_rate =
+      adjusted.length > 0
+        ? Math.round((adjusted.filter((d) => d.pnl_pct >= 0).length / adjusted.length) * 10000) /
+          100
+        : 0;
   }
 
   if (deployData.base_mint && !entry.base_mint) {
@@ -218,6 +240,8 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
     total_deploys: entry.total_deploys,
     avg_pnl_pct: entry.avg_pnl_pct,
     win_rate: entry.win_rate,
+    adjusted_win_rate: entry.adjusted_win_rate ?? 0,
+    adjusted_win_rate_sample_count: entry.adjusted_win_rate_sample_count ?? 0,
     last_deployed_at: entry.last_deployed_at,
     last_outcome: entry.last_outcome,
     cooldown_until: entry.cooldown_until || null,
@@ -246,10 +270,11 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
       total_deploys: 0,
       avg_pnl_pct: 0,
       win_rate: 0,
+      adjusted_win_rate: 0,
+      adjusted_win_rate_sample_count: 0,
       last_deployed_at: null,
       last_outcome: null,
       notes: [],
-      snapshots: [],
     };
   }
 

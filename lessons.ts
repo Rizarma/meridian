@@ -8,24 +8,24 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
-import { USER_CONFIG_PATH, LESSONS_FILE } from "./paths.js";
+import { LESSONS_FILE, USER_CONFIG_PATH } from "./paths.js";
+import type { Config } from "./types/config.js";
 import type {
-  PositionPerformance,
-  PerformanceRecord,
+  EvolutionResult,
+  LessonContext,
   LessonEntry,
   LessonOutcome,
-  LessonContext,
-  ThresholdEvolution,
-  EvolutionResult,
-  PerformanceMetrics,
-  PerformanceHistoryResult,
   LessonsData,
-  RoleTags,
+  ListedLesson,
   ListLessonsOptions,
   ListLessonsResult,
-  ListedLesson,
+  PerformanceHistoryResult,
+  PerformanceMetrics,
+  PerformanceRecord,
+  PositionPerformance,
+  RoleTags,
+  ThresholdEvolution,
 } from "./types/lessons.js";
-import type { Config } from "./types/config.js";
 
 const MIN_EVOLVE_POSITIONS = 5; // don't evolve until we have real data
 const MAX_CHANGE_PER_STEP = 0.2; // never shift a threshold more than 20% at once
@@ -92,6 +92,21 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
   const pnl_pct = perf.initial_value_usd > 0 ? (pnl_usd / perf.initial_value_usd) * 100 : 0;
   const range_efficiency =
     perf.minutes_held > 0 ? (perf.minutes_in_range / perf.minutes_held) * 100 : 0;
+
+  const closeReasonText = String(perf.close_reason || "").toLowerCase();
+  const suspiciousAbsurdClosedPnl =
+    Number.isFinite(pnl_pct) &&
+    perf.initial_value_usd >= 20 &&
+    pnl_pct <= -90 &&
+    !closeReasonText.includes("stop loss");
+
+  if (suspiciousAbsurdClosedPnl) {
+    log(
+      "lessons_warn",
+      `Skipped absurd closed PnL record for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason}`
+    );
+    return;
+  }
 
   const entry: PerformanceRecord = {
     ...perf,
@@ -262,7 +277,12 @@ export function evolveThresholds(
           rationale.maxVolatility = `Losers clustered at volatility ~${loserP25.toFixed(1)} — tightened from ${current} → ${rounded}`;
         }
       }
-    } else if (winnerVols.length >= 3 && losers.length === 0 && current !== null && current !== undefined) {
+    } else if (
+      winnerVols.length >= 3 &&
+      losers.length === 0 &&
+      current !== null &&
+      current !== undefined
+    ) {
       // All winners so far — loosen conservatively so we don't miss good pools
       const winnerP75 = percentile(winnerVols, 75);
       if (winnerP75 > current * 1.1) {
@@ -362,7 +382,8 @@ export function evolveThresholds(
   // Apply to live config object immediately
   const s = config.screening;
   if (changes.maxVolatility != null) (s as any).maxVolatility = changes.maxVolatility;
-  if (changes.minFeeActiveTvlRatio != null) (s as any).minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
+  if (changes.minFeeActiveTvlRatio != null)
+    (s as any).minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
   if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
 
   // Log a lesson summarizing the evolution
