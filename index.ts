@@ -1137,8 +1137,10 @@ async function telegramHandler(msg: TelegramMessage): Promise<void> {
       }
     );
     appendHistory(text, content);
-    if (liveMessage) await liveMessage.finalize(stripThink(content));
-    else await sendMessage(stripThink(content));
+    if (content) {
+      if (liveMessage) await liveMessage.finalize(stripThink(content));
+      else await sendMessage(stripThink(content));
+    }
   } catch (e) {
     if (liveMessage) await liveMessage.fail((e as Error).message).catch(() => {});
     else await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
