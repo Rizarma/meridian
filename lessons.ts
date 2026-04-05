@@ -229,10 +229,6 @@ function derivLesson(perf: PerformanceRecord): LessonEntry | null {
 /**
  * Analyze closed position performance and evolve screening thresholds.
  * Writes changes to user-config.json and returns a summary.
- *
- * NOTE: Known issue - this function references maxVolatility and minFeeTvlRatio
- * but config.js uses minFeeActiveTvlRatio and has no maxVolatility key.
- * The evolution of these keys is currently a no-op.
  */
 export function evolveThresholds(
   perfData: PerformanceRecord[],
@@ -256,10 +252,9 @@ export function evolveThresholds(
   {
     const winnerVols = winners.map((p) => p.volatility).filter(isFiniteNum);
     const loserVols = losers.map((p) => p.volatility).filter(isFiniteNum);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const current = (config.screening as any).maxVolatility;
+    const current = config.screening.maxVolatility;
 
-    if (loserVols.length >= 2 && current !== undefined) {
+    if (loserVols.length >= 2 && current !== null && current !== undefined) {
       // 25th percentile of loser volatilities — this is where things start going wrong
       const loserP25 = percentile(loserVols, 25);
       if (loserP25 < current) {
@@ -272,7 +267,7 @@ export function evolveThresholds(
           rationale.maxVolatility = `Losers clustered at volatility ~${loserP25.toFixed(1)} — tightened from ${current} → ${rounded}`;
         }
       }
-    } else if (winnerVols.length >= 3 && losers.length === 0 && current !== undefined) {
+    } else if (winnerVols.length >= 3 && losers.length === 0 && current !== null && current !== undefined) {
       // All winners so far — loosen conservatively so we don't miss good pools
       const winnerP75 = percentile(winnerVols, 75);
       if (winnerP75 > current * 1.1) {
@@ -287,13 +282,12 @@ export function evolveThresholds(
     }
   }
 
-  // ── 2. minFeeTvlRatio ─────────────────────────────────────────
+  // ── 2. minFeeActiveTvlRatio ─────────────────────────────────────────
   // Raise the floor if low-fee pools consistently underperform.
   {
     const winnerFees = winners.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
     const loserFees = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const current = (config.screening as any).minFeeTvlRatio;
+    const current = config.screening.minFeeActiveTvlRatio;
 
     if (winnerFees.length >= 2 && current !== undefined) {
       // Minimum fee/TVL among winners — we know pools below this don't work for us
@@ -303,8 +297,8 @@ export function evolveThresholds(
         const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
         const rounded = Number(newVal.toFixed(2));
         if (rounded > current) {
-          changes.minFeeTvlRatio = rounded;
-          rationale.minFeeTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
+          changes.minFeeActiveTvlRatio = rounded;
+          rationale.minFeeActiveTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
         }
       }
     }
@@ -319,9 +313,9 @@ export function evolveThresholds(
           const target = maxLoserFee * 1.2;
           const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
           const rounded = Number(newVal.toFixed(2));
-          if (rounded > current && !changes.minFeeTvlRatio) {
-            changes.minFeeTvlRatio = rounded;
-            rationale.minFeeTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
+          if (rounded > current && !changes.minFeeActiveTvlRatio) {
+            changes.minFeeActiveTvlRatio = rounded;
+            rationale.minFeeActiveTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
           }
         }
       }
@@ -373,7 +367,7 @@ export function evolveThresholds(
   // Apply to live config object immediately
   const s = config.screening;
   if (changes.maxVolatility != null) (s as any).maxVolatility = changes.maxVolatility;
-  if (changes.minFeeTvlRatio != null) (s as any).minFeeTvlRatio = changes.minFeeTvlRatio;
+  if (changes.minFeeActiveTvlRatio != null) (s as any).minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
   if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
 
   // Log a lesson summarizing the evolution

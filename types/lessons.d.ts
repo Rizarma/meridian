@@ -67,7 +67,7 @@ export interface LessonContext {
 
 export interface ThresholdEvolution {
   maxVolatility?: number;
-  minFeeTvlRatio?: number;
+  minFeeActiveTvlRatio?: number;
   minOrganic?: number;
   [key: string]: number | undefined;
 }
