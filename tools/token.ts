@@ -1,23 +1,23 @@
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
 import type {
-  TokenNarrativeInput,
-  TokenNarrative,
-  TokenInfoInput,
-  TokenInfoResult,
-  TokenInfo,
-  TokenAudit,
-  TokenStats1h,
-  TokenCluster,
-  TokenHoldersInput,
-  TokenHoldersResult,
-  TokenHolder,
-  TokenHolderFunding,
+  OKXAdvancedResult,
+  OKXClusterResult,
   SmartWalletHolding,
   SmartWalletHoldingPnl,
+  TokenAudit,
+  TokenCluster,
+  TokenHolder,
+  TokenHolderFunding,
+  TokenHoldersInput,
+  TokenHoldersResult,
+  TokenInfo,
+  TokenInfoInput,
+  TokenInfoResult,
+  TokenNarrative,
+  TokenNarrativeInput,
+  TokenStats1h,
 } from "../types/index.js";
-
-import type { OKXAdvancedResult, OKXClusterResult } from "../types/index.js";
 
 import type { SmartWallet, SmartWalletList } from "../types/smart-wallets.js";
 
@@ -161,8 +161,8 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
           price_change: t.stats1h.priceChange?.toFixed(2) ?? null,
           buy_vol: t.stats1h.buyVolume?.toFixed(0) ?? null,
           sell_vol: t.stats1h.sellVolume?.toFixed(0) ?? null,
-          buyers: t.stats1h.numOrganicBuyers ?? 0,
-          net_buyers: t.stats1h.numNetBuyers ?? 0,
+          buyers: t.stats1h.numOrganicBuyers ?? null,
+          net_buyers: t.stats1h.numNetBuyers ?? null,
         }
       : null;
 
