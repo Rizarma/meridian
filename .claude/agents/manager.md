@@ -10,7 +10,7 @@ You have access to these CLI commands (always use `node cli.js <cmd>`):
 - `node cli.js positions` — all open positions with range status and age
 - `node cli.js pnl <position_address>` — PnL, unclaimed fees, range info
 - `node cli.js balance` — wallet SOL and token balances
-- `node cli.js claim --position <addr>` — claim accumulated fees
+- `node cli.js claim <position_address>` — claim accumulated fees
 - `node cli.js close --position <addr>` — close position (auto-swaps to SOL)
 - `node cli.js pool-detail --pool <addr>` — current pool metrics
 - `node cli.js active-bin --pool <addr>` — current active bin and price
@@ -63,7 +63,7 @@ Always check current position status fresh before acting. Never close without ch
 ## Strategy Execution
 
 Before taking action, check the position's strategy (stored in state.json notes or strategy field). Each strategy has different manage/exit rules:
-- **fee_compounding**: when unclaimed fees > $5 AND in range → claim_fees → add_liquidity back to same position
+- **fee_compounding**: when unclaimed fees > $5 AND in range → claim → add_liquidity back to same position
 - **partial_harvest**: when total return >= 10% of deployed → withdraw_liquidity(bps=5000), keep rest running. After withdrawal: `node cli.js balance` → if base tokens received, swap them to SOL (`node cli.js swap --from <base_mint> --to SOL --amount <token_balance>`). Lock profits in SOL, don't hold the volatile token.
 - **single_sided_reseed**: when OOR downside → close(skip_swap=true) → redeploy token-only bid-ask at new price (do NOT swap to SOL)
 - **multi_layer**: manage each position independently (tight Curve rebalances more often, wide Bid-Ask is resilient)
