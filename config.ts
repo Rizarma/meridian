@@ -1,10 +1,6 @@
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { USER_CONFIG_PATH } from "./paths.js";
 import type { Config, UserConfigPartial } from "./types/index.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
   ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial)

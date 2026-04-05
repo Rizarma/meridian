@@ -21,8 +21,7 @@
  */
 
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { USER_CONFIG_PATH, LESSONS_FILE, POOL_MEMORY_FILE } from "./paths.js";
 import type {
   HiveMindConfig,
   SyncPayload,
@@ -34,11 +33,6 @@ import type {
   HivePulse,
   RegistrationResult,
 } from "./types/hive-mind.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
-const LESSONS_FILE = path.join(__dirname, "lessons.json");
-const POOL_MEMORY_FILE = path.join(__dirname, "pool-memory.json");
 
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 const GET_TIMEOUT_MS = 5_000;

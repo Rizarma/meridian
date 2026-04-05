@@ -1,7 +1,6 @@
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import { SMART_WALLETS_FILE } from "./paths.js";
 import type {
   WalletCategory,
   WalletType,
@@ -17,20 +16,17 @@ import type {
   CachedWalletPositions,
 } from "./types/smart-wallets.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WALLETS_PATH = path.join(__dirname, "smart-wallets.json");
-
 function loadWallets(): SmartWalletDB {
-  if (!fs.existsSync(WALLETS_PATH)) return { wallets: [] };
+  if (!fs.existsSync(SMART_WALLETS_FILE)) return { wallets: [] };
   try {
-    return JSON.parse(fs.readFileSync(WALLETS_PATH, "utf8")) as SmartWalletDB;
+    return JSON.parse(fs.readFileSync(SMART_WALLETS_FILE, "utf8")) as SmartWalletDB;
   } catch {
     return { wallets: [] };
   }
 }
 
 function saveWallets(data: SmartWalletDB): void {
-  fs.writeFileSync(WALLETS_PATH, JSON.stringify(data, null, 2));
+  fs.writeFileSync(SMART_WALLETS_FILE, JSON.stringify(data, null, 2));
 }
 
 const SOLANA_PUBKEY_RE: RegExp = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

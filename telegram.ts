@@ -1,7 +1,6 @@
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import { USER_CONFIG_PATH } from "./paths.js";
 import type {
   TelegramNotifyDeploy,
   TelegramNotifyClose,
@@ -12,9 +11,6 @@ import type {
   TelegramMessage,
   TelegramUpdate,
 } from "./types/telegram.d.ts";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const TOKEN: string | null = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE: string | null = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
