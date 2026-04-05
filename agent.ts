@@ -1,30 +1,29 @@
+import { jsonrepair } from "jsonrepair";
 import OpenAI from "openai";
 import type {
-  ChatCompletionMessageParam,
   ChatCompletion,
   ChatCompletionMessage,
+  ChatCompletionMessageParam,
 } from "openai/resources/chat/completions";
-import { jsonrepair } from "jsonrepair";
-import { buildSystemPrompt } from "./prompt.js";
-import { executeTool } from "./tools/executor.js";
-import { tools } from "./tools/definitions.js";
-import type { ToolDefinition } from "./types/index.js";
-import { getWalletBalances } from "./tools/wallet.js";
-import { getMyPositions } from "./tools/dlmm.js";
-import { log } from "./logger.js";
 import { config } from "./config.js";
-import { getStateSummary } from "./state.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
+import { log } from "./logger.js";
+import { buildSystemPrompt } from "./prompt.js";
+import { getStateSummary } from "./state.js";
+import { tools } from "./tools/definitions.js";
+import { getMyPositions } from "./tools/dlmm.js";
+import { executeTool } from "./tools/executor.js";
+import { getWalletBalances } from "./tools/wallet.js";
 import type {
-  AgentType,
   AgentOptions,
   AgentResult,
-  ToolChoice,
-  IntentPattern,
+  AgentType,
   IntentTools,
-  ToolResult,
-  ProviderMode,
   OpenAIError,
+  ProviderMode,
+  ToolChoice,
+  ToolDefinition,
+  ToolResult,
 } from "./types/index.js";
 
 const MANAGER_TOOLS: Set<string> = new Set([
@@ -70,7 +69,10 @@ const GENERAL_INTENT_ONLY_TOOLS: Set<string> = new Set([
   "set_active_strategy",
 ]);
 
-const INTENT_TOOLS: IntentTools = {
+// Derive strict intent key type from INTENT_PATTERNS
+type IntentKey = (typeof INTENT_PATTERNS)[number]["intent"];
+
+const INTENT_TOOLS: { [K in IntentKey]: Set<string> } = {
   deploy: new Set([
     "deploy_position",
     "get_top_candidates",
@@ -157,7 +159,7 @@ const INTENT_TOOLS: IntentTools = {
   lessons: new Set(["add_lesson", "pin_lesson", "unpin_lesson", "list_lessons", "clear_lessons"]),
 };
 
-const INTENT_PATTERNS: IntentPattern[] = [
+const INTENT_PATTERNS = [
   { intent: "deploy", re: /\b(deploy|open|add liquidity|lp into|invest in)\b/i },
   { intent: "close", re: /\b(close|exit|withdraw|remove liquidity|shut down)\b/i },
   { intent: "claim", re: /\b(claim|harvest|collect)\b.*\bfee/i },
@@ -192,7 +194,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
     intent: "lessons",
     re: /\b(lesson|learned|teach|pin|unpin|clear lesson|what did you learn)\b/i,
   },
-];
+] as const;
 
 function getToolsForRole(agentType: AgentType, goal: string): ToolDefinition[] {
   if (agentType === "MANAGER") return tools.filter((t) => MANAGER_TOOLS.has(t.function.name));
@@ -203,9 +205,7 @@ function getToolsForRole(agentType: AgentType, goal: string): ToolDefinition[] {
   for (const { intent, re } of INTENT_PATTERNS) {
     if (re.test(goal)) {
       const toolSet = INTENT_TOOLS[intent];
-      if (toolSet) {
-        for (const t of toolSet) matched.add(t);
-      }
+      for (const t of toolSet) matched.add(t);
     }
   }
 
