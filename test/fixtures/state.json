@@ -1,0 +1,142 @@
+{
+  "positions": {
+    "7xKXk5L9kRmKfP7qKjXyL9kRmKfP7qKjXyL9kRmKfP7q": {
+      "position": "7xKXk5L9kRmKfP7qKjXyL9kRmKfP7qKjXyL9kRmKfP7q",
+      "pool": "EP7j7VG5w1P7x2P9jL9kRmKfP7qKjXyL9kRmKfP7qKjX",
+      "pool_name": "SOL-USDC-100bps",
+      "strategy": "balanced",
+      "bin_range": {
+        "min": 850,
+        "max": 950,
+        "active": 900,
+        "bins_below": 50,
+        "bins_above": 50
+      },
+      "amount_sol": 1.5,
+      "amount_x": 2500.5,
+      "active_bin_at_deploy": 900,
+      "bin_step": 100,
+      "volatility": 2.5,
+      "fee_tvl_ratio": 0.085,
+      "initial_fee_tvl_24h": 0.092,
+      "organic_score": 78,
+      "initial_value_usd": 285.75,
+      "signal_snapshot": {
+        "volume_24h": 125000,
+        "tvl": 85000,
+        "fee_24h": 7200,
+        "holder_count": 1250,
+        "top_10_pct": 45,
+        "bundle_pct": 15,
+        "bot_holders_pct": 18
+      },
+      "deployed_at": "2026-04-01T14:30:00.000Z",
+      "out_of_range_since": null,
+      "last_claim_at": "2026-04-03T09:15:00.000Z",
+      "total_fees_claimed_usd": 12.45,
+      "rebalance_count": 0,
+      "closed": false,
+      "closed_at": null,
+      "notes": [
+        "Deployed with balanced strategy targeting 100bps fee tier",
+        "Claimed ~$12.45 fees at 2026-04-03T09:15:00.000Z"
+      ],
+      "peak_pnl_pct": 8.5,
+      "pending_peak_pnl_pct": null,
+      "pending_peak_started_at": null,
+      "trailing_active": false,
+      "instruction": null,
+      "pending_trailing_current_pnl_pct": null,
+      "pending_trailing_peak_pnl_pct": null,
+      "pending_trailing_drop_pct": null,
+      "pending_trailing_started_at": null,
+      "confirmed_trailing_exit_reason": null,
+      "confirmed_trailing_exit_until": null
+    },
+    "9yMZm7N2mTnH9rS9mTnH9rS9mTnH9rS9mTnH9rS9mTnH": {
+      "position": "9yMZm7N2mTnH9rS9mTnH9rS9mTnH9rS9mTnH9rS9mTnH",
+      "pool": "AB9j7VG5w1P7x2P9jL9kRmKfP7qKjXyL9kRmKfP7qKjY",
+      "pool_name": "BONK-SOL-80bps",
+      "strategy": "aggressive",
+      "bin_range": {
+        "min": 420,
+        "max": 580,
+        "active": 500,
+        "bins_below": 80,
+        "bins_above": 80
+      },
+      "amount_sol": 0.75,
+      "amount_x": 1500000,
+      "active_bin_at_deploy": 500,
+      "bin_step": 80,
+      "volatility": 4.2,
+      "fee_tvl_ratio": 0.12,
+      "initial_fee_tvl_24h": 0.145,
+      "organic_score": 65,
+      "initial_value_usd": 142.5,
+      "signal_snapshot": {
+        "volume_24h": 85000,
+        "tvl": 45000,
+        "fee_24h": 5400,
+        "holder_count": 850,
+        "top_10_pct": 52,
+        "bundle_pct": 22,
+        "bot_holders_pct": 21
+      },
+      "deployed_at": "2026-03-15T10:00:00.000Z",
+      "out_of_range_since": "2026-03-20T16:45:00.000Z",
+      "last_claim_at": "2026-03-18T08:30:00.000Z",
+      "total_fees_claimed_usd": 8.32,
+      "rebalance_count": 1,
+      "closed": true,
+      "closed_at": "2026-03-25T12:00:00.000Z",
+      "notes": [
+        "Deployed with aggressive strategy - high volatility expected",
+        "Went out of range on 2026-03-20 - monitoring for re-entry",
+        "Claimed ~$8.32 fees at 2026-03-18T08:30:00.000Z",
+        "Rebalanced from 8xKXk5L9kRmKfP7qKjXyL9kRmKfP7qKjXyL9kRmKfP7r",
+        "Closed at 2026-03-25T12:00:00.000Z: Stop loss triggered at -15% PnL"
+      ],
+      "peak_pnl_pct": 12.3,
+      "pending_peak_pnl_pct": null,
+      "pending_peak_started_at": null,
+      "trailing_active": false,
+      "instruction": null,
+      "pending_trailing_current_pnl_pct": null,
+      "pending_trailing_peak_pnl_pct": null,
+      "pending_trailing_drop_pct": null,
+      "pending_trailing_started_at": null,
+      "confirmed_trailing_exit_reason": null,
+      "confirmed_trailing_exit_until": null
+    }
+  },
+  "recentEvents": [
+    {
+      "ts": "2026-04-01T14:30:00.000Z",
+      "action": "deploy",
+      "position": "7xKXk5L9kRmKfP7qKjXyL9kRmKfP7qKjXyL9kRmKfP7q",
+      "pool_name": "SOL-USDC-100bps"
+    },
+    {
+      "ts": "2026-04-03T09:15:00.000Z",
+      "action": "claim",
+      "position": "7xKXk5L9kRmKfP7qKjXyL9kRmKfP7qKjXyL9kRmKfP7q",
+      "pool_name": "SOL-USDC-100bps"
+    },
+    {
+      "ts": "2026-03-25T12:00:00.000Z",
+      "action": "close",
+      "position": "9yMZm7N2mTnH9rS9mTnH9rS9mTnH9rS9mTnH9rS9mTnH",
+      "pool_name": "BONK-SOL-80bps",
+      "reason": "Stop loss triggered at -15% PnL"
+    },
+    {
+      "ts": "2026-03-15T10:00:00.000Z",
+      "action": "deploy",
+      "position": "9yMZm7N2mTnH9rS9mTnH9rS9mTnH9rS9mTnH9rS9mTnH",
+      "pool_name": "BONK-SOL-80bps"
+    }
+  ],
+  "lastUpdated": "2026-04-05T08:30:00.000Z",
+  "_lastBriefingDate": "2026-04-04"
+}
