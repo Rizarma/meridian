@@ -8,6 +8,7 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { registerTool } from "./tools/registry.js";
 import type { BlockedDev, DevBlocklistDB } from "./types/blocklist.d.ts";
 
 const BLOCKLIST_FILE = "./dev-blocklist.json";
@@ -91,3 +92,22 @@ export function listBlockedDevs(): {
   }));
   return { count: entries.length, blocked_devs: entries };
 }
+
+// Tool registrations
+registerTool({
+  name: "block_deployer",
+  handler: blockDev,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "unblock_deployer",
+  handler: unblockDev,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "list_blocked_deployers",
+  handler: listBlockedDevs,
+  roles: ["GENERAL"],
+});

@@ -1,6 +1,14 @@
 import fs from "fs";
+import { log } from "./logger.js";
 import { USER_CONFIG_PATH } from "./paths.js";
-import type { Config, UserConfigPartial } from "./types/index.js";
+import { registerTool } from "./tools/registry.js";
+import type {
+  Config,
+  ConfigChangeMap,
+  UpdateConfigInput,
+  UpdateConfigResult,
+  UserConfigPartial,
+} from "./types/index.js";
 
 const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
   ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial)
@@ -13,6 +21,12 @@ if (u.llmModel) process.env.LLM_MODEL ||= u.llmModel;
 if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
 if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
+
+// Registered by index.js so update_config can restart cron jobs when intervals change
+let _cronRestarter: (() => void) | null = null;
+export function registerCronRestarter(fn: () => void): void {
+  _cronRestarter = fn;
+}
 
 export const config: Config = {
   // ─── Risk Limits ─────────────────────────
@@ -171,3 +185,137 @@ export function reloadScreeningThresholds(): void {
     /* ignore */
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Registrations
+// ═══════════════════════════════════════════════════════════════════════════
+
+registerTool({
+  name: "update_config",
+  handler: (args: unknown) => {
+    const { changes, reason = "" } = args as UpdateConfigInput;
+
+    // Flat key → config section mapping (covers everything in config.js)
+    const CONFIG_MAP: ConfigChangeMap = {
+      // screening
+      minFeeActiveTvlRatio: ["screening", "minFeeActiveTvlRatio"],
+      minTvl: ["screening", "minTvl"],
+      maxTvl: ["screening", "maxTvl"],
+      minVolume: ["screening", "minVolume"],
+      minOrganic: ["screening", "minOrganic"],
+      minHolders: ["screening", "minHolders"],
+      minMcap: ["screening", "minMcap"],
+      maxMcap: ["screening", "maxMcap"],
+      minBinStep: ["screening", "minBinStep"],
+      maxBinStep: ["screening", "maxBinStep"],
+      timeframe: ["screening", "timeframe"],
+      category: ["screening", "category"],
+      minTokenFeesSol: ["screening", "minTokenFeesSol"],
+      maxBundlePct: ["screening", "maxBundlePct"],
+      maxBotHoldersPct: ["screening", "maxBotHoldersPct"],
+      maxTop10Pct: ["screening", "maxTop10Pct"],
+      minTokenAgeHours: ["screening", "minTokenAgeHours"],
+      maxTokenAgeHours: ["screening", "maxTokenAgeHours"],
+      athFilterPct: ["screening", "athFilterPct"],
+      minFeePerTvl24h: ["management", "minFeePerTvl24h"],
+      // management
+      minClaimAmount: ["management", "minClaimAmount"],
+      autoSwapAfterClaim: ["management", "autoSwapAfterClaim"],
+      outOfRangeBinsToClose: ["management", "outOfRangeBinsToClose"],
+      outOfRangeWaitMinutes: ["management", "outOfRangeWaitMinutes"],
+      oorCooldownTriggerCount: ["management", "oorCooldownTriggerCount"],
+      oorCooldownHours: ["management", "oorCooldownHours"],
+      minVolumeToRebalance: ["management", "minVolumeToRebalance"],
+      stopLossPct: ["management", "stopLossPct"],
+      takeProfitFeePct: ["management", "takeProfitFeePct"],
+      trailingTakeProfit: ["management", "trailingTakeProfit"],
+      trailingTriggerPct: ["management", "trailingTriggerPct"],
+      trailingDropPct: ["management", "trailingDropPct"],
+      solMode: ["management", "solMode"],
+      minSolToOpen: ["management", "minSolToOpen"],
+      deployAmountSol: ["management", "deployAmountSol"],
+      gasReserve: ["management", "gasReserve"],
+      positionSizePct: ["management", "positionSizePct"],
+      // risk
+      maxPositions: ["risk", "maxPositions"],
+      maxDeployAmount: ["risk", "maxDeployAmount"],
+      // schedule
+      managementIntervalMin: ["schedule", "managementIntervalMin"],
+      screeningIntervalMin: ["schedule", "screeningIntervalMin"],
+      // models
+      managementModel: ["llm", "managementModel"],
+      screeningModel: ["llm", "screeningModel"],
+      generalModel: ["llm", "generalModel"],
+      // strategy
+      binsBelow: ["strategy", "binsBelow"],
+    };
+
+    const applied: Record<string, string | number | boolean> = {};
+    const unknown: string[] = [];
+
+    // Build case-insensitive lookup
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const CONFIG_MAP_LOWER: Record<string, any> = Object.entries(CONFIG_MAP)
+      .map(([k, v]) => [k.toLowerCase(), [k, v]])
+      .reduce((acc, [k, v]) => ({ ...acc, [k as string]: v }), {});
+
+    for (const [key, val] of Object.entries(changes)) {
+      const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
+      if (!match) {
+        unknown.push(key);
+        continue;
+      }
+      applied[match[0] as string] = val;
+    }
+
+    if (Object.keys(applied).length === 0) {
+      log(
+        "config",
+        `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`
+      );
+      return { success: false, unknown, reason } as UpdateConfigResult;
+    }
+
+    // Apply to live config immediately
+    for (const [key, val] of Object.entries(applied)) {
+      const [section, field] = CONFIG_MAP[key];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const configSection = (config as any)[section];
+      const before = configSection[field];
+      configSection[field] = val;
+      log(
+        "config",
+        `update_config: config.${section}.${field} ${before} → ${val} (verify: ${configSection[field]})`
+      );
+    }
+
+    // Persist to user-config.json
+    type UserConfig = Record<string, unknown> & { _lastAgentTune?: string };
+    let userConfig: UserConfig = {};
+    if (fs.existsSync(USER_CONFIG_PATH)) {
+      try {
+        userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfig;
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+    Object.assign(userConfig, applied);
+    userConfig._lastAgentTune = new Date().toISOString();
+    fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+
+    // Restart cron jobs if intervals changed
+    const intervalChanged =
+      applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
+    if (intervalChanged && _cronRestarter) {
+      _cronRestarter();
+      log(
+        "config",
+        `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`
+      );
+    }
+
+    log("config", `Agent self-tuned: ${JSON.stringify(applied)} — ${reason}`);
+    return { success: true, applied, unknown, reason } as UpdateConfigResult;
+  },
+  roles: ["GENERAL"],
+});

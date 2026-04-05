@@ -1,19 +1,20 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { SMART_WALLETS_FILE } from "./paths.js";
+import { registerTool } from "./tools/registry.js";
 import type {
-  WalletCategory,
-  WalletType,
+  AddSmartWalletInput,
+  CachedWalletPositions,
+  CheckSmartWalletsInput,
+  RemoveSmartWalletInput,
   SmartWallet,
   SmartWalletDB,
-  AddSmartWalletInput,
-  RemoveSmartWalletInput,
-  SmartWalletResult,
   SmartWalletList,
+  SmartWalletResult,
+  WalletCategory,
   WalletInPool,
-  CheckSmartWalletsInput,
   WalletPositionCheck,
-  CachedWalletPositions,
+  WalletType,
 } from "./types/smart-wallets.js";
 
 function loadWallets(): SmartWalletDB {
@@ -135,3 +136,28 @@ export async function checkSmartWalletsOnPool({
         : `0/${wallets.length} smart wallets in this pool — neutral, rely on fundamentals`,
   };
 }
+
+// Tool registrations
+registerTool({
+  name: "add_smart_wallet",
+  handler: addSmartWallet,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "remove_smart_wallet",
+  handler: removeSmartWallet,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "list_smart_wallets",
+  handler: listSmartWallets,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "check_smart_wallets_on_pool",
+  handler: checkSmartWalletsOnPool,
+  roles: ["SCREENER", "GENERAL"],
+});

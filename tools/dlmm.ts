@@ -8,38 +8,39 @@ import {
 import BN from "bn.js";
 import bs58 from "bs58";
 import { config } from "../config.js";
+import { recordPerformance } from "../lessons.js";
 import { log } from "../logger.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import {
-  trackPosition,
-  markOutOfRange,
+  getTrackedPosition,
   markInRange,
+  markOutOfRange,
+  minutesOutOfRange,
   recordClaim,
   recordClose,
-  getTrackedPosition,
-  minutesOutOfRange,
   syncOpenPositions,
+  trackPosition,
 } from "../state.js";
-import { recordPerformance } from "../lessons.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint } from "./wallet.js";
 import type {
-  DeployParams,
-  DeployResult,
-  PositionPnL,
-  RawPnLData,
-  EnrichedPosition,
-  PositionsResult,
-  CloseParams,
-  CloseResult,
+  ActiveBinParams,
+  ActiveBinResult,
   ClaimParams,
   ClaimResult,
+  CloseParams,
+  CloseResult,
+  DeployParams,
+  DeployResult,
+  EnrichedPosition,
+  PositionPnL,
+  PositionsResult,
+  RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
   WalletPositionsParams,
   WalletPositionsResult,
-  ActiveBinParams,
-  ActiveBinResult,
 } from "../types/dlmm.js";
+import { registerTool } from "./registry.js";
+import { normalizeMint } from "./wallet.js";
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
@@ -83,18 +84,24 @@ function getWallet(): Keypair {
 
 // ─── Pool Cache ────────────────────────────────────────────────
 const poolCache = new Map<string, any>();
+let _poolCacheInterval: NodeJS.Timeout | null = null;
+
+function startPoolCacheInterval() {
+  if (!_poolCacheInterval) {
+    _poolCacheInterval = setInterval(() => poolCache.clear(), 5 * 60 * 1000);
+  }
+}
 
 async function getPool(poolAddress: string): Promise<any> {
   const key = poolAddress.toString();
   if (!poolCache.has(key)) {
+    startPoolCacheInterval(); // lazy start - only when actually needed
     const { DLMM } = await getDLMM();
     const pool = await DLMM.create(getConnection(), new PublicKey(poolAddress));
     poolCache.set(key, pool);
   }
   return poolCache.get(key);
 }
-
-setInterval(() => poolCache.clear(), 5 * 60 * 1000);
 
 // ─── Get Active Bin ────────────────────────────────────────────
 export async function getActiveBin({ pool_address }: ActiveBinParams): Promise<ActiveBinResult> {
@@ -1055,3 +1062,55 @@ async function lookupPoolForPosition(
 
   throw new Error(`Position ${position_address} not found in open positions`);
 }
+
+// Tool registrations
+registerTool({
+  name: "get_active_bin",
+  handler: getActiveBin,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_position_pnl",
+  handler: getPositionPnl,
+  roles: ["MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_my_positions",
+  handler: getMyPositions,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_wallet_positions",
+  handler: getWalletPositions,
+  roles: ["GENERAL"], // Research only — not for agent's own positions
+});
+
+registerTool({
+  name: "search_pools",
+  handler: searchPools,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "deploy_position",
+  handler: deployPosition,
+  roles: ["SCREENER", "GENERAL"],
+  isWriteTool: true,
+});
+
+registerTool({
+  name: "close_position",
+  handler: closePosition,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});
+
+registerTool({
+  name: "claim_fees",
+  handler: claimFees,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});

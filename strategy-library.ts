@@ -8,14 +8,15 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { registerTool } from "./tools/registry.js";
 import type {
-  LPStrategyType,
-  TokenCriteria,
   EntryCriteria,
-  RangeCriteria,
   ExitCriteria,
+  LPStrategyType,
+  RangeCriteria,
   Strategy,
   StrategyDB,
+  TokenCriteria,
 } from "./types/strategy.d.ts";
 
 const STRATEGY_FILE = "./strategy-library.json";
@@ -357,3 +358,34 @@ export function getActiveStrategy(): Strategy | null {
   if (!db.active || !db.strategies[db.active]) return null;
   return db.strategies[db.active];
 }
+
+// Tool registrations
+registerTool({
+  name: "add_strategy",
+  handler: addStrategy,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "list_strategies",
+  handler: listStrategies,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "get_strategy",
+  handler: getStrategy,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "set_active_strategy",
+  handler: setActiveStrategy,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "remove_strategy",
+  handler: removeStrategy,
+  roles: ["GENERAL"],
+});

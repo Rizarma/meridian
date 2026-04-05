@@ -20,6 +20,7 @@ import type {
 } from "../types/index.js";
 
 import type { SmartWallet, SmartWalletList } from "../types/smart-wallets.js";
+import { registerTool } from "./registry.js";
 
 // Jupiter API response types
 interface JupiterNarrativeResponse {
@@ -370,3 +371,22 @@ export async function getTokenHolders({
     holders: mapped,
   };
 }
+
+// Tool registrations
+registerTool({
+  name: "get_token_info",
+  handler: getTokenInfo,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_token_holders",
+  handler: getTokenHolders,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_token_narrative",
+  handler: getTokenNarrative,
+  roles: ["SCREENER", "GENERAL"],
+});

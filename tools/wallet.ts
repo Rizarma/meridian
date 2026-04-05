@@ -1,13 +1,14 @@
 import {
   Connection,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-  VersionedTransaction,
   Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { log } from "../logger.js";
 import { config } from "../config.js";
+import { log } from "../logger.js";
+import { registerTool } from "./registry.js";
 
 // Type imports from types/wallet.d.ts
 interface WalletBalance {
@@ -357,3 +358,17 @@ async function swapViaQuoteApi({
   log("swap", `SUCCESS (fallback) tx: ${txHash}`);
   return { success: true, tx: txHash, input_mint, output_mint };
 }
+
+// Tool registrations
+registerTool({
+  name: "get_wallet_balance",
+  handler: getWalletBalances,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "swap_token",
+  handler: swapToken,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});
