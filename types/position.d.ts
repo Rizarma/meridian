@@ -17,6 +17,7 @@ export interface Position {
   pnl_pct_suspicious?: boolean;
   fee_per_tvl_24h?: number;
   instruction?: string;
+  base_mint?: string; // Token mint for duplicate detection
   // Extended fields from positionData
   recall?: PoolMemory;
 }
