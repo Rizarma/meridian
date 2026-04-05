@@ -36,5 +36,6 @@ discord-signals.json
 # Playwright MCP browser logs
 .playwright-mcp/
 
-# Claude Code runtime lock
+# Claude Code — only track shared settings, not local overrides
 .claude/scheduled_tasks.lock
+.claude/settings.local.json

@@ -1,0 +1,5 @@
+# Plan subfolders are local only — each dev keeps their own plans locally.
+# Only this README (the naming convention guide) is tracked.
+*
+!.gitignore
+!README.md
