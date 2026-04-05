@@ -14,11 +14,7 @@ You have access to these CLI commands:
 - `curl -s "https://dlmm.datapi.meteora.ag/pools/<addr>/volume/history?timeframe=1h"` — volume trend
 - `curl -s "https://dlmm.datapi.meteora.ag/stats/protocol_metrics"` — protocol-wide TVL/volume/fees
 
-**OKX signals (use `onchainos <cmd>`):****
-- `onchainos signal list --chain solana --wallet-type 1` — smart money buy signals (type 1=smart money, 2=KOL, 3=whale)
-- `onchainos token advanced-info --address <mint> --chain solana` — risk level, rug pull count, honeypot flag, dev holding %
-- `onchainos token holders --address <mint> --chain solana --tag-filter 3` — smart money holders
-- `onchainos token trending --chains solana` — trending tokens by volume
+**Note:** OKX smart money signals via `onchainos` CLI are available if installed separately. Check `onchainos signal list --chain solana --wallet-type 1` for smart money buy signals when the tool is present.
 
 **Meridian CLI (use `node cli.js <cmd>`):**
 - `node cli.js lessons` — learned rules from past positions (read this first every cycle)
@@ -74,8 +70,6 @@ After choosing a pool candidate, the deploy parameters must be derived from REAL
 | `node cli.js study --pool <addr>` | top LPer win rate, avg hold hours, range widths used | Bin range calibration |
 | `node cli.js pool-memory --pool <addr>` | previous deploys, win_rate, avg_pnl_pct | Confidence adjustment |
 | `node cli.js lessons` | learned rules from past positions | Override any default |
-| `onchainos signal list --chain solana --wallet-type 1` | smart money buy/sell signals | Ratio direction |
-| `onchainos token advanced-info --address <mint> --chain solana` | risk level, rug pull count, honeypot, dev holding % | Hard rejects |
 
 ### 2. Choose Strategy
 
@@ -103,15 +97,15 @@ Each strategy uses the gathered data differently. After choosing a strategy, fol
 
 #### custom_ratio_spot
 
-**Ratio** — derived from `token-info` → `stats_1h` + `onchainos signals`:
+**Ratio** — derived from `token-info` → `stats_1h`:
 
-| price_change_1h | net_buyers_1h | smart money | Ratio | Bias |
-|-----------------|---------------|-------------|-------|------|
-| > +5% | > +10 | buying | 80% token / 20% SOL | strong bull |
-| +1% to +5% | positive | — | 70% token / 30% SOL | mild bull |
-| -1% to +1% | mixed | — | 50% / 50% | neutral |
-| -1% to -5% | negative | — | 30% token / 70% SOL | mild bear |
-| < -5% | < -10 | selling | 20% token / 80% SOL | strong bear |
+| price_change_1h | net_buyers_1h | Ratio | Bias |
+|-----------------|---------------|-------|------|
+| > +5% | > +10 | 80% token / 20% SOL | strong bull |
+| +1% to +5% | positive | 70% token / 30% SOL | mild bull |
+| -1% to +1% | mixed | 50% / 50% | neutral |
+| -1% to -5% | negative | 30% token / 70% SOL | mild bear |
+| < -5% | < -10 | 20% token / 80% SOL | strong bear |
 
 **Capital allocation — total deploy amount is always in SOL:**
 1. Read `total_sol` from pre-deploy checks (section 4)
