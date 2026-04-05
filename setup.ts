@@ -6,8 +6,7 @@
 
 import readline from "readline";
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { USER_CONFIG_PATH, ENV_PATH } from "./paths.js";
 import type {
   Presets,
   PresetConfig,
@@ -21,10 +20,6 @@ import type {
   AskChoiceFn,
   AskNumOptions,
 } from "./types/setup.d.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.join(__dirname, "user-config.json");
-const ENV_PATH = path.join(__dirname, ".env");
 
 const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
@@ -205,8 +200,8 @@ const PRESETS: Presets = {
 };
 
 // ─── Load existing state ───────────────────────────────────────────────────────
-const existingConfig: Partial<UserConfig> = fs.existsSync(CONFIG_PATH)
-  ? JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"))
+const existingConfig: Partial<UserConfig> = fs.existsSync(USER_CONFIG_PATH)
+  ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
   : {};
 const existingEnv: EnvMap = fs.existsSync(ENV_PATH)
   ? parseEnv(fs.readFileSync(ENV_PATH, "utf8"))
@@ -472,7 +467,7 @@ const userConfig: UserConfig = {
 delete (userConfig as Partial<UserConfig> & { emergencyPriceDropPct?: unknown })
   .emergencyPriceDropPct;
 
-fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 const presetName = preset ? `${preset.label}` : "Custom";
@@ -499,7 +494,7 @@ console.log(`
 
   Telegram:     ${telegramToken ? "enabled" : "disabled"}
   .env:         ${ENV_PATH}
-  Config:       ${CONFIG_PATH}
+  Config:       ${USER_CONFIG_PATH}
 
 Run "pnpm start" to launch the agent.
 ${dryRun ? "\n  ⚠ DRY RUN is ON — set dryRun: false in user-config.json when ready for live trading.\n" : ""}

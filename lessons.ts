@@ -7,9 +7,8 @@
  */
 
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import { USER_CONFIG_PATH, LESSONS_FILE } from "./paths.js";
 import type {
   PositionPerformance,
   PerformanceRecord,
@@ -28,10 +27,6 @@ import type {
 } from "./types/lessons.js";
 import type { Config } from "./types/config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
-
-const LESSONS_FILE = "./lessons.json";
 const MIN_EVOLVE_POSITIONS = 5; // don't evolve until we have real data
 const MAX_CHANGE_PER_STEP = 0.2; // never shift a threshold more than 20% at once
 const MAX_MANUAL_LESSON_LENGTH = 400;

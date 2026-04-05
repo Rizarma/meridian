@@ -42,12 +42,9 @@ import {
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds } from "../config.js";
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { USER_CONFIG_PATH } from "../paths.js";
 import { execSync, spawn } from "child_process";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "../user-config.json");
 import { log, logAction } from "../logger.js";
 import { notifyDeploy, notifyClose, notifySwap } from "../telegram.js";
 
