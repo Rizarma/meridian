@@ -23,7 +23,7 @@ Replace ADDRESS with the position address string from step 1.
 - In range, total return >= 10% → close and take profit
 
 **`fee_compounding`:**
-- In range, unclaimed fees > $5 → `node cli.js claim-fees --position <addr> --pool <pool>` then `node cli.js add-liquidity --position <addr> --pool <pool> --amount-y <claimed_sol>` to re-add fees back
+- In range, unclaimed fees > $5 → `node cli.js claim <position_address>` then `node cli.js add-liquidity --position <addr> --pool <pool> --amount-y <claimed_sol>` to re-add fees back
 - OOR → close normally
 
 **`single_sided_reseed`:**
