@@ -19,23 +19,73 @@ export interface TestSuite {
 
 const suites: TestSuite[] = [];
 let currentSuite: TestSuite | null = null;
+const suiteStack: TestSuite[] = [];
+const pendingSuites: Promise<void>[] = [];
+const pendingTests: Promise<void>[] = [];
 
 /**
  * Define a test suite (group of related tests)
+ * Supports both sync and async test functions within the suite.
  */
-export function describe(name: string, fn: () => void): void {
+export function describe(name: string, fn: () => void | Promise<void>): void {
   currentSuite = { name, tests: [] };
-  fn();
+
+  try {
+    const result = fn();
+    // If fn returns a promise, we need to handle it
+    // Note: In a minimal harness, we assume synchronous execution
+    // For full async support, use describeAsync
+    if (result && typeof result.then === "function") {
+      throw new Error("Async suite functions detected. Use describeAsync() for async test suites.");
+    }
+  } catch (e) {
+    // Re-throw to allow caller to handle
+    currentSuite = null;
+    throw e;
+  }
+
   suites.push(currentSuite);
   currentSuite = null;
 }
 
 /**
- * Define a single test case
+ * Define an async test suite (supports async test functions)
+ * This is synchronous at call site but stores the promise for later execution.
+ * Use runTestsAsync() to await all pending suites before running tests.
  */
-export function test(name: string, fn: () => void): void {
+export function describeAsync(name: string, fn: () => Promise<void>): void {
+  const suite: TestSuite = { name, tests: [] };
+
+  // Store the promise to be awaited later in runTestsAsync()
+  const suitePromise = (async () => {
+    suiteStack.push(suite); // Push this suite onto stack
+    try {
+      await fn();
+      // Wait for all async tests in this suite to complete
+      if (pendingTests.length > 0) {
+        await Promise.all(pendingTests);
+        pendingTests.length = 0;
+      }
+      suites.push(suite);
+    } catch (e) {
+      throw e;
+    } finally {
+      suiteStack.pop(); // Pop this suite from stack
+      // Clear any remaining pending tests
+      pendingTests.length = 0;
+    }
+  })();
+
+  pendingSuites.push(suitePromise);
+}
+
+/**
+ * Define a single test case
+ * Handles both sync and async test functions by detecting Promise return values.
+ */
+export function test(name: string, fn: () => void | Promise<void>): void {
   if (!currentSuite) {
-    throw new Error("test() must be called inside describe()");
+    throw new Error("test() must be called inside describe() or describeAsync()");
   }
 
   const start = Date.now();
@@ -43,7 +93,18 @@ export function test(name: string, fn: () => void): void {
   let error: string | undefined;
 
   try {
-    fn();
+    const result = fn();
+
+    // Check if the test function returned a Promise (async test)
+    if (result && typeof result.then === "function") {
+      // For async tests within sync describe(), we can't properly await
+      // This is a limitation of the minimal harness
+      throw new Error(
+        "Async test function detected in sync describe(). " +
+          "Use describeAsync() for async test suites or handle async before test()."
+      );
+    }
+    // Sync test completed successfully
   } catch (e) {
     passed = false;
     error = e instanceof Error ? e.message : String(e);
@@ -55,6 +116,42 @@ export function test(name: string, fn: () => void): void {
     error,
     durationMs: Date.now() - start,
   });
+}
+
+/**
+ * Define an async test case (for use within describeAsync)
+ * Synchronously registers the test, but stores async execution for later awaiting.
+ */
+export function testAsync(name: string, fn: () => Promise<void>): void {
+  const activeSuite = suiteStack[suiteStack.length - 1]; // Get top of stack
+  if (!activeSuite) {
+    throw new Error("testAsync() must be called inside describeAsync()");
+  }
+
+  // Register test synchronously with placeholder result
+  const testResult: TestResult = {
+    name,
+    passed: true,
+    error: undefined,
+    durationMs: 0,
+  };
+  activeSuite.tests.push(testResult);
+
+  // Store the async execution to be awaited
+  const testPromise = (async () => {
+    const start = Date.now();
+    try {
+      await fn();
+      testResult.passed = true;
+    } catch (e) {
+      testResult.passed = false;
+      testResult.error = e instanceof Error ? e.message : String(e);
+    }
+    testResult.durationMs = Date.now() - start;
+  })();
+
+  // Add to pending tests for this suite
+  pendingTests.push(testPromise);
 }
 
 /**
@@ -118,9 +215,9 @@ export function expect(value: unknown): Expectation {
 }
 
 /**
- * Run all tests and print summary
+ * Print test results summary
  */
-export function runTests(): void {
+function printResults(): void {
   console.log("\n" + "=".repeat(60));
   console.log("PHASE 0 CHARACTERIZATION TESTS");
   console.log("=".repeat(60) + "\n");
@@ -160,6 +257,47 @@ export function runTests(): void {
     console.log("\n🎉 All tests passed!");
   } else {
     console.log(`\n⚠️  ${failedTests} test(s) failed`);
+  }
+}
+
+/**
+ * Run all tests and print summary (synchronous version)
+ * For sync tests only. Use runTestsAsync() if using describeAsync().
+ */
+export function runTests(): void {
+  printResults();
+
+  // Exit with error code if any tests failed
+  const failedTests = suites.reduce(
+    (count, suite) => count + suite.tests.filter((t) => !t.passed).length,
+    0
+  );
+
+  if (failedTests > 0) {
+    process.exit(1);
+  }
+}
+
+/**
+ * Run all tests and print summary (asynchronous version)
+ * Awaits all pending async suites before running tests.
+ * Use this when test files use describeAsync().
+ */
+export async function runTestsAsync(): Promise<void> {
+  // Wait for all async suites to complete
+  if (pendingSuites.length > 0) {
+    await Promise.all(pendingSuites);
+  }
+
+  printResults();
+
+  // Exit with error code if any tests failed
+  const failedTests = suites.reduce(
+    (count, suite) => count + suite.tests.filter((t) => !t.passed).length,
+    0
+  );
+
+  if (failedTests > 0) {
     process.exit(1);
   }
 }
@@ -170,6 +308,9 @@ export function runTests(): void {
 export function resetTests(): void {
   suites.length = 0;
   currentSuite = null;
+  suiteStack.length = 0;
+  pendingSuites.length = 0;
+  pendingTests.length = 0;
 }
 
 /**
