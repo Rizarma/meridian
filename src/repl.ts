@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { Interface as ReadlineInterface } from "readline";
@@ -253,14 +254,55 @@ function formatCountdown(seconds: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function buildPrompt(deps: REPLDependencies): string {
+function buildPrompt(): string {
+  return "> ";
+}
+
+function buildStatusBar(deps: REPLDependencies): string {
   const mgmt = formatCountdown(
     nextRunIn(deps.timers.managementLastRun, config.schedule.managementIntervalMin)
   );
   const scrn = formatCountdown(
     nextRunIn(deps.timers.screeningLastRun, config.schedule.screeningIntervalMin)
   );
-  return `[manage: ${mgmt} | screen: ${scrn}]\n> `;
+  return chalk.dim(`[manage: ${mgmt} | screen: ${scrn}]`);
+}
+
+function drawStatusBar(deps: REPLDependencies): void {
+  if (!_ttyInterface) return;
+
+  // @ts-ignore - line is a private property
+  const currentLine = _ttyInterface.line;
+
+  // Don't draw status bar if user is typing (has input on current line)
+  if (currentLine && currentLine.length > 0) return;
+
+  const statusText = buildStatusBar(deps);
+
+  // ANSI escape sequence to:
+  // 1. Save cursor position
+  // 2. Move to beginning of current line
+  // 3. Clear to end of line
+  // 4. Write status bar
+  // 5. Restore cursor position
+  process.stdout.write("\x1b[s"); // Save cursor
+  process.stdout.write("\x1b[1G"); // Move to column 1
+  process.stdout.write("\x1b[K"); // Clear to end of line
+  process.stdout.write(statusText); // Write status
+  process.stdout.write("\x1b[u"); // Restore cursor
+}
+
+function refreshPrompt(deps: REPLDependencies): void {
+  if (!_ttyInterface) return;
+
+  // @ts-ignore - line is a private property
+  const currentLine = _ttyInterface.line;
+
+  // Skip if user is typing
+  if (currentLine && currentLine.length > 0) return;
+
+  // Just redraw the status bar in-place
+  drawStatusBar(deps);
 }
 
 function formatCandidates(candidates: CondensedPool[]): string {
@@ -298,24 +340,6 @@ function appendHistory(userMsg: string, assistantMsg: string): void {
   // Trim to last MAX_HISTORY messages
   if (sessionHistory.length > MAX_HISTORY) {
     sessionHistory.splice(0, sessionHistory.length - MAX_HISTORY);
-  }
-}
-
-function refreshPrompt(deps: REPLDependencies): void {
-  if (!_ttyInterface) return;
-  const currentPrompt = _ttyInterface.getPrompt();
-  const newPrompt = buildPrompt(deps);
-
-  // Only update if prompt actually changed
-  if (currentPrompt === newPrompt) return;
-
-  _ttyInterface.setPrompt(newPrompt);
-
-  // Only redraw if user is not currently typing (no input line)
-  // @ts-ignore - line is a private property but we need it for smooth UX
-  const currentLine = _ttyInterface.line;
-  if (!currentLine || currentLine.length === 0) {
-    _ttyInterface.prompt(true);
   }
 }
 
@@ -499,7 +523,7 @@ async function runBusy(
     console.error(colors.red(`Error: ${(e as Error).message}`));
   } finally {
     busy = false;
-    rl.setPrompt(buildPrompt(deps));
+    rl.setPrompt(buildPrompt());
     rl.resume();
     rl.prompt();
   }
@@ -785,7 +809,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   const rl: ReadlineInterface = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: buildPrompt(deps),
+    prompt: buildPrompt(),
     completer: createCompleter(),
     history: persistentHistory,
     historySize: 100,
@@ -881,6 +905,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       console.error(colors.red(`Startup fetch failed: ${(e as Error).message}`));
     } finally {
       busy = false;
+      drawStatusBar(deps); // Show status bar only after startup complete
     }
   })();
 
