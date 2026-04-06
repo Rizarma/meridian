@@ -111,13 +111,20 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
     });
     if (!res.ok) {
       const err = await res.text();
-      log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
+      // Don't log "parse entities" errors here — they're handled by callers with fallback
+      if (!err.includes("parse entities") && !err.includes("message is not modified")) {
+        log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
+      }
       // Throw so callers can handle specific errors (e.g., Markdown parsing)
       throw new Error(`${method} ${res.status}: ${err}`);
     }
     return await res.json();
   } catch (e) {
-    log("telegram_error", `${method} failed: ${(e as Error).message}`);
+    // Only log if it's not a parse entities error (those are expected and handled)
+    const msg = (e as Error).message || "";
+    if (!msg.includes("parse entities") && !msg.includes("message is not modified")) {
+      log("telegram_error", `${method} failed: ${msg}`);
+    }
     throw e; // Re-throw so callers can handle it
   }
 }
@@ -136,6 +143,10 @@ export async function sendMessage(text: string): Promise<unknown> {
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
       log("telegram_warn", "Markdown parsing failed, sending as plain text");
       return postTelegram("sendMessage", { text: safeText });
+    }
+    // Ignore "message is not modified" — content hasn't changed, no need to update
+    if (errorMessage.includes("message is not modified")) {
+      return null;
     }
     throw error;
   }
@@ -161,6 +172,10 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
       log("telegram_warn", "Markdown parsing failed, editing as plain text");
       return postTelegram("editMessageText", { message_id: messageId, text: safeText });
+    }
+    // Ignore "message is not modified" — content hasn't changed, no need to update
+    if (errorMessage.includes("message is not modified")) {
+      return null;
     }
     throw error;
   }
