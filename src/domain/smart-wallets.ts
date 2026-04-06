@@ -1,7 +1,7 @@
 import fs from "fs";
-import { log } from "./logger.js";
-import { SMART_WALLETS_FILE } from "./paths.js";
-import { registerTool } from "./tools/registry.js";
+import { registerTool } from "../../tools/registry.js";
+import { SMART_WALLETS_FILE } from "../config/paths.js";
+import { log } from "../infrastructure/logger.js";
 import type {
   AddSmartWalletInput,
   CachedWalletPositions,
@@ -15,7 +15,7 @@ import type {
   WalletInPool,
   WalletPositionCheck,
   WalletType,
-} from "./types/smart-wallets.js";
+} from "../types/smart-wallets.js";
 
 function loadWallets(): SmartWalletDB {
   if (!fs.existsSync(SMART_WALLETS_FILE)) return { wallets: [] };
@@ -94,7 +94,7 @@ export async function checkSmartWalletsOnPool({
     };
   }
 
-  const { getWalletPositions } = await import("./tools/dlmm.js");
+  const { getWalletPositions } = await import("../../tools/dlmm.js");
 
   const results = await Promise.all(
     wallets.map(async (wallet: SmartWallet) => {
@@ -118,7 +118,7 @@ export async function checkSmartWalletsOnPool({
   );
 
   const inPool: WalletInPool[] = results
-    .filter((r) => r.positions.some((p: { pool: string }) => p.pool === pool_address))
+    .filter((r) => r.positions.some((p) => (p as { pool: string }).pool === pool_address))
     .map((r) => ({
       name: r.wallet.name,
       category: r.wallet.category,

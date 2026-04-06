@@ -53,8 +53,9 @@ export type ToolName =
 export type WriteTool = "deploy_position" | "claim_fees" | "close_position" | "swap_token";
 export type ProtectedTool = WriteTool | "self_update";
 
-// Tool function type
-export type ToolFunction = (args: unknown) => Promise<unknown> | unknown;
+// Tool function type - handlers can have any parameter type
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ToolFunction = (args: any) => Promise<unknown> | unknown;
 
 export interface ToolMap {
   [key: string]: ToolFunction;

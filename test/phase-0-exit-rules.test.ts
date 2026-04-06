@@ -16,8 +16,8 @@ import {
   shouldStopLoss,
   shouldTakeProfit,
 } from "../src/domain/exit-rules.js";
-import type { EnrichedPosition } from "../types/dlmm.js";
-import type { ManagementConfig, PositionData, TrackedPosition } from "../types/state.js";
+import type { EnrichedPosition } from "../src/types/dlmm.js";
+import type { ManagementConfig, PositionData, TrackedPosition } from "../src/types/state.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
 
 // ============================================================================

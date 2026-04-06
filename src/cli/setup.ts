@@ -4,22 +4,22 @@
  * Run: pnpm run setup
  */
 
-import readline from "readline";
 import fs from "fs";
-import { USER_CONFIG_PATH, ENV_PATH } from "./paths.js";
+import readline from "readline";
+import { ENV_PATH, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
-  Presets,
-  PresetConfig,
-  LLMProvider,
-  UserConfig,
-  EnvMap,
-  ChoiceOption,
-  AskFn,
-  AskNumFn,
   AskBoolFn,
   AskChoiceFn,
+  AskFn,
+  AskNumFn,
   AskNumOptions,
-} from "./types/setup.d.js";
+  ChoiceOption,
+  EnvMap,
+  LLMProvider,
+  PresetConfig,
+  Presets,
+  UserConfig,
+} from "../types/setup.d.ts";
 
 const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 

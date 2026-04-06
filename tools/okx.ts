@@ -5,16 +5,16 @@
  */
 import crypto from "crypto";
 import type {
-  OKXRiskFlags,
-  OKXAdvancedResult,
-  OKXClusterResult,
-  OKXPriceResult,
-  OKXFullAnalysis,
-  OKXRiskAnalysis,
   OKXAdvancedInfo,
+  OKXAdvancedResult,
   OKXCluster,
+  OKXClusterResult,
+  OKXFullAnalysis,
   OKXPriceData,
-} from "../types/index.js";
+  OKXPriceResult,
+  OKXRiskAnalysis,
+  OKXRiskFlags,
+} from "../src/types/index.js";
 
 const BASE = "https://web3.okx.com";
 const CHAIN_SOLANA = "501";

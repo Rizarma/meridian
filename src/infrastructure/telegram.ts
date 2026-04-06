@@ -1,16 +1,16 @@
 import fs from "fs";
-import { log } from "./logger.js";
-import { USER_CONFIG_PATH } from "./paths.js";
+import { USER_CONFIG_PATH } from "../config/paths.js";
 import type {
-  TelegramNotifyDeploy,
-  TelegramNotifyClose,
-  TelegramNotifySwap,
-  TelegramNotifyOOR,
-  LiveMessageState,
   LiveMessageAPI,
+  LiveMessageState,
   TelegramMessage,
+  TelegramNotifyClose,
+  TelegramNotifyDeploy,
+  TelegramNotifyOOR,
+  TelegramNotifySwap,
   TelegramUpdate,
-} from "./types/telegram.d.ts";
+} from "../types/telegram.d.ts";
+import { log } from "./logger.js";
 
 const TOKEN: string | null = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE: string | null = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;

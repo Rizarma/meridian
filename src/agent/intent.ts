@@ -8,7 +8,7 @@
  * intent patterns, roles, and required tools.
  */
 
-import type { AgentType } from "../../types/index.js";
+import type { AgentType } from "../types/index.js";
 
 export interface IntentDefinition {
   /** Intent identifier (e.g., "deploy", "close", "manage") */

@@ -2,7 +2,9 @@
  * Prompt builder types
  */
 
-export type AgentType = "SCREENER" | "MANAGER" | "GENERAL";
+import type { AgentType } from "./agent.js";
+
+export type { AgentType };
 
 export interface PromptContext {
   portfolio: unknown;

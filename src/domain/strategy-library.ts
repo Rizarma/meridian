@@ -7,8 +7,8 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
-import { registerTool } from "./tools/registry.js";
+import { registerTool } from "../../tools/registry.js";
+import { log } from "../infrastructure/logger.js";
 import type {
   EntryCriteria,
   ExitCriteria,
@@ -17,7 +17,7 @@ import type {
   Strategy,
   StrategyDB,
   TokenCriteria,
-} from "./types/strategy.d.ts";
+} from "../types/strategy.js";
 
 const STRATEGY_FILE = "./strategy-library.json";
 

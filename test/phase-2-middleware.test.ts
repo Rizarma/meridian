@@ -11,6 +11,8 @@
  * These tests exercise the REAL middleware functions, not mocks.
  */
 
+import type { ToolName } from "../src/types/executor.js";
+import type { AgentType } from "../src/types/index.js";
 import {
   applyMiddleware,
   loggingMiddleware,
@@ -19,8 +21,6 @@ import {
   safetyCheckMiddleware,
 } from "../tools/middleware.js";
 import type { ToolRegistration } from "../tools/registry.js";
-import type { ToolName } from "../types/executor.js";
-import type { AgentType } from "../types/index.js";
 import { describeAsync, expect, runTestsAsync, testAsync } from "./test-harness.js";
 
 // Mock tool for testing

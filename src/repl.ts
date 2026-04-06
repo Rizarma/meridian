@@ -1,10 +1,19 @@
 import type { Interface as ReadlineInterface } from "readline";
 import readline from "readline";
-import { agentLoop } from "../agent.js";
-import { generateBriefing } from "../briefing.js";
-import { config } from "../config.js";
-import { evolveThresholds, getPerformanceSummary } from "../lessons.js";
-import { log } from "../logger.js";
+import { closePosition, getMyPositions } from "../tools/dlmm.js";
+import { getTopCandidates } from "../tools/screening.js";
+import { getWalletBalances } from "../tools/wallet.js";
+import { agentLoop } from "./agent/agent.js";
+import { config } from "./config/config.js";
+import {
+  getScreeningLastTriggered,
+  isScreeningBusy,
+  setScreeningLastTriggered,
+} from "./cycles/screening.js";
+import { getPerformanceSummary } from "./domain/lessons.js";
+import { evolveThresholds } from "./domain/threshold-evolution.js";
+import { generateBriefing } from "./infrastructure/briefing.js";
+import { log } from "./infrastructure/logger.js";
 import {
   createLiveMessage,
   sendHTML,
@@ -12,16 +21,9 @@ import {
   startPolling,
   stopPolling,
   isEnabled as telegramEnabled,
-} from "../telegram.js";
-import { closePosition, getMyPositions } from "../tools/dlmm.js";
-import { getTopCandidates } from "../tools/screening.js";
-import { getWalletBalances } from "../tools/wallet.js";
-import type { CondensedPool, EnrichedPosition, TelegramMessage } from "../types/index.js";
-import {
-  getScreeningLastTriggered,
-  isScreeningBusy,
-  setScreeningLastTriggered,
-} from "./cycles/screening.js";
+} from "./infrastructure/telegram.js";
+import type { CondensedPool, EnrichedPosition } from "./types/index.js";
+import type { TelegramMessage } from "./types/telegram.js";
 
 // DEPLOY constant from config
 const DEPLOY: number = config.management.deployAmountSol;
@@ -171,7 +173,8 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       }
       const cur = config.management.solMode ? "◎" : "$";
       const lines = positions.map((p, i) => {
-        const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
+        const pnl =
+          (p.pnl_usd ?? 0) >= 0 ? `+${cur}${p.pnl_usd ?? 0}` : `-${cur}${Math.abs(p.pnl_usd ?? 0)}`;
         const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
         const oor = !p.in_range ? " ⚠️OOR" : "";
         return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
@@ -228,7 +231,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       }
       const pos = positions[idx];
       // Import dynamically to avoid circular dependency
-      const { setPositionInstruction } = await import("../state.js");
+      const { setPositionInstruction } = await import("./infrastructure/state.js");
       setPositionInstruction(pos.position, note);
       await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
     } catch (e) {
@@ -621,7 +624,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
           );
         } else {
           // Import dynamically to avoid circular dependency
-          const { reloadScreeningThresholds } = await import("../config.js");
+          const { reloadScreeningThresholds } = await import("./config/config.js");
           reloadScreeningThresholds();
           console.log("\nThresholds evolved:");
           for (const [key, val] of Object.entries(result.changes)) {

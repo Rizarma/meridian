@@ -5,18 +5,15 @@ import type {
   ChatCompletionMessage,
   ChatCompletionMessageParam,
 } from "openai/resources/chat/completions";
-import { config } from "./config.js";
-import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
-import { log } from "./logger.js";
-import { buildSystemPrompt } from "./prompt.js";
-import { INTENTS } from "./src/agent/intent.js";
-import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./src/agent/tool-sets.js";
-import { FALLBACK_MODELS, MAX_REACT_STEPS } from "./src/config/constants.js";
-import { getStateSummary } from "./state.js";
-import { tools } from "./tools/definitions/index.js";
-import { getMyPositions } from "./tools/dlmm.js";
-import { executeTool } from "./tools/executor.js";
-import { getWalletBalances } from "./tools/wallet.js";
+import { tools } from "../../tools/definitions/index.js";
+import { getMyPositions } from "../../tools/dlmm.js";
+import { executeTool } from "../../tools/executor.js";
+import { getWalletBalances } from "../../tools/wallet.js";
+import { config } from "../config/config.js";
+import { FALLBACK_MODELS, MAX_REACT_STEPS } from "../config/constants.js";
+import { getLessonsForPrompt, getPerformanceSummary } from "../domain/lessons.js";
+import { log } from "../infrastructure/logger.js";
+import { getStateSummary } from "../infrastructure/state.js";
 import type {
   AgentOptions,
   AgentResult,
@@ -27,7 +24,10 @@ import type {
   ToolChoice,
   ToolDefinition,
   ToolResult,
-} from "./types/index.js";
+} from "../types/index.js";
+import { INTENTS } from "./intent.js";
+import { buildSystemPrompt } from "./prompt.js";
+import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
 
 // Intent routing unified in src/agent/intent.ts (INTENTS array)
 // Use detectIntent(), getToolsForIntent(), getRoleForIntent() from that module

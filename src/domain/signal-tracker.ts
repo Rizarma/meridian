@@ -9,8 +9,8 @@
  * This enables post-hoc analysis: which signals actually predicted wins?
  */
 
-import { log } from "./logger.js";
-import type { SignalSnapshot, StagedSignals } from "./types/signals.d.ts";
+import { log } from "../infrastructure/logger.js";
+import type { SignalSnapshot, StagedSignals } from "../types/signals.js";
 
 // In-memory staging area — cleared after retrieval or after 10 minutes
 const _staged: Map<string, StagedSignals> = new Map();

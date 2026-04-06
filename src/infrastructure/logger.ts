@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { LogCategory, LogAction, LogSnapshot } from "./types/index.js";
+import type { LogAction, LogCategory, LogSnapshot } from "../types/index.js";
 
 const LOG_DIR = "./logs";
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";

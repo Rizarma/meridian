@@ -6,9 +6,9 @@
  */
 
 import fs from "fs";
-import { config } from "./config.js";
-import { log } from "./logger.js";
-import { registerTool } from "./tools/registry.js";
+import { registerTool } from "../../tools/registry.js";
+import { config } from "../config/config.js";
+import { log } from "../infrastructure/logger.js";
 import type {
   PoolMemoryDB,
   PoolMemoryEntry,
@@ -16,7 +16,7 @@ import type {
   PoolMemoryResult,
   PoolNoteResult,
   PositionSnapshotInput,
-} from "./types/pool-memory.js";
+} from "../types/pool-memory.js";
 
 const POOL_MEMORY_FILE = "./pool-memory.json";
 const MAX_NOTE_LENGTH = 280;
@@ -35,7 +35,7 @@ function sanitizeStoredNote(
   return cleaned || null;
 }
 
-function isAdjustedWinRateExcludedReason(reason: string | undefined): boolean {
+function isAdjustedWinRateExcludedReason(reason: string | null | undefined): boolean {
   const text = String(reason || "")
     .trim()
     .toLowerCase();
@@ -150,8 +150,9 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     entry.adjusted_win_rate_sample_count = adjusted.length;
     entry.adjusted_win_rate =
       adjusted.length > 0
-        ? Math.round((adjusted.filter((d) => d.pnl_pct >= 0).length / adjusted.length) * 10000) /
-          100
+        ? Math.round(
+            (adjusted.filter((d) => (d.pnl_pct ?? 0) >= 0).length / adjusted.length) * 10000
+          ) / 100
         : 0;
   }
 

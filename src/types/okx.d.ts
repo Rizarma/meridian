@@ -59,6 +59,7 @@ export interface OKXAdvancedResult {
   bundle_pct: number | null;
   sniper_pct: number | null;
   suspicious_pct: number | null;
+  new_wallet_pct?: number | null;
   dev_holding_pct: number | null;
   top10_pct: number | null;
   lp_burned_pct: number | null;

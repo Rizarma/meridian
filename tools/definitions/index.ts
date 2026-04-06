@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../../types/index.js";
+import type { ToolDefinition } from "../../src/types/index.js";
 import { adminTools } from "./admin.js";
 import { dataTools } from "./data.js";
 import { managementTools } from "./management.js";

@@ -49,19 +49,19 @@ export interface CondensedPool {
   swap_count: number;
   unique_traders: number;
   // OKX enriched fields
-  risk_level?: number;
-  bundle_pct?: number;
-  sniper_pct?: number;
-  suspicious_pct?: number;
-  new_wallet_pct?: number;
+  risk_level?: number | null;
+  bundle_pct?: number | null;
+  sniper_pct?: number | null;
+  suspicious_pct?: number | null;
+  new_wallet_pct?: number | null;
   smart_money_buy?: boolean;
   dev_sold_all?: boolean;
   dex_boost?: boolean;
   dex_screener_paid?: boolean;
   is_rugpull?: boolean;
   is_wash?: boolean;
-  price_vs_ath_pct?: number;
-  ath?: number;
+  price_vs_ath_pct?: number | null;
+  ath?: number | null;
   kol_in_clusters?: boolean;
   top_cluster_trend?: string | null;
   top_cluster_hold_pct?: number | null;

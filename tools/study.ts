@@ -9,7 +9,7 @@ import type {
   LPerSummary,
   StudyOptions,
   StudyResult,
-} from "../types/index.js";
+} from "../src/types/index.js";
 import { registerTool } from "./registry.js";
 
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";

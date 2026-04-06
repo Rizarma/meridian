@@ -9,7 +9,7 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
+import { registerTool } from "../../tools/registry.js";
 import {
   MAX_INSTRUCTION_LENGTH,
   MAX_RECENT_EVENTS,
@@ -17,11 +17,10 @@ import {
   TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
   TRAILING_EXIT_COOLDOWN_MS,
   TRAILING_PEAK_CONFIRM_TOLERANCE,
-} from "./src/config/constants.js";
-import { evaluateExitConditions, shouldActivateTrailingTP } from "./src/domain/exit-rules.js";
-import { registerTool } from "./tools/registry.js";
-import type { SetPositionNoteArgs } from "./types/executor.js";
-import type { SignalSnapshot } from "./types/signals.js";
+} from "../config/constants.js";
+import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
+import type { SetPositionNoteArgs } from "../types/executor.js";
+import type { SignalSnapshot } from "../types/signals.js";
 import type {
   BinRange,
   ExitAction,
@@ -33,7 +32,8 @@ import type {
   StateSummary,
   TrackedPosition,
   TrailingConfirmation,
-} from "./types/state.js";
+} from "../types/state.js";
+import { log } from "./logger.js";
 
 const STATE_FILE = "./state.json";
 

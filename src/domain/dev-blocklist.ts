@@ -7,9 +7,9 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
-import { registerTool } from "./tools/registry.js";
-import type { BlockedDev, DevBlocklistDB } from "./types/blocklist.d.ts";
+import { registerTool } from "../../tools/registry.js";
+import { log } from "../infrastructure/logger.js";
+import type { BlockedDev, DevBlocklistDB } from "../types/blocklist.js";
 
 const BLOCKLIST_FILE = "./dev-blocklist.json";
 

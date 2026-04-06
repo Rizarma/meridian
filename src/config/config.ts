@@ -1,14 +1,14 @@
 import fs from "fs";
-import { log } from "./logger.js";
-import { USER_CONFIG_PATH } from "./paths.js";
-import { registerTool } from "./tools/registry.js";
+import { registerTool } from "../../tools/registry.js";
+import { log } from "../infrastructure/logger.js";
 import type {
   Config,
   ConfigChangeMap,
   UpdateConfigInput,
   UpdateConfigResult,
   UserConfigPartial,
-} from "./types/index.js";
+} from "../types/index.js";
+import { USER_CONFIG_PATH } from "./paths.js";
 
 const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
   ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial)

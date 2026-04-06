@@ -11,6 +11,7 @@
  * These tests exercise the REAL registry functions, not mocks.
  */
 
+import type { ToolName } from "../src/types/executor.js";
 import {
   clearRegistry,
   getAllToolNames,
@@ -19,14 +20,13 @@ import {
   hasTool,
   registerTool,
 } from "../tools/registry.js";
-import type { ToolName } from "../types/executor.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Import executor module which triggers tool discovery via discover.js
-// This tests the REAL production bootstrap path used by agent.ts and cli.ts
+// Import bootstrap module which triggers ALL tool registrations
+// This tests the REAL production bootstrap path used by index.ts
 // ═══════════════════════════════════════════════════════════════════════════
-import "../tools/executor.js";
+import "../src/bootstrap.js";
 
 // Test tool handler
 const mockHandler = async (args: unknown) => ({ success: true, args });
@@ -42,9 +42,8 @@ const TEST_TOOL_4: ToolName = "deploy_position";
 // ═══════════════════════════════════════════════════════════════════════════
 describe("Registry Integration - Real Tool Loading", () => {
   test("registry is populated by production bootstrap path", () => {
-    // Importing ../tools/executor.js triggers discover.js which auto-discovers
-    // and imports all tool modules, triggering their registerTool() calls.
-    // This validates the real production path used by agent.ts and cli.ts.
+    // Importing ../src/bootstrap.js triggers all tool registrations
+    // This validates the real production path used by index.ts.
 
     const allNames = getAllToolNames();
 
@@ -306,7 +305,7 @@ const isMainModule =
 
 if (isMainModule) {
   // DO NOT clear registry before running tests - we want to verify
-  // that the production bootstrap path (executor.js -> discover.js)
+  // that the production bootstrap path (src/bootstrap.js)
   // triggered the side-effect registrations in each tool module
   runTests();
 }

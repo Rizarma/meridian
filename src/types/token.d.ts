@@ -29,8 +29,8 @@ export interface TokenStats1h {
   price_change: string | null;
   buy_vol: string | null;
   sell_vol: string | null;
-  buyers: number;
-  net_buyers: number;
+  buyers: number | null;
+  net_buyers: number | null;
 }
 
 export interface TokenCluster {

@@ -7,12 +7,10 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
-import { LESSONS_FILE, USER_CONFIG_PATH } from "./paths.js";
-import { registerTool } from "./tools/registry.js";
-import type { Config } from "./types/config.js";
+import { registerTool } from "../../tools/registry.js";
+import { LESSONS_FILE } from "../config/paths.js";
+import { log } from "../infrastructure/logger.js";
 import type {
-  EvolutionResult,
   LessonContext,
   LessonEntry,
   LessonOutcome,
@@ -25,11 +23,9 @@ import type {
   PerformanceRecord,
   PositionPerformance,
   RoleTags,
-  ThresholdEvolution,
-} from "./types/lessons.js";
+} from "../types/lessons.js";
+import { runThresholdEvolution } from "./threshold-evolution.js";
 
-const MIN_EVOLVE_POSITIONS = 5; // don't evolve until we have real data
-const MAX_CHANGE_PER_STEP = 0.2; // never shift a threshold more than 20% at once
 const MAX_MANUAL_LESSON_LENGTH = 400;
 
 function sanitizeLessonText(
@@ -128,45 +124,8 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
 
   save(data);
 
-  // Update pool-level memory
-  if (perf.pool) {
-    const { recordPoolDeploy } = await import("./pool-memory.js");
-    recordPoolDeploy(perf.pool, {
-      pool_name: perf.pool_name,
-      base_mint: perf.base_mint,
-      deployed_at: perf.deployed_at,
-      closed_at: entry.recorded_at,
-      pnl_pct: entry.pnl_pct,
-      pnl_usd: entry.pnl_usd,
-      range_efficiency: entry.range_efficiency,
-      minutes_held: perf.minutes_held,
-      close_reason: perf.close_reason,
-      strategy: perf.strategy,
-      volatility: perf.volatility,
-    });
-  }
-
-  // Evolve thresholds every 5 closed positions
-  if (data.performance.length % MIN_EVOLVE_POSITIONS === 0) {
-    const { config, reloadScreeningThresholds } = await import("./config.js");
-    const result = evolveThresholds(data.performance, config as Config);
-    if (result?.changes && Object.keys(result.changes).length > 0) {
-      reloadScreeningThresholds();
-      log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
-    }
-
-    // Darwinian signal weight recalculation
-    if (config.darwin?.enabled) {
-      const { recalculateWeights } = await import("./signal-weights.js");
-      const wResult = recalculateWeights(data.performance, { darwin: config.darwin });
-      if (wResult.changes.length > 0) {
-        log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
-      }
-    }
-  }
-
-  // Fire-and-forget sync to hive mind (if enabled)
-  import("./hive-mind.js").then((m) => m.syncToHive()).catch(() => {});
+  // Run threshold evolution (pool memory, Darwin weights, hive sync)
+  await runThresholdEvolution(perf, data.performance);
 }
 
 /**
@@ -233,204 +192,6 @@ function derivLesson(perf: PerformanceRecord): LessonEntry | null {
     pool: perf.pool,
     created_at: new Date().toISOString(),
   };
-}
-
-// ─── Adaptive Threshold Evolution ──────────────────────────────
-
-/**
- * Analyze closed position performance and evolve screening thresholds.
- * Writes changes to user-config.json and returns a summary.
- */
-export function evolveThresholds(
-  perfData: PerformanceRecord[],
-  config: Config
-): EvolutionResult | null {
-  if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
-
-  const winners = perfData.filter((p) => p.pnl_pct > 0);
-  const losers = perfData.filter((p) => p.pnl_pct < -5);
-
-  // Need at least some signal in both directions before adjusting
-  const hasSignal = winners.length >= 2 || losers.length >= 2;
-  if (!hasSignal) return null;
-
-  const changes: ThresholdEvolution = {};
-  const rationale: Record<string, string> = {};
-
-  // ── 1. maxVolatility ─────────────────────────────────────────
-  // If losers tend to cluster at higher volatility → tighten the ceiling.
-  // If winners span higher volatility safely → we can loosen a bit.
-  {
-    const winnerVols = winners.map((p) => p.volatility).filter(isFiniteNum);
-    const loserVols = losers.map((p) => p.volatility).filter(isFiniteNum);
-    const current = config.screening.maxVolatility;
-
-    if (loserVols.length >= 2 && current !== null && current !== undefined) {
-      // 25th percentile of loser volatilities — this is where things start going wrong
-      const loserP25 = percentile(loserVols, 25);
-      if (loserP25 < current) {
-        // Tighten: new ceiling = loserP25 + a small buffer
-        const target = loserP25 * 1.15;
-        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
-        const rounded = Number(newVal.toFixed(1));
-        if (rounded < current) {
-          changes.maxVolatility = rounded;
-          rationale.maxVolatility = `Losers clustered at volatility ~${loserP25.toFixed(1)} — tightened from ${current} → ${rounded}`;
-        }
-      }
-    } else if (
-      winnerVols.length >= 3 &&
-      losers.length === 0 &&
-      current !== null &&
-      current !== undefined
-    ) {
-      // All winners so far — loosen conservatively so we don't miss good pools
-      const winnerP75 = percentile(winnerVols, 75);
-      if (winnerP75 > current * 1.1) {
-        const target = winnerP75 * 1.1;
-        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
-        const rounded = Number(newVal.toFixed(1));
-        if (rounded > current) {
-          changes.maxVolatility = rounded;
-          rationale.maxVolatility = `All ${winners.length} positions profitable — loosened from ${current} → ${rounded}`;
-        }
-      }
-    }
-  }
-
-  // ── 2. minFeeActiveTvlRatio ─────────────────────────────────────────
-  // Raise the floor if low-fee pools consistently underperform.
-  {
-    const winnerFees = winners.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const loserFees = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const current = config.screening.minFeeActiveTvlRatio;
-
-    if (winnerFees.length >= 2 && current !== undefined) {
-      // Minimum fee/TVL among winners — we know pools below this don't work for us
-      const minWinnerFee = Math.min(...winnerFees);
-      if (minWinnerFee > current * 1.2) {
-        const target = minWinnerFee * 0.85; // stay slightly below min winner
-        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
-        const rounded = Number(newVal.toFixed(2));
-        if (rounded > current) {
-          changes.minFeeActiveTvlRatio = rounded;
-          rationale.minFeeActiveTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
-        }
-      }
-    }
-
-    if (loserFees.length >= 2 && current !== undefined) {
-      // If losers all had high fee/TVL, that's noise (pumps then crash) — don't raise min
-      // But if losers had low fee/TVL, raise min
-      const maxLoserFee = Math.max(...loserFees);
-      if (maxLoserFee < current * 1.5 && winnerFees.length > 0) {
-        const minWinnerFee = Math.min(...winnerFees);
-        if (minWinnerFee > maxLoserFee) {
-          const target = maxLoserFee * 1.2;
-          const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
-          const rounded = Number(newVal.toFixed(2));
-          if (rounded > current && !changes.minFeeActiveTvlRatio) {
-            changes.minFeeActiveTvlRatio = rounded;
-            rationale.minFeeActiveTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
-          }
-        }
-      }
-    }
-  }
-
-  // ── 3. minOrganic ─────────────────────────────────────────────
-  // Raise organic floor if low-organic tokens consistently failed.
-  {
-    const loserOrganics = losers.map((p) => p.organic_score).filter(isFiniteNum);
-    const winnerOrganics = winners.map((p) => p.organic_score).filter(isFiniteNum);
-    const current = config.screening.minOrganic;
-
-    if (loserOrganics.length >= 2 && winnerOrganics.length >= 1) {
-      const avgLoserOrganic = avg(loserOrganics);
-      const avgWinnerOrganic = avg(winnerOrganics);
-      // Only raise if there's a clear gap (winners consistently more organic)
-      if (avgWinnerOrganic - avgLoserOrganic >= 10) {
-        // Set floor just below worst winner
-        const minWinnerOrganic = Math.min(...winnerOrganics);
-        const target = Math.max(minWinnerOrganic - 3, current);
-        const newVal = clamp(Math.round(nudge(current, target, MAX_CHANGE_PER_STEP)), 60, 90);
-        if (newVal > current) {
-          changes.minOrganic = newVal;
-          rationale.minOrganic = `Winner avg organic ${avgWinnerOrganic.toFixed(0)} vs loser avg ${avgLoserOrganic.toFixed(0)} — raised from ${current} → ${newVal}`;
-        }
-      }
-    }
-  }
-
-  if (Object.keys(changes).length === 0) return { changes: {}, rationale: {} };
-
-  // ── Persist changes to user-config.json ───────────────────────
-  let userConfig: Record<string, unknown> = {};
-  if (fs.existsSync(USER_CONFIG_PATH)) {
-    try {
-      userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
-    } catch {
-      /* ignore */
-    }
-  }
-
-  Object.assign(userConfig, changes);
-  userConfig._lastEvolved = new Date().toISOString();
-  userConfig._positionsAtEvolution = perfData.length;
-
-  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
-
-  // Apply to live config object immediately
-  const s = config.screening;
-  if (changes.maxVolatility != null) (s as any).maxVolatility = changes.maxVolatility;
-  if (changes.minFeeActiveTvlRatio != null)
-    (s as any).minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
-  if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
-
-  // Log a lesson summarizing the evolution
-  const data = load();
-  data.lessons.push({
-    id: Date.now(),
-    rule: `[AUTO-EVOLVED @ ${perfData.length} positions] ${Object.entries(changes)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ")} — ${Object.values(rationale).join("; ")}`,
-    tags: ["evolution", "config_change"],
-    outcome: "manual",
-    created_at: new Date().toISOString(),
-  });
-  save(data);
-
-  return { changes, rationale };
-}
-
-// ─── Helpers ───────────────────────────────────────────────────
-
-function isFiniteNum(n: unknown): n is number {
-  return typeof n === "number" && isFinite(n);
-}
-
-function avg(arr: number[]): number {
-  return arr.reduce((s, x) => s + x, 0) / arr.length;
-}
-
-function percentile(arr: number[], p: number): number {
-  const sorted = [...arr].sort((a, b) => a - b);
-  const idx = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-}
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val));
-}
-
-/** Move current toward target by at most maxChange fraction. */
-function nudge(current: number, target: number, maxChange: number): number {
-  const delta = target - current;
-  const maxDelta = current * maxChange;
-  if (Math.abs(delta) <= maxDelta) return target;
-  return current + Math.sign(delta) * maxDelta;
 }
 
 // ─── Manual Lessons ────────────────────────────────────────────
