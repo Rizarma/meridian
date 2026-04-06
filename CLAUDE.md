@@ -17,8 +17,12 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 - `src/` — application code (agent loop, cycles, domain, infrastructure, config, CLI)
 - `tools/` — tool handlers and registry (sibling of `src/`, auto-discovered at startup)
 - `test/` — phase-numbered integration and safety tests
-- `user-config.json` — runtime config (see `user-config.example.json`)
-- `.env` — secrets only (wallet key, API keys)
+- `user-config.json` — user preferences: models, thresholds, strategy, intervals
+- `.env` — secrets only: wallet key, API keys (never committed)
+
+**Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults
+- Use `.env` for secrets and environment-specific overrides (CI/CD, Docker)
+- Use `user-config.json` for day-to-day tuning (models, screening thresholds, strategy)
 
 ## Detailed guidelines
 
