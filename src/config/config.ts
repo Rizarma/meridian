@@ -14,13 +14,29 @@ const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
   ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial)
   : {};
 
-// Apply wallet/RPC from user-config if not already in env
-if (u.rpcUrl) process.env.RPC_URL ||= u.rpcUrl;
-if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
-if (u.llmModel) process.env.LLM_MODEL ||= u.llmModel;
-if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
-if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
-if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
+// ═══════════════════════════════════════════════════════════════════════════
+// Configuration Precedence:
+//   1. Environment variables (.env) - for secrets and deployment overrides
+//   2. user-config.json - for user preferences and tuning
+//   3. Hardcoded defaults - sensible fallbacks
+//
+// This follows 12-Factor App best practices:
+//   - .env = secrets + environment-specific settings (never committed)
+//   - user-config.json = user preferences (portable, can be shared)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Helper: Get value with precedence env > user-config > default
+const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
+  const envValue = process.env[envKey];
+  if (envValue !== undefined) {
+    // Try to parse as the same type as default
+    if (typeof defaultValue === "boolean") return (envValue === "true") as unknown as T;
+    if (typeof defaultValue === "number")
+      return (parseFloat(envValue) || defaultValue) as unknown as T;
+    return envValue as unknown as T;
+  }
+  return (u[userKey] as T) ?? defaultValue;
+};
 
 // Registered by index.js so update_config can restart cron jobs when intervals change
 let _cronRestarter: (() => void) | null = null;
@@ -101,9 +117,13 @@ export const config: Config = {
     temperature: u.temperature ?? 0.373,
     maxTokens: u.maxTokens ?? 4096,
     maxSteps: u.maxSteps ?? 20,
-    managementModel: u.managementModel ?? process.env.LLM_MODEL ?? "openrouter/healer-alpha",
-    screeningModel: u.screeningModel ?? process.env.LLM_MODEL ?? "openrouter/hunter-alpha",
-    generalModel: u.generalModel ?? process.env.LLM_MODEL ?? "openrouter/healer-alpha",
+    // Precedence: .env LLM_MODEL > user-config role-specific > user-config llmModel > defaults
+    managementModel:
+      process.env.LLM_MODEL ?? u.managementModel ?? u.llmModel ?? "openrouter/healer-alpha",
+    screeningModel:
+      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "openrouter/hunter-alpha",
+    generalModel:
+      process.env.LLM_MODEL ?? u.generalModel ?? u.llmModel ?? "openrouter/healer-alpha",
   },
 
   // ─── Common Token Mints ────────────────
