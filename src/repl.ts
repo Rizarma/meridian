@@ -257,8 +257,14 @@ function formatCountdown(seconds: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function buildPrompt(): string {
-  return "> ";
+function buildPrompt(deps: REPLDependencies): string {
+  const mgmt = formatCountdown(
+    nextRunIn(deps.timers.managementLastRun, config.schedule.managementIntervalMin)
+  );
+  const scrn = formatCountdown(
+    nextRunIn(deps.timers.screeningLastRun, config.schedule.screeningIntervalMin)
+  );
+  return `[manage: ${mgmt} | screen: ${scrn}]\n> `;
 }
 
 function buildStatusBar(deps: REPLDependencies): string {
@@ -532,7 +538,7 @@ async function runBusy(
     console.error(colors.red(`Error: ${(e as Error).message}`));
   } finally {
     busy = false;
-    rl.setPrompt(buildPrompt());
+    rl.setPrompt(buildPrompt(deps));
     rl.resume();
     rl.prompt();
   }
@@ -818,7 +824,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   const rl: ReadlineInterface = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: buildPrompt(),
+    prompt: buildPrompt(deps),
     completer: createCompleter(),
     history: persistentHistory,
     historySize: 100,
@@ -833,8 +839,12 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     saveHistory(rl.history || []);
   }, HISTORY_SAVE_INTERVAL);
 
-  // Note: Status bar is drawn once at startup, not refreshed periodically
-  // to avoid corrupting log output. The prompt remains static "> ".
+  // Update prompt countdown every 30 seconds (slower refresh to reduce log spam)
+  const promptRefreshInterval = setInterval(() => {
+    if (!busy && _ttyInterface) {
+      _ttyInterface.setPrompt(buildPrompt(deps));
+    }
+  }, 30_000);
 
   // Wrapper that calls orchestrator's launchCron and adds REPL-specific UI updates
   function launchCron(): void {
@@ -993,6 +1003,7 @@ Commands:
   });
 
   rl.on("close", () => {
+    clearInterval(promptRefreshInterval);
     clearInterval(historySaveInterval);
     // @ts-ignore - history is private but accessible
     saveHistory(rl.history || []);
