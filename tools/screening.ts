@@ -19,6 +19,8 @@ import type {
   TopCandidatesInput,
   TopCandidatesResult,
 } from "../src/types/screening.js";
+import { cache } from "../src/utils/cache.js";
+import { isEnabled as isOKXEnabled } from "./okx.js";
 import { registerTool } from "./registry.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
@@ -198,7 +200,7 @@ export async function getTopCandidates({
     .slice(0, limit);
 
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
-  if (eligible.length > 0) {
+  if (eligible.length > 0 && isOKXEnabled()) {
     const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = (await import(
       "./okx.js"
     )) as OKXModule;
@@ -324,11 +326,21 @@ export async function getTopCandidates({
  * Get full raw details for a specific pool.
  * Fetches top 50 pools from discovery API and finds the matching address.
  * Returns the full unfiltered API object (all fields, not condensed).
+ * Cached for 2 minutes to reduce API load.
  */
 export async function getPoolDetail({
   pool_address,
   timeframe = "5m",
 }: PoolDetailInput): Promise<RawPoolData> {
+  const normalizedAddress = pool_address.trim().toLowerCase();
+  const cacheKey = `pool:detail:${normalizedAddress}:${timeframe || "default"}`;
+  const CACHE_TTL_MS = 120000; // 2 minutes
+
+  const cached = cache.get(cacheKey) as RawPoolData | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const url =
     `${POOL_DISCOVERY_BASE}/pools?` +
     `page_size=1` +
@@ -348,6 +360,7 @@ export async function getPoolDetail({
     throw new Error(`Pool ${pool_address} not found`);
   }
 
+  cache.set(cacheKey, pool, CACHE_TTL_MS);
   return pool;
 }
 
