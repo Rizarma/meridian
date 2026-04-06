@@ -497,14 +497,12 @@ export async function getMyPositions({
             : null;
           const reportedPnlPct = binData
             ? Number(
-                config.management.solMode
+                config.features.solMode
                   ? (binData.pnlSolPctChange ?? 0)
                   : (binData.pnlPctChange ?? 0)
               )
             : null;
-          const derivedPnlPct = binData
-            ? deriveOpenPnlPct(binData, config.management.solMode)
-            : null;
+          const derivedPnlPct = binData ? deriveOpenPnlPct(binData, config.features.solMode) : null;
           const pnlPctDiff =
             reportedPnlPct != null && derivedPnlPct != null
               ? Math.abs(reportedPnlPct - derivedPnlPct)
@@ -529,7 +527,7 @@ export async function getMyPositions({
             in_range: binData ? !binData.isOutOfRange : !isOOR,
             unclaimed_fees_usd: binData
               ? Math.round(
-                  (config.management.solMode
+                  (config.features.solMode
                     ? Number(binData.unrealizedPnl?.unclaimedFeeTokenX?.amountSol ?? 0) +
                       Number(binData.unrealizedPnl?.unclaimedFeeTokenY?.amountSol ?? 0)
                     : Number(binData.unrealizedPnl?.unclaimedFeeTokenX?.usd ?? 0) +
@@ -538,7 +536,7 @@ export async function getMyPositions({
               : null,
             total_value_usd: binData
               ? Math.round(
-                  (config.management.solMode
+                  (config.features.solMode
                     ? Number(binData.unrealizedPnl?.balancesSol ?? 0)
                     : Number(binData.unrealizedPnl?.balances ?? 0)) * 10000
                 ) / 10000
@@ -550,7 +548,7 @@ export async function getMyPositions({
             collected_fees_usd: binData
               ? Math.round(
                   Number(
-                    config.management.solMode
+                    config.features.solMode
                       ? (binData.allTimeFees?.total?.sol ?? 0)
                       : (binData.allTimeFees?.total?.usd ?? 0)
                   ) * 10000
@@ -561,9 +559,8 @@ export async function getMyPositions({
               : null,
             pnl_usd: binData
               ? Math.round(
-                  Number(
-                    config.management.solMode ? (binData.pnlSol ?? 0) : (binData.pnlUsd ?? 0)
-                  ) * 10000
+                  Number(config.features.solMode ? (binData.pnlSol ?? 0) : (binData.pnlUsd ?? 0)) *
+                    10000
                 ) / 10000
               : null,
             pnl_true_usd: binData ? Math.round(Number(binData.pnlUsd ?? 0) * 10000) / 10000 : null,

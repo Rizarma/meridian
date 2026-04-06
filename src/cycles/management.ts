@@ -232,10 +232,10 @@ export async function runManagementCycle(
     const reportLines = positionData.map((p) => {
       const act = actionMap.get(p.position);
       const inRange = p.in_range ? "🟢 IN" : `🔴 OOR ${p.minutes_out_of_range ?? 0}m`;
-      const val = config.management.solMode
+      const val = config.features.solMode
         ? `◎${p.total_value_usd ?? "?"}`
         : `$${p.total_value_usd ?? "?"}`;
-      const unclaimed = config.management.solMode
+      const unclaimed = config.features.solMode
         ? `◎${p.unclaimed_fees_usd ?? "?"}`
         : `$${p.unclaimed_fees_usd ?? "?"}`;
       const statusLabel = act?.action === "INSTRUCTION" ? "HOLD (instruction)" : act?.action;
@@ -260,7 +260,7 @@ export async function runManagementCycle(
             .join(", ")
         : "no action";
 
-    const cur = config.management.solMode ? "◎" : "$";
+    const cur = config.features.solMode ? "◎" : "$";
     mgmtReport =
       reportLines.join("\n\n") +
       `\n\nSummary: 💼 ${positions.length} positions | ${cur}${totalValue.toFixed(4)} | fees: ${cur}${totalUnclaimed.toFixed(4)} | ${actionSummary}`;

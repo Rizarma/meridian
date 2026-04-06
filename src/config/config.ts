@@ -77,13 +77,10 @@ export const config: Config = {
     deployAmountSol: u.deployAmountSol ?? 0.5,
     gasReserve: u.gasReserve ?? 0.2,
     positionSizePct: u.positionSizePct ?? 0.35,
-    // Trailing take-profit
-    trailingTakeProfit: u.trailingTakeProfit ?? true,
+    // Trailing take-profit settings (feature flag in features.trailingTakeProfit)
     trailingTriggerPct: u.trailingTriggerPct ?? 3, // activate trailing at X% PnL
     trailingDropPct: u.trailingDropPct ?? 1.5, // close when drops X% from peak
     pnlSanityMaxDiffPct: u.pnlSanityMaxDiffPct ?? 5, // max allowed diff between reported and derived pnl % before ignoring a tick
-    // SOL mode — positions, PnL, and balances reported in SOL instead of USD
-    solMode: u.solMode ?? false,
   },
 
   // ─── Strategy Mapping ───────────────────
@@ -118,13 +115,29 @@ export const config: Config = {
 
   // ─── Darwin Evolution Config ───────────
   darwin: {
-    enabled: u.darwin?.enabled ?? false,
     windowDays: u.darwin?.windowDays ?? 30,
     minSamples: u.darwin?.minSamples ?? 10,
     boostFactor: u.darwin?.boostFactor ?? 1.5,
     decayFactor: u.darwin?.decayFactor ?? 0.95,
     weightFloor: u.darwin?.weightFloor ?? 0.5,
     weightCeiling: u.darwin?.weightCeiling ?? 2.0,
+  },
+
+  // ─── Feature Flags ─────────────────────
+  features: {
+    // Trailing take-profit: migrated from management.trailingTakeProfit
+    trailingTakeProfit: u.features?.trailingTakeProfit ?? u.trailingTakeProfit ?? true,
+    // Hive Mind sync: requires HIVE_MIND_URL and HIVE_MIND_API_KEY env vars
+    hiveMind:
+      u.features?.hiveMind ??
+      u.hiveMind ??
+      Boolean(process.env.HIVE_MIND_URL && process.env.HIVE_MIND_API_KEY),
+    // Darwin evolution: enabled via features.darwinEvolution or flat darwinEvolution key
+    darwinEvolution: u.features?.darwinEvolution ?? u.darwinEvolution ?? false,
+    // SOL mode: migrated from management.solMode
+    solMode: u.features?.solMode ?? u.solMode ?? false,
+    // OKX integration: requires OKX_API_KEY and OKX_API_SECRET env vars
+    okx: u.features?.okx ?? u.okx ?? Boolean(process.env.OKX_API_KEY && process.env.OKX_API_SECRET),
   },
 };
 
@@ -228,10 +241,8 @@ registerTool({
       minVolumeToRebalance: ["management", "minVolumeToRebalance"],
       stopLossPct: ["management", "stopLossPct"],
       takeProfitFeePct: ["management", "takeProfitFeePct"],
-      trailingTakeProfit: ["management", "trailingTakeProfit"],
       trailingTriggerPct: ["management", "trailingTriggerPct"],
       trailingDropPct: ["management", "trailingDropPct"],
-      solMode: ["management", "solMode"],
       minSolToOpen: ["management", "minSolToOpen"],
       deployAmountSol: ["management", "deployAmountSol"],
       gasReserve: ["management", "gasReserve"],
@@ -248,6 +259,12 @@ registerTool({
       generalModel: ["llm", "generalModel"],
       // strategy
       binsBelow: ["strategy", "binsBelow"],
+      // features
+      trailingTakeProfit: ["features", "trailingTakeProfit"],
+      hiveMind: ["features", "hiveMind"],
+      darwinEvolution: ["features", "darwinEvolution"],
+      solMode: ["features", "solMode"],
+      okx: ["features", "okx"],
     };
 
     const applied: Record<string, string | number | boolean> = {};

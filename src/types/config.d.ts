@@ -45,11 +45,9 @@ export interface ManagementConfig {
   deployAmountSol: number;
   gasReserve: number;
   positionSizePct: number;
-  trailingTakeProfit: boolean;
   trailingTriggerPct: number;
   trailingDropPct: number;
   pnlSanityMaxDiffPct: number;
-  solMode: boolean;
 }
 
 export interface StrategyConfig {
@@ -79,13 +77,20 @@ export interface TokenConfig {
 }
 
 export interface DarwinConfig {
-  enabled: boolean;
   windowDays?: number;
   minSamples?: number;
   boostFactor?: number;
   decayFactor?: number;
   weightFloor?: number;
   weightCeiling?: number;
+}
+
+export interface FeaturesConfig {
+  trailingTakeProfit: boolean;
+  hiveMind: boolean;
+  darwinEvolution: boolean;
+  solMode: boolean;
+  okx: boolean;
 }
 
 export interface Config {
@@ -97,6 +102,7 @@ export interface Config {
   llm: LlmConfig;
   tokens: TokenConfig;
   darwin: DarwinConfig;
+  features: FeaturesConfig;
 }
 
 export interface UserConfigPartial {
@@ -162,4 +168,9 @@ export interface UserConfigPartial {
   generalModel?: string;
   emergencyPriceDropPct?: number;
   darwin?: DarwinConfig;
+  features?: Partial<FeaturesConfig>;
+  // Flat key fallbacks for feature flags (written by older versions or update_config)
+  hiveMind?: boolean;
+  darwinEvolution?: boolean;
+  okx?: boolean;
 }
