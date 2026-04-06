@@ -905,22 +905,20 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       console.error(colors.red(`Startup fetch failed: ${(e as Error).message}`));
     } finally {
       busy = false;
-      drawStatusBar(deps); // Show status bar only after startup complete
-    }
-  })();
 
-  // Always start autonomous cycles on launch
-  launchCron();
+      // Start autonomous cycles after data fetch complete
+      launchCron();
 
-  // Run missed briefing check
-  deps.maybeRunMissedBriefing().catch(() => {});
+      // Run missed briefing check
+      deps.maybeRunMissedBriefing().catch(() => {});
 
-  // Create telegram handler bound to deps
-  const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
-  startPolling(boundTelegramHandler);
+      // Start Telegram polling
+      const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
+      startPolling(boundTelegramHandler);
 
-  console.log(
-    colors.cyan(`
+      // Show commands
+      console.log(
+        colors.cyan(`
 Commands:
   ${colors.green("1 / 2 / 3 ...")}  Deploy ${DEPLOY} SOL into that pool
   ${colors.green("auto")}           Let the agent pick and deploy automatically
@@ -934,9 +932,13 @@ Commands:
   ${colors.yellow("/help")}          Show all available commands
   ${colors.red("/stop")}            Shut down
 `)
-  );
+      );
 
-  rl.prompt();
+      // Show prompt and initial status bar
+      rl.prompt();
+      drawStatusBar(deps);
+    }
+  })();
 
   rl.on("line", async (line) => {
     const input = line.trim();
