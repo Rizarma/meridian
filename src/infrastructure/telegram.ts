@@ -112,12 +112,13 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
     if (!res.ok) {
       const err = await res.text();
       log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
-      return null;
+      // Throw so callers can handle specific errors (e.g., Markdown parsing)
+      throw new Error(`${method} ${res.status}: ${err}`);
     }
     return await res.json();
   } catch (e) {
     log("telegram_error", `${method} failed: ${(e as Error).message}`);
-    return null;
+    throw e; // Re-throw so callers can handle it
   }
 }
 
