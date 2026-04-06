@@ -20,6 +20,7 @@ import type {
   Presets,
   UserConfig,
 } from "../types/setup.d.ts";
+import { colors, error, header, info, success, warning } from "./colors.js";
 
 const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
@@ -58,15 +59,15 @@ const askNum: AskNumFn = (
       const raw = await ask(question, String(defaultVal));
       const n = parseFloat(raw);
       if (isNaN(n)) {
-        console.log(`  ⚠ Please enter a number.`);
+        console.log(error(`  Please enter a number.`));
         continue;
       }
       if (min !== undefined && n < min) {
-        console.log(`  ⚠ Minimum is ${min}.`);
+        console.log(error(`  Minimum is ${min}.`));
         continue;
       }
       if (max !== undefined && n > max) {
-        console.log(`  ⚠ Maximum is ${max}.`);
+        console.log(error(`  Maximum is ${max}.`));
         continue;
       }
       resolve(n);
@@ -98,7 +99,7 @@ const askBool: AskBoolFn = (question: string, defaultVal: boolean): Promise<bool
         resolve(false);
         break;
       }
-      console.log("  ⚠ Enter y or n.");
+      console.log(error("  Enter y or n."));
     }
   });
 };
@@ -211,18 +212,19 @@ const e = (key: keyof UserConfig, fallback: unknown) => existingConfig[key] ?? f
 const ev = (key: string, fallback: string) => existingEnv[key] ?? fallback;
 
 // ─── Banner ────────────────────────────────────────────────────────────────────
-console.log(`
+console.log(
+  colors.cyan(`
 ╔═══════════════════════════════════════════════╗
 ║        Meridian — Setup Wizard                ║
 ║        Autonomous Meteora DLMM LP Agent       ║
 ╚═══════════════════════════════════════════════╝
-
-This wizard creates your .env and user-config.json.
-Press Enter to keep the current/default value.
-`);
+`)
+);
+console.log(colors.dim("This wizard creates your .env and user-config.json."));
+console.log(colors.dim("Press Enter to keep the current/default value.\n"));
 
 // ─── Section 1: API Keys & Wallet ─────────────────────────────────────────────
-console.log("── API Keys & Wallet ─────────────────────────────────────────");
+console.log(header("API Keys & Wallet"));
 
 const alreadySet = (val: string) => (val ? "*** (already set — Enter to keep)" : "");
 
@@ -247,7 +249,7 @@ const heliusKey = await ask(
 );
 
 // ─── Section 2: Telegram ──────────────────────────────────────────────────────
-console.log("\n── Telegram (optional — skip to disable) ─────────────────────");
+console.log(header("Telegram (optional — skip to disable)"));
 
 const telegramToken = await ask("Telegram bot token", alreadySet(ev("TELEGRAM_BOT_TOKEN", "")));
 
@@ -270,12 +272,14 @@ const p = (key: keyof PresetConfig, fallback: unknown) =>
 
 console.log(
   preset
-    ? `\n✓ ${preset.label} preset selected. Override individual values below (Enter to keep).\n`
-    : `\nCustom mode — configure all settings.\n`
+    ? colors.success(
+        `\n✓ ${preset.label} preset selected. Override individual values below (Enter to keep).\n`
+      )
+    : colors.info("\nCustom mode — configure all settings.\n")
 );
 
 // ─── Section 4: Deployment ────────────────────────────────────────────────────
-console.log("── Deployment ────────────────────────────────────────────────");
+console.log(header("Deployment"));
 
 const deployAmountSol = await askNum(
   "SOL to deploy per position",
@@ -297,7 +301,7 @@ const minSolToOpen = await askNum(
 const dryRun = await askBool("Dry run mode? (no real transactions)", e("dryRun", true) as boolean);
 
 // ─── Section 5: Risk & Filters ────────────────────────────────────────────────
-console.log("\n── Risk & Filters ────────────────────────────────────────────");
+console.log(header("Risk & Filters"));
 
 const timeframe = await ask(
   "Pool discovery timeframe (30m / 1h / 4h / 12h / 24h)",
@@ -316,7 +320,7 @@ const maxMcap = await askNum("Max token market cap USD", p("maxMcap", 10_000_000
 });
 
 // ─── Section 6: Exit Rules ────────────────────────────────────────────────────
-console.log("\n── Exit Rules ────────────────────────────────────────────────");
+console.log(header("Exit Rules"));
 
 const takeProfitFeePct = await askNum(
   "Take profit when fees earned >= X% of deployed capital",
@@ -337,7 +341,7 @@ const outOfRangeWaitMinutes = await askNum(
 );
 
 // ─── Section 7: Scheduling ────────────────────────────────────────────────────
-console.log("\n── Scheduling ────────────────────────────────────────────────");
+console.log(header("Scheduling"));
 
 const managementIntervalMin = await askNum(
   "Management cycle interval (minutes)",
@@ -352,7 +356,7 @@ const screeningIntervalMin = await askNum(
 );
 
 // ─── Section 8: LLM Provider ─────────────────────────────────────────────────
-console.log("\n── LLM Provider ──────────────────────────────────────────────");
+console.log(header("LLM Provider"));
 
 const LLM_PROVIDERS: LLMProvider[] = [
   {
@@ -472,14 +476,22 @@ fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 // ─── Summary ──────────────────────────────────────────────────────────────────
 const presetName = preset ? `${preset.label}` : "Custom";
 
-console.log(`
+console.log(
+  colors.green(`
 ╔═══════════════════════════════════════════════╗
 ║           Setup Complete                      ║
 ╚═══════════════════════════════════════════════╝
+`)
+);
 
-  Preset:       ${presetName}
-  Dry run:      ${dryRun ? "YES — no real transactions" : "NO — live trading"}
+console.log(colors.cyan("  Preset:       ") + colors.bold(presetName));
+console.log(
+  colors.cyan("  Dry run:      ") +
+    (dryRun ? colors.yellow("YES — no real transactions") : colors.green("NO — live trading"))
+);
 
+console.log(
+  colors.dim(`
   Deploy:       ${deployAmountSol} SOL/position  ·  max ${maxPositions} positions
   Min balance:  ${minSolToOpen} SOL to open new position
   Timeframe:    ${timeframe}  ·  organic ≥ ${minOrganic}  ·  holders ≥ ${minHolders}
@@ -492,10 +504,17 @@ console.log(`
   Model:        ${llmModel}
   Base URL:     ${llmBaseUrl}
 
-  Telegram:     ${telegramToken ? "enabled" : "disabled"}
+  Telegram:     ${telegramToken ? colors.green("enabled") : colors.gray("disabled")}
   .env:         ${ENV_PATH}
   Config:       ${USER_CONFIG_PATH}
+`)
+);
 
-Run "pnpm start" to launch the agent.
-${dryRun ? "\n  ⚠ DRY RUN is ON — set dryRun: false in user-config.json when ready for live trading.\n" : ""}
-`);
+console.log(colors.bold.green('\nRun "pnpm start" to launch the agent.'));
+if (dryRun) {
+  console.log(
+    colors.yellow(
+      "\n  ⚠ DRY RUN is ON — set dryRun: false in user-config.json when ready for live trading.\n"
+    )
+  );
+}
