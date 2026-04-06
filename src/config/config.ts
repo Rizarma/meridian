@@ -26,9 +26,11 @@ const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Copy user-config values to process.env if not already set (maintains precedence)
-// These are needed by tools/ that read directly from process.env
+// These are needed by code that reads directly from process.env (agent.ts, tools/)
 if (u.rpcUrl) process.env.RPC_URL ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
+if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
+if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
 
 // Helper: Get value with precedence env > user-config > default
 const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
