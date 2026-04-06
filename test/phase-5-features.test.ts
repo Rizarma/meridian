@@ -85,7 +85,7 @@ function createTestConfig(partial: UserConfigPartial): Config {
       maxTokens: u.maxTokens ?? 4096,
       maxSteps: u.maxSteps ?? 20,
       managementModel: u.managementModel ?? "xiaomi/mimo-v2-omni",
-      screeningModel: u.screeningModel ?? "openrouter/optimus-alpha",
+      screeningModel: u.screeningModel ?? "xiaomi/mimo-v2-omni",
       generalModel: u.generalModel ?? "xiaomi/mimo-v2-omni",
     },
     tokens: {
