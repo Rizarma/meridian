@@ -9,6 +9,7 @@
  */
 
 import fs from "fs";
+import path from "path";
 import { registerTool } from "../../tools/registry.js";
 import {
   MAX_INSTRUCTION_LENGTH,
@@ -18,6 +19,7 @@ import {
   TRAILING_EXIT_COOLDOWN_MS,
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
+import { PROJECT_ROOT } from "../config/paths.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
 import type { SetPositionNoteArgs } from "../types/executor.js";
 import type { SignalSnapshot } from "../types/signals.js";
@@ -35,7 +37,7 @@ import type {
 } from "../types/state.js";
 import { log } from "./logger.js";
 
-const STATE_FILE = "./state.json";
+const STATE_FILE = path.join(PROJECT_ROOT, "state.json");
 
 /** Parameters for tracking a new position */
 export interface TrackPositionParams {
