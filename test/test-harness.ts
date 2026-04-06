@@ -163,6 +163,7 @@ export interface Expectation {
   toBeLessThan(n: number): void;
   toBeTruthy(): void;
   toBeFalsy(): void;
+  toHaveProperty(key: string): void;
 }
 
 class AssertionError extends Error {
@@ -209,6 +210,15 @@ export function expect(value: unknown): Expectation {
     toBeFalsy(): void {
       if (value) {
         throw new AssertionError(`Expected ${JSON.stringify(value)} to be falsy`);
+      }
+    },
+
+    toHaveProperty(key: string): void {
+      if (value == null || typeof value !== "object") {
+        throw new AssertionError(`Expected object, but got ${typeof value}`);
+      }
+      if (!(key in (value as Record<string, unknown>))) {
+        throw new AssertionError(`Expected object to have property "${key}"`);
       }
     },
   };
