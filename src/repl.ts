@@ -4,6 +4,7 @@ import { closePosition, getMyPositions } from "../tools/dlmm.js";
 import { getTopCandidates } from "../tools/screening.js";
 import { getWalletBalances } from "../tools/wallet.js";
 import { agentLoop } from "./agent/agent.js";
+import { colors } from "./cli/colors.js";
 import { config } from "./config/config.js";
 import {
   getScreeningLastTriggered,
@@ -298,7 +299,7 @@ async function runBusy(
   fn: () => Promise<void>
 ): Promise<void> {
   if (busy) {
-    console.log("Agent is busy, please wait...");
+    console.log(colors.yellow("Agent is busy, please wait..."));
     rl.prompt();
     return;
   }
@@ -307,7 +308,7 @@ async function runBusy(
   try {
     await fn();
   } catch (e) {
-    console.error(`Error: ${(e as Error).message}`);
+    console.error(colors.red(`Error: ${(e as Error).message}`));
   } finally {
     busy = false;
     rl.setPrompt(buildPrompt(deps));
@@ -349,20 +350,22 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     const wasAlreadyStarted = deps.isCronStarted ? deps.isCronStarted() : false;
     deps.launchCron();
     if (!wasAlreadyStarted) {
-      console.log("Autonomous cycles are now running.\n");
+      console.log(colors.green("✓ Autonomous cycles are now running.\n"));
       rl.setPrompt(buildPrompt(deps));
       rl.prompt(true);
     }
   }
 
   // ── Startup: show wallet + top candidates ──
-  console.log(`
+  console.log(
+    colors.cyan(`
 ╔═══════════════════════════════════════════╗
 ║         DLMM LP Agent — Ready             ║
 ╚═══════════════════════════════════════════╝
-`);
+`)
+  );
 
-  console.log("Fetching wallet and top pool candidates...\n");
+  console.log(colors.dim("Fetching wallet and top pool candidates...\n"));
 
   busy = true;
   let startupCandidates: CondensedPool[] = [];
@@ -386,27 +389,36 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       startupCandidates = candidates;
 
       console.log(
-        `Wallet:    ${wallet.sol} SOL  ($${wallet.sol_usd})  |  SOL price: $${wallet.sol_price}`
+        colors.cyan("Wallet:    ") +
+          colors.white(`${wallet.sol} SOL`) +
+          colors.dim(`  ($${wallet.sol_usd})  |  SOL price: $${wallet.sol_price}`)
       );
       console.log(
-        `Positions: ${(positions as { total_positions?: number }).total_positions ?? 0} open\n`
+        colors.cyan("Positions: ") +
+          colors.white(`${(positions as { total_positions?: number }).total_positions ?? 0} open\n`)
       );
 
       if ((positions as { total_positions?: number }).total_positions ?? 0 > 0) {
-        console.log("Open positions:");
+        console.log(colors.bold("Open positions:"));
         for (const p of (positions as { positions?: EnrichedPosition[] }).positions || []) {
-          const status = p.in_range ? "in-range ✓" : "OUT OF RANGE ⚠";
-          console.log(`  ${p.pair.padEnd(16)} ${status}  fees: $${p.unclaimed_fees_usd}`);
+          const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
+          console.log(
+            `  ${colors.white(p.pair.padEnd(16))} ${status}  ${colors.dim("fees: $")}${colors.green(p.unclaimed_fees_usd)}`
+          );
         }
         console.log();
       }
 
       const totalEligible = (topCandidates as { total_eligible?: number }).total_eligible ?? 0;
       const totalScreened = (topCandidates as { total_screened?: number }).total_screened ?? 0;
-      console.log(`Top pools (${totalEligible} eligible from ${totalScreened} screened):\n`);
+      console.log(
+        colors.bold(
+          `Top pools (${colors.cyan(totalEligible.toString())} eligible from ${colors.dim(totalScreened.toString())} screened):\n`
+        )
+      );
       console.log(formatCandidates(candidates));
     } catch (e) {
-      console.error(`Startup fetch failed: ${(e as Error).message}`);
+      console.error(colors.red(`Startup fetch failed: ${(e as Error).message}`));
     } finally {
       busy = false;
     }
@@ -422,19 +434,21 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
   startPolling(boundTelegramHandler);
 
-  console.log(`
+  console.log(
+    colors.cyan(`
 Commands:
-  1 / 2 / 3 ...  Deploy ${DEPLOY} SOL into that pool
-  auto           Let the agent pick and deploy automatically
-  /status        Refresh wallet + positions
-  /candidates    Refresh top pool list
-  /briefing      Show morning briefing (last 24h)
-  /learn         Study top LPers from the best current pool and save lessons
-  /learn <addr>  Study top LPers from a specific pool address
-  /thresholds    Show current screening thresholds + performance stats
-  /evolve        Manually trigger threshold evolution from performance data
-  /stop          Shut down
-`);
+  ${colors.green("1 / 2 / 3 ...")}  Deploy ${DEPLOY} SOL into that pool
+  ${colors.green("auto")}           Let the agent pick and deploy automatically
+  ${colors.yellow("/status")}        Refresh wallet + positions
+  ${colors.yellow("/candidates")}    Refresh top pool list
+  ${colors.yellow("/briefing")}      Show morning briefing (last 24h)
+  ${colors.yellow("/learn")}         Study top LPers from the best current pool and save lessons
+  ${colors.yellow("/learn <addr>")}  Study top LPers from a specific pool address
+  ${colors.yellow("/thresholds")}    Show current screening thresholds + performance stats
+  ${colors.yellow("/evolve")}        Manually trigger threshold evolution from performance data
+  ${colors.red("/stop")}            Shut down
+`)
+  );
 
   rl.prompt();
 
@@ -450,14 +464,14 @@ Commands:
     if (!isNaN(pick) && pick >= 1 && pick <= startupCandidates.length) {
       await runBusy(rl, deps, async () => {
         const pool = startupCandidates[pick - 1];
-        console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
+        console.log(colors.cyan(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`));
         const { content: reply } = await agentLoop(
           `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
           config.llm.maxSteps,
           [],
           "SCREENER"
         );
-        console.log(`\n${reply}\n`);
+        console.log(colors.dim(`\n${reply}\n`));
         launchCron();
       });
       return;
@@ -466,14 +480,14 @@ Commands:
     // ── auto: agent picks and deploys ───────
     if (input.toLowerCase() === "auto") {
       await runBusy(rl, deps, async () => {
-        console.log("\nAgent is picking and deploying...\n");
+        console.log(colors.cyan("\nAgent is picking and deploying...\n"));
         const { content: reply } = await agentLoop(
           `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${DEPLOY} SOL. Execute now, don't ask.`,
           config.llm.maxSteps,
           [],
           "SCREENER"
         );
-        console.log(`\n${reply}\n`);
+        console.log(colors.dim(`\n${reply}\n`));
         launchCron();
       });
       return;
@@ -498,12 +512,12 @@ Commands:
           getWalletBalances(),
           getMyPositions({ force: true }),
         ]);
-        console.log(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`);
-        console.log(`Positions: ${positionsResult.total_positions ?? 0}`);
+        console.log(colors.cyan(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`));
+        console.log(colors.cyan(`Positions: ${positionsResult.total_positions ?? 0}`));
         for (const p of positionsResult.positions || []) {
-          const status = p.in_range ? "in-range ✓" : "OUT OF RANGE ⚠";
+          const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
           console.log(
-            `  ${p.pair.padEnd(16)} ${status}  fees: ${config.features.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
+            `  ${colors.white(p.pair.padEnd(16))} ${status}  ${colors.dim("fees: ")}${config.features.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
           );
         }
         console.log();
@@ -514,7 +528,7 @@ Commands:
     if (input === "/briefing") {
       await runBusy(rl, deps, async () => {
         const briefing = await generateBriefing();
-        console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
+        console.log(colors.dim(`\n${briefing.replace(/<[^>]*>/g, "")}\n`));
       });
       return;
     }
@@ -526,7 +540,11 @@ Commands:
         startupCandidates = candidates;
         const totalEligible = (topCandidates as { total_eligible?: number }).total_eligible ?? 0;
         const totalScreened = (topCandidates as { total_screened?: number }).total_screened ?? 0;
-        console.log(`\nTop pools (${totalEligible} eligible from ${totalScreened} screened):\n`);
+        console.log(
+          colors.bold(
+            `\nTop pools (${colors.cyan(totalEligible.toString())} eligible from ${colors.dim(totalScreened.toString())} screened):\n`
+          )
+        );
         console.log(formatCandidates(candidates));
         console.log();
       });
@@ -535,24 +553,26 @@ Commands:
 
     if (input === "/thresholds") {
       const s = config.screening;
-      console.log("\nCurrent screening thresholds:");
-      console.log(`  minFeeActiveTvlRatio: ${s.minFeeActiveTvlRatio}`);
-      console.log(`  minOrganic:           ${s.minOrganic}`);
-      console.log(`  minHolders:           ${s.minHolders}`);
-      console.log(`  minTvl:               ${s.minTvl}`);
-      console.log(`  maxTvl:               ${s.maxTvl}`);
-      console.log(`  minVolume:            ${s.minVolume}`);
-      console.log(`  minTokenFeesSol:      ${s.minTokenFeesSol}`);
-      console.log(`  maxBundlePct:         ${s.maxBundlePct}`);
-      console.log(`  maxBotHoldersPct:     ${s.maxBotHoldersPct}`);
-      console.log(`  maxTop10Pct:          ${s.maxTop10Pct}`);
-      console.log(`  timeframe:            ${s.timeframe}`);
+      console.log(colors.bold("\nCurrent screening thresholds:"));
+      console.log(`  ${colors.cyan("minFeeActiveTvlRatio:")} ${s.minFeeActiveTvlRatio}`);
+      console.log(`  ${colors.cyan("minOrganic:")}           ${s.minOrganic}`);
+      console.log(`  ${colors.cyan("minHolders:")}           ${s.minHolders}`);
+      console.log(`  ${colors.cyan("minTvl:")}               ${s.minTvl}`);
+      console.log(`  ${colors.cyan("maxTvl:")}               ${s.maxTvl}`);
+      console.log(`  ${colors.cyan("minVolume:")}            ${s.minVolume}`);
+      console.log(`  ${colors.cyan("minTokenFeesSol:")}      ${s.minTokenFeesSol}`);
+      console.log(`  ${colors.cyan("maxBundlePct:")}         ${s.maxBundlePct}`);
+      console.log(`  ${colors.cyan("maxBotHoldersPct:")}     ${s.maxBotHoldersPct}`);
+      console.log(`  ${colors.cyan("maxTop10Pct:")}          ${s.maxTop10Pct}`);
+      console.log(`  ${colors.cyan("timeframe:")}            ${s.timeframe}`);
       const perf = getPerformanceSummary();
       if (perf) {
-        console.log(`\n  Based on ${perf.total_positions_closed} closed positions`);
-        console.log(`  Win rate: ${perf.win_rate_pct}%  |  Avg PnL: ${perf.avg_pnl_pct}%`);
+        console.log(colors.dim(`\n  Based on ${perf.total_positions_closed} closed positions`));
+        console.log(
+          `  ${colors.green("Win rate:")} ${perf.win_rate_pct}%  |  ${colors.green("Avg PnL:")} ${perf.avg_pnl_pct}%`
+        );
       } else {
-        console.log("\n  No closed positions yet — thresholds are preset defaults.");
+        console.log(colors.yellow("\n  No closed positions yet — thresholds are preset defaults."));
       }
       console.log();
       rl.prompt();
@@ -570,18 +590,18 @@ Commands:
           poolsToStudy = [{ pool: poolArg, name: poolArg }];
         } else {
           // Fetch top 10 candidates across all eligible pools
-          console.log("\nFetching top pool candidates to study...\n");
+          console.log(colors.dim("\nFetching top pool candidates to study...\n"));
           const topCandidates = await getTopCandidates({ limit: 10 });
           const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
           if (!candidates.length) {
-            console.log("No eligible pools found to study.\n");
+            console.log(colors.yellow("No eligible pools found to study.\n"));
             return;
           }
           poolsToStudy = candidates.map((c) => ({ pool: c.pool, name: c.name }));
         }
 
-        console.log(`\nStudying top LPers across ${poolsToStudy.length} pools...\n`);
-        for (const p of poolsToStudy) console.log(`  • ${p.name || p.pool}`);
+        console.log(colors.cyan(`\nStudying top LPers across ${poolsToStudy.length} pools...\n`));
+        for (const p of poolsToStudy) console.log(colors.dim(`  • ${p.name || p.pool}`));
         console.log();
 
         const poolList = poolsToStudy.map((p, i) => `${i + 1}. ${p.name} (${p.pool})`).join("\n");
@@ -602,7 +622,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
           [],
           "GENERAL"
         );
-        console.log(`\n${reply}\n`);
+        console.log(colors.dim(`\n${reply}\n`));
       });
       return;
     }
@@ -612,7 +632,9 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         const perf = getPerformanceSummary();
         if (!perf || perf.total_positions_closed < 5) {
           const needed = 5 - (perf?.total_positions_closed || 0);
-          console.log(`\nNeed at least 5 closed positions to evolve. ${needed} more needed.\n`);
+          console.log(
+            colors.yellow(`\nNeed at least 5 closed positions to evolve. ${needed} more needed.\n`)
+          );
           return;
         }
         const fs = await import("fs");
@@ -620,17 +642,21 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         const result = evolveThresholds(lessonsData.performance, config);
         if (!result || Object.keys(result.changes).length === 0) {
           console.log(
-            "\nNo threshold changes needed — current settings already match performance data.\n"
+            colors.yellow(
+              "\nNo threshold changes needed — current settings already match performance data.\n"
+            )
           );
         } else {
           // Import dynamically to avoid circular dependency
           const { reloadScreeningThresholds } = await import("./config/config.js");
           reloadScreeningThresholds();
-          console.log("\nThresholds evolved:");
+          console.log(colors.green("\nThresholds evolved:"));
           for (const [key, val] of Object.entries(result.changes)) {
-            console.log(`  ${key}: ${(result.rationale as Record<string, string>)[key]}`);
+            console.log(
+              `  ${colors.cyan(key)}: ${(result.rationale as Record<string, string>)[key]}`
+            );
           }
-          console.log("\nSaved to user-config.json. Applied immediately.\n");
+          console.log(colors.green("\nSaved to user-config.json. Applied immediately.\n"));
         }
       });
       return;
@@ -649,7 +675,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         { requireTool: true }
       );
       appendHistory(input, content);
-      console.log(`\n${content}\n`);
+      console.log(colors.dim(`\n${content}\n`));
     });
   });
 
