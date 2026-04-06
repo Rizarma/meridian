@@ -5,44 +5,43 @@
  */
 
 import "dotenv/config";
-import { parseArgs, ParseArgsOptionsConfig } from "util";
-import os from "os";
 import fs from "fs";
+import os from "os";
 import path from "path";
+import { ParseArgsOptionsConfig, parseArgs } from "util";
 
 import type {
-  CLIFlags,
-  CLISubcommand,
-  CLIOutputFn,
-  CLIDieFn,
-  CandidatesOutput,
-  EnrichedCandidate,
-  CycleOutput,
-  LessonsListOutput,
-  LessonsAddOutput,
-  PoolMemoryOutput,
-  EvolveOutput,
   BlacklistAddOutput,
   BlacklistListOutput,
+  CandidatesOutput,
+  CLIDieFn,
+  CLIFlags,
+  CLIOutputFn,
+  CLISubcommand,
+  CycleOutput,
+  EnrichedCandidate,
+  EvolveOutput,
+  LessonsAddOutput,
+  LessonsListOutput,
   PerformanceOutput,
+  PoolMemoryOutput,
 } from "./types/cli.js";
-
-import type { CondensedPool, TopCandidatesResult } from "./types/screening.js";
 import type {
-  PositionsResult,
-  PositionPnL,
-  WalletPositionsResult,
   ActiveBinResult,
+  PositionPnL,
+  PositionsResult,
   SearchPoolsResult,
+  WalletPositionsResult,
 } from "./types/dlmm.js";
-import type {
-  TokenInfoResult,
-  TokenHoldersResult,
-  TokenNarrative,
-  TokenInfo,
-} from "./types/token.js";
-import type { WalletPositionCheck } from "./types/smart-wallets.js";
 import type { PoolMemoryEntry } from "./types/pool-memory.js";
+import type { CondensedPool, TopCandidatesResult } from "./types/screening.js";
+import type { WalletPositionCheck } from "./types/smart-wallets.js";
+import type {
+  TokenHoldersResult,
+  TokenInfo,
+  TokenInfoResult,
+  TokenNarrative,
+} from "./types/token.js";
 
 // ─── DRY_RUN must be set before any tool imports ─────────────────
 if (process.argv.includes("--dry-run")) process.env.DRY_RUN = "true";
@@ -575,7 +574,7 @@ switch (subcommand as CLISubcommand) {
 
   // ── screen ───────────────────────────────────────────────────────
   case "screen": {
-    const { runScreeningCycle } = await import("./index.js");
+    const { runScreeningCycle } = await import("./src/orchestrator.js");
     const report: string | undefined = await runScreeningCycle({ silent });
     const output: CycleOutput = { done: true, report: report || "No action taken" };
     out(output);
@@ -584,7 +583,7 @@ switch (subcommand as CLISubcommand) {
 
   // ── manage ───────────────────────────────────────────────────────
   case "manage": {
-    const { runManagementCycle } = await import("./index.js");
+    const { runManagementCycle } = await import("./src/orchestrator.js");
     const report: string | undefined = await runManagementCycle({ silent });
     const output: CycleOutput = { done: true, report: report || "No action taken" };
     out(output);
@@ -627,7 +626,7 @@ switch (subcommand as CLISubcommand) {
 
   // ── start ────────────────────────────────────────────────────────
   case "start": {
-    const { startCronJobs } = await import("./index.js");
+    const { startCronJobs } = await import("./src/orchestrator.js");
     process.stderr.write("[meridian] Starting autonomous agent...\n");
     startCronJobs();
     break;
