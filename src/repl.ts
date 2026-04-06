@@ -1,3 +1,5 @@
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 import type { Interface as ReadlineInterface } from "readline";
 import readline from "readline";
 import { closePosition, getMyPositions } from "../tools/dlmm.js";
@@ -30,6 +32,13 @@ import type { TelegramMessage } from "./types/telegram.js";
 const DEPLOY: number = config.management.deployAmountSol;
 
 // ═══════════════════════════════════════════
+//  CONFIGURATION
+// ═══════════════════════════════════════════
+const HISTORY_FILE = join(process.cwd(), ".repl_history");
+const MAX_HISTORY_LINES = 1000;
+const HISTORY_SAVE_INTERVAL = 60000; // Save every minute
+
+// ═══════════════════════════════════════════
 //  SESSION STATE
 // ═══════════════════════════════════════════
 const sessionHistory: Array<{ role: string; content: string }> = []; // persists conversation across REPL turns
@@ -41,6 +50,9 @@ const _telegramQueue: TelegramMessage[] = [];
 
 // TTY interface reference for prompt refresh (null in non-TTY mode)
 let _ttyInterface: readline.Interface | null = null;
+
+// Current candidates for number-based selection
+let _startupCandidates: CondensedPool[] = [];
 
 // ═══════════════════════════════════════════
 //  TYPE DEFINITIONS FOR DEPENDENCIES
@@ -58,6 +70,170 @@ interface REPLDependencies {
   startCronJobs: () => void;
   stopCronJobs: () => void;
   maybeRunMissedBriefing: () => Promise<void>;
+}
+
+// ═══════════════════════════════════════════
+//  COMMAND REGISTRY SYSTEM
+// ═══════════════════════════════════════════
+interface CommandContext {
+  rl: ReadlineInterface;
+  deps: REPLDependencies;
+  args: string[];
+  rawInput: string;
+}
+
+interface Command {
+  name: string;
+  description: string;
+  handler: (ctx: CommandContext) => Promise<void>;
+  aliases?: string[];
+  hidden?: boolean; // Hide from /help (e.g., internal commands)
+}
+
+const commandRegistry = new Map<string, Command>();
+const commandNames: string[] = [];
+
+function registerCommand(cmd: Command): void {
+  commandRegistry.set(cmd.name, cmd);
+  commandNames.push(cmd.name);
+  cmd.aliases?.forEach((alias) => {
+    commandRegistry.set(alias, cmd);
+  });
+}
+
+function getCommand(input: string): Command | undefined {
+  const trimmed = input.trim().toLowerCase();
+  // Check exact match first
+  if (commandRegistry.has(trimmed)) {
+    return commandRegistry.get(trimmed);
+  }
+  // Check for commands with arguments (e.g., "/learn <addr>")
+  for (const [name, cmd] of commandRegistry) {
+    if (trimmed.startsWith(name + " ") || trimmed === name) {
+      return cmd;
+    }
+  }
+  return undefined;
+}
+
+function parseCommand(input: string): {
+  command: Command | undefined;
+  args: string[];
+  rawInput: string;
+} {
+  const trimmed = input.trim();
+  const cmd = getCommand(trimmed);
+  if (!cmd) {
+    return { command: undefined, args: [], rawInput: trimmed };
+  }
+
+  // Extract arguments (everything after the command name)
+  const cmdName = trimmed.split(" ")[0];
+  const argsStr = trimmed.slice(cmdName.length).trim();
+  const args = argsStr ? argsStr.split(/\s+/) : [];
+
+  return { command: cmd, args, rawInput: trimmed };
+}
+
+// ═══════════════════════════════════════════
+//  TAB COMPLETION
+// ═══════════════════════════════════════════
+function createCompleter(): readline.Completer {
+  return (line: string): [string[], string] => {
+    const trimmed = line.trim().toLowerCase();
+
+    // If empty or just whitespace, show all commands
+    if (!trimmed) {
+      return [commandNames, ""];
+    }
+
+    // Filter commands that start with the input
+    const hits = commandNames.filter((cmd) => cmd.startsWith(trimmed));
+
+    // Also include number completions if we have candidates
+    if (/^\d*$/.test(trimmed)) {
+      const maxNum = Math.min(_startupCandidates.length, 9);
+      for (let i = 1; i <= maxNum; i++) {
+        const numStr = String(i);
+        if (numStr.startsWith(trimmed) && !hits.includes(numStr)) {
+          hits.push(numStr);
+        }
+      }
+    }
+
+    return [hits, trimmed];
+  };
+}
+
+// ═══════════════════════════════════════════
+//  PERSISTENT HISTORY
+// ═══════════════════════════════════════════
+function loadHistory(): string[] {
+  try {
+    if (existsSync(HISTORY_FILE)) {
+      const content = readFileSync(HISTORY_FILE, "utf8");
+      return content.split("\n").filter((line) => line.trim());
+    }
+  } catch (e) {
+    // Ignore errors, start with empty history
+  }
+  return [];
+}
+
+function saveHistory(history: string[]): void {
+  try {
+    // Keep only last MAX_HISTORY_LINES
+    const linesToSave = history.slice(-MAX_HISTORY_LINES);
+    writeFileSync(HISTORY_FILE, linesToSave.join("\n") + "\n");
+  } catch (e) {
+    // Ignore save errors
+  }
+}
+
+function appendHistoryEntry(entry: string): void {
+  try {
+    appendFileSync(HISTORY_FILE, entry + "\n");
+  } catch (e) {
+    // Ignore append errors
+  }
+}
+
+// ═══════════════════════════════════════════
+//  SIGNAL HANDLING
+// ═══════════════════════════════════════════
+function setupSignalHandlers(deps: REPLDependencies): void {
+  let shuttingDown = false;
+
+  const handleShutdown = async (signal: string) => {
+    if (shuttingDown) {
+      console.log(colors.yellow("\nForce exit..."));
+      process.exit(1);
+    }
+    shuttingDown = true;
+    console.log(colors.yellow(`\nReceived ${signal}, shutting down gracefully...`));
+    try {
+      await deps.shutdown(signal);
+      process.exit(0);
+    } catch (e) {
+      console.error(colors.red(`Shutdown error: ${(e as Error).message}`));
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGINT", () => handleShutdown("SIGINT"));
+  process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+
+  // Handle uncaught errors gracefully
+  process.on("uncaughtException", (err) => {
+    console.error(colors.red(`\nUncaught exception: ${err.message}`));
+    log("error", `Uncaught exception: ${err.message}`);
+    // Don't exit immediately, let user decide
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    console.error(colors.red(`\nUnhandled rejection: ${reason}`));
+    log("error", `Unhandled rejection: ${reason}`);
+  });
 }
 
 // ═══════════════════════════════════════════
@@ -127,8 +303,20 @@ function appendHistory(userMsg: string, assistantMsg: string): void {
 
 function refreshPrompt(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
-  _ttyInterface.setPrompt(buildPrompt(deps));
-  _ttyInterface.prompt(true);
+  const currentPrompt = _ttyInterface.getPrompt();
+  const newPrompt = buildPrompt(deps);
+
+  // Only update if prompt actually changed
+  if (currentPrompt === newPrompt) return;
+
+  _ttyInterface.setPrompt(newPrompt);
+
+  // Only redraw if user is not currently typing (no input line)
+  // @ts-ignore - line is a private property but we need it for smooth UX
+  const currentLine = _ttyInterface.line;
+  if (!currentLine || currentLine.length === 0) {
+    _ttyInterface.prompt(true);
+  }
 }
 
 async function drainTelegramQueue(deps: REPLDependencies): Promise<void> {
@@ -318,6 +506,254 @@ async function runBusy(
 }
 
 // ═══════════════════════════════════════════
+//  COMMAND HANDLERS
+// ═══════════════════════════════════════════
+
+const cmdHelp: Command = {
+  name: "/help",
+  description: "Show available commands",
+  handler: async ({ rl }) => {
+    console.log(colors.cyan("\nAvailable commands:"));
+    console.log();
+
+    const visibleCommands = Array.from(commandRegistry.values())
+      .filter((cmd) => !cmd.hidden)
+      .filter((cmd, idx, arr) => arr.findIndex((c) => c.name === cmd.name) === idx); // Remove duplicates from aliases
+
+    for (const cmd of visibleCommands) {
+      const aliases = cmd.aliases?.length ? colors.dim(` (${cmd.aliases.join(", ")})`) : "";
+      console.log(`  ${colors.green(cmdName(cmd.name).padEnd(20))} ${cmd.description}${aliases}`);
+    }
+
+    console.log();
+    console.log(colors.dim("Tip: Press TAB for command completion"));
+    console.log();
+    rl.prompt();
+  },
+};
+
+const cmdStop: Command = {
+  name: "/stop",
+  description: "Shut down the agent",
+  handler: async ({ deps }) => {
+    await deps.shutdown("user command");
+  },
+};
+
+const cmdStatus: Command = {
+  name: "/status",
+  description: "Refresh wallet + positions",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const [wallet, positionsResult] = await Promise.all([
+        getWalletBalances(),
+        getMyPositions({ force: true }),
+      ]);
+      console.log(colors.cyan(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`));
+      console.log(colors.cyan(`Positions: ${positionsResult.total_positions ?? 0}`));
+      for (const p of positionsResult.positions || []) {
+        const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
+        console.log(
+          `  ${colors.white(p.pair.padEnd(16))} ${status}  ${colors.dim("fees: ")}${config.features.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
+        );
+      }
+      console.log();
+    });
+  },
+};
+
+const cmdCandidates: Command = {
+  name: "/candidates",
+  description: "Refresh top pool list",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const topCandidates = await getTopCandidates({ limit: 5 });
+      const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
+      _startupCandidates = candidates;
+      const totalEligible = (topCandidates as { total_eligible?: number }).total_eligible ?? 0;
+      const totalScreened = (topCandidates as { total_screened?: number }).total_screened ?? 0;
+      console.log(
+        colors.bold(
+          `\nTop pools (${colors.cyan(totalEligible.toString())} eligible from ${colors.dim(totalScreened.toString())} screened):\n`
+        )
+      );
+      console.log(formatCandidates(candidates));
+      console.log();
+    });
+  },
+};
+
+const cmdBriefing: Command = {
+  name: "/briefing",
+  description: "Show morning briefing (last 24h)",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const briefing = await generateBriefing();
+      console.log(colors.dim(`\n${briefing.replace(/<[^>]*>/g, "")}\n`));
+    });
+  },
+};
+
+const cmdThresholds: Command = {
+  name: "/thresholds",
+  description: "Show current screening thresholds + performance stats",
+  handler: async ({ rl }) => {
+    const s = config.screening;
+    console.log(colors.bold("\nCurrent screening thresholds:"));
+    console.log(`  ${colors.cyan("minFeeActiveTvlRatio:")} ${s.minFeeActiveTvlRatio}`);
+    console.log(`  ${colors.cyan("minOrganic:")}           ${s.minOrganic}`);
+    console.log(`  ${colors.cyan("minHolders:")}           ${s.minHolders}`);
+    console.log(`  ${colors.cyan("minTvl:")}               ${s.minTvl}`);
+    console.log(`  ${colors.cyan("maxTvl:")}               ${s.maxTvl}`);
+    console.log(`  ${colors.cyan("minVolume:")}            ${s.minVolume}`);
+    console.log(`  ${colors.cyan("minTokenFeesSol:")}      ${s.minTokenFeesSol}`);
+    console.log(`  ${colors.cyan("maxBundlePct:")}         ${s.maxBundlePct}`);
+    console.log(`  ${colors.cyan("maxBotHoldersPct:")}     ${s.maxBotHoldersPct}`);
+    console.log(`  ${colors.cyan("maxTop10Pct:")}          ${s.maxTop10Pct}`);
+    console.log(`  ${colors.cyan("timeframe:")}            ${s.timeframe}`);
+    const perf = getPerformanceSummary();
+    if (perf) {
+      console.log(colors.dim(`\n  Based on ${perf.total_positions_closed} closed positions`));
+      console.log(
+        `  ${colors.green("Win rate:")} ${perf.win_rate_pct}%  |  ${colors.green("Avg PnL:")} ${perf.avg_pnl_pct}%`
+      );
+    } else {
+      console.log(colors.yellow("\n  No closed positions yet — thresholds are preset defaults."));
+    }
+    console.log();
+    rl.prompt();
+  },
+};
+
+const cmdLearn: Command = {
+  name: "/learn",
+  description: "Study top LPers from pools and save lessons",
+  handler: async ({ rl, deps, args, rawInput }) => {
+    await runBusy(rl, deps, async () => {
+      const poolArg = args[0] || null;
+
+      let poolsToStudy: Array<{ pool: string; name: string }> = [];
+
+      if (poolArg) {
+        poolsToStudy = [{ pool: poolArg, name: poolArg }];
+      } else {
+        // Fetch top 10 candidates across all eligible pools
+        console.log(colors.dim("\nFetching top pool candidates to study...\n"));
+        const topCandidates = await getTopCandidates({ limit: 10 });
+        const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
+        if (!candidates.length) {
+          console.log(colors.yellow("No eligible pools found to study.\n"));
+          return;
+        }
+        poolsToStudy = candidates.map((c) => ({ pool: c.pool, name: c.name }));
+      }
+
+      console.log(colors.cyan(`\nStudying top LPers across ${poolsToStudy.length} pools...\n`));
+      for (const p of poolsToStudy) console.log(colors.dim(`  • ${p.name || p.pool}`));
+      console.log();
+
+      const poolList = poolsToStudy.map((p, i) => `${i + 1}. ${p.name} (${p.pool})`).join("\n");
+
+      const { content: reply } = await agentLoop(
+        `Study top LPers across these ${poolsToStudy.length} pools by calling study_top_lpers for each:
+
+${poolList}
+
+For each pool, call study_top_lpers then move to the next. After studying all pools:
+1. Identify patterns that appear across multiple pools (hold time, scalping vs holding, win rates).
+2. Note pool-specific patterns where behaviour differs significantly.
+3. Derive 4-8 concrete, actionable lessons using add_lesson. Prioritize cross-pool patterns — they're more reliable.
+4. Summarize what you learned.
+
+Focus on: hold duration, entry/exit timing, what win rates look like, whether scalpers or holders dominate.`,
+        config.llm.maxSteps,
+        [],
+        "GENERAL"
+      );
+      console.log(colors.dim(`\n${reply}\n`));
+    });
+  },
+};
+
+const cmdEvolve: Command = {
+  name: "/evolve",
+  description: "Manually trigger threshold evolution from performance data",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const perf = getPerformanceSummary();
+      if (!perf || perf.total_positions_closed < 5) {
+        const needed = 5 - (perf?.total_positions_closed || 0);
+        console.log(
+          colors.yellow(`\nNeed at least 5 closed positions to evolve. ${needed} more needed.\n`)
+        );
+        return;
+      }
+      const fs = await import("fs");
+      const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
+      const result = evolveThresholds(lessonsData.performance, config);
+      if (!result || Object.keys(result.changes).length === 0) {
+        console.log(
+          colors.yellow(
+            "\nNo threshold changes needed — current settings already match performance data.\n"
+          )
+        );
+      } else {
+        // Import dynamically to avoid circular dependency
+        const { reloadScreeningThresholds } = await import("./config/config.js");
+        reloadScreeningThresholds();
+        console.log(colors.green("\nThresholds evolved:"));
+        for (const [key, val] of Object.entries(result.changes)) {
+          console.log(
+            `  ${colors.cyan(key)}: ${(result.rationale as Record<string, string>)[key]}`
+          );
+        }
+        console.log(colors.green("\nSaved to user-config.json. Applied immediately.\n"));
+      }
+    });
+  },
+};
+
+const cmdAuto: Command = {
+  name: "auto",
+  description: "Let the agent pick and deploy automatically",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      console.log(colors.cyan("\nAgent is picking and deploying...\n"));
+      const { content: reply } = await agentLoop(
+        `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${DEPLOY} SOL. Execute now, don't ask.`,
+        config.llm.maxSteps,
+        [],
+        "SCREENER"
+      );
+      console.log(colors.dim(`\n${reply}\n`));
+    });
+  },
+};
+
+const cmdGo: Command = {
+  name: "go",
+  description: "Start cron without deploying",
+  hidden: true,
+  handler: async ({ deps, rl }) => {
+    const wasAlreadyStarted = deps.isCronStarted ? deps.isCronStarted() : false;
+    deps.launchCron();
+    if (!wasAlreadyStarted) {
+      console.log(colors.green("✓ Autonomous cycles are now running.\n"));
+    }
+    rl.prompt();
+  },
+};
+
+// Helper to format command name for display
+function cmdName(name: string): string {
+  // Add color to slash commands
+  if (name.startsWith("/")) {
+    return colors.yellow(name);
+  }
+  return colors.green(name);
+}
+
+// ═══════════════════════════════════════════
 //  MAIN REPL ENTRY POINT
 // ═══════════════════════════════════════════
 export async function startREPL(deps: REPLDependencies): Promise<void> {
@@ -328,20 +764,46 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     return;
   }
 
+  // Setup signal handlers first
+  setupSignalHandlers(deps);
+
+  // Register all commands
+  registerCommand(cmdHelp);
+  registerCommand(cmdStop);
+  registerCommand(cmdStatus);
+  registerCommand(cmdCandidates);
+  registerCommand(cmdBriefing);
+  registerCommand(cmdThresholds);
+  registerCommand(cmdLearn);
+  registerCommand(cmdEvolve);
+  registerCommand(cmdAuto);
+  registerCommand(cmdGo);
+
+  // Load persistent history
+  const persistentHistory = loadHistory();
+
   const rl: ReadlineInterface = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: buildPrompt(deps),
+    completer: createCompleter(),
+    history: persistentHistory,
+    historySize: 100,
   });
 
   // Store reference for prompt refresh
   _ttyInterface = rl;
 
-  // Update prompt countdown every 10 seconds
-  setInterval(() => {
+  // Save history periodically and on exit
+  const historySaveInterval = setInterval(() => {
+    // @ts-ignore - history is private but accessible
+    saveHistory(rl.history || []);
+  }, HISTORY_SAVE_INTERVAL);
+
+  // Update prompt countdown every 10 seconds (smooth refresh)
+  const promptRefreshInterval = setInterval(() => {
     if (!busy) {
-      rl.setPrompt(buildPrompt(deps));
-      rl.prompt(true); // true = preserve current line
+      refreshPrompt(deps);
     }
   }, 10_000);
 
@@ -351,8 +813,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     deps.launchCron();
     if (!wasAlreadyStarted) {
       console.log(colors.green("✓ Autonomous cycles are now running.\n"));
-      rl.setPrompt(buildPrompt(deps));
-      rl.prompt(true);
+      refreshPrompt(deps);
     }
   }
 
@@ -368,7 +829,6 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   console.log(colors.dim("Fetching wallet and top pool candidates...\n"));
 
   busy = true;
-  let startupCandidates: CondensedPool[] = [];
 
   (async () => {
     try {
@@ -386,7 +846,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
             total_screened?: number;
           }
         ).candidates || [];
-      startupCandidates = candidates;
+      _startupCandidates = candidates;
 
       console.log(
         colors.cyan("Wallet:    ") +
@@ -446,6 +906,7 @@ Commands:
   ${colors.yellow("/learn <addr>")}  Study top LPers from a specific pool address
   ${colors.yellow("/thresholds")}    Show current screening thresholds + performance stats
   ${colors.yellow("/evolve")}        Manually trigger threshold evolution from performance data
+  ${colors.yellow("/help")}          Show all available commands
   ${colors.red("/stop")}            Shut down
 `)
   );
@@ -459,11 +920,14 @@ Commands:
       return;
     }
 
+    // Save to persistent history
+    appendHistoryEntry(input);
+
     // ── Number pick: deploy into pool N ─────
     const pick = parseInt(input);
-    if (!isNaN(pick) && pick >= 1 && pick <= startupCandidates.length) {
+    if (!isNaN(pick) && pick >= 1 && pick <= _startupCandidates.length) {
       await runBusy(rl, deps, async () => {
-        const pool = startupCandidates[pick - 1];
+        const pool = _startupCandidates[pick - 1];
         console.log(colors.cyan(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`));
         const { content: reply } = await agentLoop(
           `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
@@ -477,188 +941,11 @@ Commands:
       return;
     }
 
-    // ── auto: agent picks and deploys ───────
-    if (input.toLowerCase() === "auto") {
-      await runBusy(rl, deps, async () => {
-        console.log(colors.cyan("\nAgent is picking and deploying...\n"));
-        const { content: reply } = await agentLoop(
-          `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${DEPLOY} SOL. Execute now, don't ask.`,
-          config.llm.maxSteps,
-          [],
-          "SCREENER"
-        );
-        console.log(colors.dim(`\n${reply}\n`));
-        launchCron();
-      });
-      return;
-    }
+    // ── Command registry lookup ─────────────
+    const { command, args, rawInput } = parseCommand(input);
 
-    // ── go: start cron without deploying ────
-    if (input.toLowerCase() === "go") {
-      launchCron();
-      rl.prompt();
-      return;
-    }
-
-    // ── Slash commands ───────────────────────
-    if (input === "/stop") {
-      await deps.shutdown("user command");
-      return;
-    }
-
-    if (input === "/status") {
-      await runBusy(rl, deps, async () => {
-        const [wallet, positionsResult] = await Promise.all([
-          getWalletBalances(),
-          getMyPositions({ force: true }),
-        ]);
-        console.log(colors.cyan(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`));
-        console.log(colors.cyan(`Positions: ${positionsResult.total_positions ?? 0}`));
-        for (const p of positionsResult.positions || []) {
-          const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
-          console.log(
-            `  ${colors.white(p.pair.padEnd(16))} ${status}  ${colors.dim("fees: ")}${config.features.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
-          );
-        }
-        console.log();
-      });
-      return;
-    }
-
-    if (input === "/briefing") {
-      await runBusy(rl, deps, async () => {
-        const briefing = await generateBriefing();
-        console.log(colors.dim(`\n${briefing.replace(/<[^>]*>/g, "")}\n`));
-      });
-      return;
-    }
-
-    if (input === "/candidates") {
-      await runBusy(rl, deps, async () => {
-        const topCandidates = await getTopCandidates({ limit: 5 });
-        const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
-        startupCandidates = candidates;
-        const totalEligible = (topCandidates as { total_eligible?: number }).total_eligible ?? 0;
-        const totalScreened = (topCandidates as { total_screened?: number }).total_screened ?? 0;
-        console.log(
-          colors.bold(
-            `\nTop pools (${colors.cyan(totalEligible.toString())} eligible from ${colors.dim(totalScreened.toString())} screened):\n`
-          )
-        );
-        console.log(formatCandidates(candidates));
-        console.log();
-      });
-      return;
-    }
-
-    if (input === "/thresholds") {
-      const s = config.screening;
-      console.log(colors.bold("\nCurrent screening thresholds:"));
-      console.log(`  ${colors.cyan("minFeeActiveTvlRatio:")} ${s.minFeeActiveTvlRatio}`);
-      console.log(`  ${colors.cyan("minOrganic:")}           ${s.minOrganic}`);
-      console.log(`  ${colors.cyan("minHolders:")}           ${s.minHolders}`);
-      console.log(`  ${colors.cyan("minTvl:")}               ${s.minTvl}`);
-      console.log(`  ${colors.cyan("maxTvl:")}               ${s.maxTvl}`);
-      console.log(`  ${colors.cyan("minVolume:")}            ${s.minVolume}`);
-      console.log(`  ${colors.cyan("minTokenFeesSol:")}      ${s.minTokenFeesSol}`);
-      console.log(`  ${colors.cyan("maxBundlePct:")}         ${s.maxBundlePct}`);
-      console.log(`  ${colors.cyan("maxBotHoldersPct:")}     ${s.maxBotHoldersPct}`);
-      console.log(`  ${colors.cyan("maxTop10Pct:")}          ${s.maxTop10Pct}`);
-      console.log(`  ${colors.cyan("timeframe:")}            ${s.timeframe}`);
-      const perf = getPerformanceSummary();
-      if (perf) {
-        console.log(colors.dim(`\n  Based on ${perf.total_positions_closed} closed positions`));
-        console.log(
-          `  ${colors.green("Win rate:")} ${perf.win_rate_pct}%  |  ${colors.green("Avg PnL:")} ${perf.avg_pnl_pct}%`
-        );
-      } else {
-        console.log(colors.yellow("\n  No closed positions yet — thresholds are preset defaults."));
-      }
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input.startsWith("/learn")) {
-      await runBusy(rl, deps, async () => {
-        const parts = input.split(" ");
-        const poolArg = parts[1] || null;
-
-        let poolsToStudy: Array<{ pool: string; name: string }> = [];
-
-        if (poolArg) {
-          poolsToStudy = [{ pool: poolArg, name: poolArg }];
-        } else {
-          // Fetch top 10 candidates across all eligible pools
-          console.log(colors.dim("\nFetching top pool candidates to study...\n"));
-          const topCandidates = await getTopCandidates({ limit: 10 });
-          const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
-          if (!candidates.length) {
-            console.log(colors.yellow("No eligible pools found to study.\n"));
-            return;
-          }
-          poolsToStudy = candidates.map((c) => ({ pool: c.pool, name: c.name }));
-        }
-
-        console.log(colors.cyan(`\nStudying top LPers across ${poolsToStudy.length} pools...\n`));
-        for (const p of poolsToStudy) console.log(colors.dim(`  • ${p.name || p.pool}`));
-        console.log();
-
-        const poolList = poolsToStudy.map((p, i) => `${i + 1}. ${p.name} (${p.pool})`).join("\n");
-
-        const { content: reply } = await agentLoop(
-          `Study top LPers across these ${poolsToStudy.length} pools by calling study_top_lpers for each:
-
-${poolList}
-
-For each pool, call study_top_lpers then move to the next. After studying all pools:
-1. Identify patterns that appear across multiple pools (hold time, scalping vs holding, win rates).
-2. Note pool-specific patterns where behaviour differs significantly.
-3. Derive 4-8 concrete, actionable lessons using add_lesson. Prioritize cross-pool patterns — they're more reliable.
-4. Summarize what you learned.
-
-Focus on: hold duration, entry/exit timing, what win rates look like, whether scalpers or holders dominate.`,
-          config.llm.maxSteps,
-          [],
-          "GENERAL"
-        );
-        console.log(colors.dim(`\n${reply}\n`));
-      });
-      return;
-    }
-
-    if (input === "/evolve") {
-      await runBusy(rl, deps, async () => {
-        const perf = getPerformanceSummary();
-        if (!perf || perf.total_positions_closed < 5) {
-          const needed = 5 - (perf?.total_positions_closed || 0);
-          console.log(
-            colors.yellow(`\nNeed at least 5 closed positions to evolve. ${needed} more needed.\n`)
-          );
-          return;
-        }
-        const fs = await import("fs");
-        const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
-        const result = evolveThresholds(lessonsData.performance, config);
-        if (!result || Object.keys(result.changes).length === 0) {
-          console.log(
-            colors.yellow(
-              "\nNo threshold changes needed — current settings already match performance data.\n"
-            )
-          );
-        } else {
-          // Import dynamically to avoid circular dependency
-          const { reloadScreeningThresholds } = await import("./config/config.js");
-          reloadScreeningThresholds();
-          console.log(colors.green("\nThresholds evolved:"));
-          for (const [key, val] of Object.entries(result.changes)) {
-            console.log(
-              `  ${colors.cyan(key)}: ${(result.rationale as Record<string, string>)[key]}`
-            );
-          }
-          console.log(colors.green("\nSaved to user-config.json. Applied immediately.\n"));
-        }
-      });
+    if (command) {
+      await command.handler({ rl, deps, args, rawInput });
       return;
     }
 
@@ -679,13 +966,22 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
     });
   });
 
-  rl.on("close", () => deps.shutdown("stdin closed"));
+  rl.on("close", () => {
+    clearInterval(promptRefreshInterval);
+    clearInterval(historySaveInterval);
+    // @ts-ignore - history is private but accessible
+    saveHistory(rl.history || []);
+    deps.shutdown("stdin closed");
+  });
 }
 
 // ═══════════════════════════════════════════
 //  NON-TTY MODE
 // ═══════════════════════════════════════════
 export async function startNonTTY(deps: REPLDependencies): Promise<void> {
+  // Setup signal handlers for non-TTY mode too
+  setupSignalHandlers(deps);
+
   log("startup", "Non-TTY mode — starting cron cycles immediately.");
   deps.startCronJobs();
 
