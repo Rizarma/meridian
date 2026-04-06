@@ -858,7 +858,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     try {
       const [wallet, positions, topCandidates] = await Promise.all([
         getWalletBalances(),
-        getMyPositions({ force: true }),
+        getMyPositions({ force: true, silent: true }),
         getTopCandidates({ limit: 5 }),
       ]);
 
@@ -906,16 +906,6 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     } finally {
       busy = false;
 
-      // Start autonomous cycles after data fetch complete
-      launchCron();
-
-      // Run missed briefing check
-      deps.maybeRunMissedBriefing().catch(() => {});
-
-      // Start Telegram polling
-      const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
-      startPolling(boundTelegramHandler);
-
       // Show commands
       console.log(
         colors.cyan(`
@@ -937,6 +927,12 @@ Commands:
       // Show prompt and initial status bar
       rl.prompt();
       drawStatusBar(deps);
+
+      // Start background services after all UI is rendered
+      launchCron();
+      deps.maybeRunMissedBriefing().catch(() => {});
+      const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
+      startPolling(boundTelegramHandler);
     }
   })();
 

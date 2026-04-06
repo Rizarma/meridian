@@ -459,7 +459,7 @@ export async function getMyPositions({
       const portfolio = (await res.json()) as { pools?: any[] };
 
       const pools = portfolio.pools || [];
-      log("positions", `Found ${pools.length} pool(s) with open positions`);
+      if (!silent) log("positions", `Found ${pools.length} pool(s) with open positions`);
 
       // Fetch bin data (lowerBinId, upperBinId, poolActiveBinId) for all pools in parallel
       // Needed for rules 3 & 4 (active_bin vs upper_bin comparison)
