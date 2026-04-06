@@ -84,9 +84,9 @@ function createTestConfig(partial: UserConfigPartial): Config {
       temperature: u.temperature ?? 0.373,
       maxTokens: u.maxTokens ?? 4096,
       maxSteps: u.maxSteps ?? 20,
-      managementModel: u.managementModel ?? "openrouter/healer-alpha",
-      screeningModel: u.screeningModel ?? "openrouter/hunter-alpha",
-      generalModel: u.generalModel ?? "openrouter/healer-alpha",
+      managementModel: u.managementModel ?? "xiaomi/mimo-v2-omni",
+      screeningModel: u.screeningModel ?? "openrouter/optimus-alpha",
+      generalModel: u.generalModel ?? "xiaomi/mimo-v2-omni",
     },
     tokens: {
       SOL: "So11111111111111111111111111111111111111112",
