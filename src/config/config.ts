@@ -118,12 +118,12 @@ export const config: Config = {
     maxTokens: u.maxTokens ?? 4096,
     maxSteps: u.maxSteps ?? 20,
     // Precedence: .env LLM_MODEL > user-config role-specific > user-config llmModel > defaults
+    // Default models updated after healer-alpha/hunter-alpha were removed from OpenRouter
     managementModel:
-      process.env.LLM_MODEL ?? u.managementModel ?? u.llmModel ?? "openrouter/healer-alpha",
+      process.env.LLM_MODEL ?? u.managementModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
     screeningModel:
-      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "openrouter/hunter-alpha",
-    generalModel:
-      process.env.LLM_MODEL ?? u.generalModel ?? u.llmModel ?? "openrouter/healer-alpha",
+      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "openrouter/optimus-alpha",
+    generalModel: process.env.LLM_MODEL ?? u.generalModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
   },
 
   // ─── Common Token Mints ────────────────
