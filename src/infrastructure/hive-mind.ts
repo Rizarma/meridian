@@ -21,6 +21,7 @@
  */
 
 import fs from "fs";
+import { config } from "../config/config.js";
 import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   HiveMindConfig,
@@ -86,6 +87,7 @@ async function fetchWithTimeout(
  * Check whether Hive Mind is configured and enabled.
  */
 export function isEnabled(): boolean {
+  if (!config.features.hiveMind) return false;
   const cfg = readConfig();
   return Boolean(cfg.hiveMindUrl && cfg.hiveMindApiKey);
 }

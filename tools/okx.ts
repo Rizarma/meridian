@@ -4,6 +4,7 @@
  * Docs: https://web3.okx.com/build/dev-docs/
  */
 import crypto from "crypto";
+import { config } from "../src/config/config.js";
 import type {
   OKXAdvancedInfo,
   OKXAdvancedResult,
@@ -19,12 +20,18 @@ import type {
 const BASE = "https://web3.okx.com";
 const CHAIN_SOLANA = "501";
 const PUBLIC_HEADERS = { "Ok-Access-Client-type": "agent-cli" };
-const OKX_API_KEY = process.env.OKX_API_KEY || process.env.OK_ACCESS_KEY || "";
-const OKX_SECRET_KEY = process.env.OKX_SECRET_KEY || process.env.OK_ACCESS_SECRET || "";
-const OKX_PASSPHRASE = process.env.OKX_PASSPHRASE || process.env.OK_ACCESS_PASSPHRASE || "";
-const OKX_PROJECT_ID = process.env.OKX_PROJECT_ID || process.env.OK_ACCESS_PROJECT || "";
+
+function getOKXCredentials() {
+  return {
+    OKX_API_KEY: process.env.OKX_API_KEY || process.env.OK_ACCESS_KEY || "",
+    OKX_SECRET_KEY: process.env.OKX_SECRET_KEY || process.env.OK_ACCESS_SECRET || "",
+    OKX_PASSPHRASE: process.env.OKX_PASSPHRASE || process.env.OK_ACCESS_PASSPHRASE || "",
+    OKX_PROJECT_ID: process.env.OKX_PROJECT_ID || process.env.OK_ACCESS_PROJECT || "",
+  };
+}
 
 function hasAuth(): boolean {
+  const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE } = getOKXCredentials();
   return !!(
     OKX_API_KEY &&
     OKX_SECRET_KEY &&
@@ -33,7 +40,16 @@ function hasAuth(): boolean {
   );
 }
 
+/**
+ * Check whether OKX integration is enabled.
+ * Requires both the feature flag AND environment variables.
+ */
+export function isEnabled(): boolean {
+  return config.features.okx && hasAuth();
+}
+
 function buildAuthHeaders(method: string, path: string, body = ""): Record<string, string> {
+  const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE, OKX_PROJECT_ID } = getOKXCredentials();
   const timestamp = new Date().toISOString();
   const prehash = `${timestamp}${method.toUpperCase()}${path}${body}`;
   const sign = crypto.createHmac("sha256", OKX_SECRET_KEY).update(prehash).digest("base64");

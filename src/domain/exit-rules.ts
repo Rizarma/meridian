@@ -8,6 +8,7 @@
  * Pattern: Domain-Driven Structure + Single Responsibility Principle
  */
 
+import { config } from "../config/config.js";
 import type { EnrichedPosition } from "../types/dlmm.js";
 import type { ActionDecision } from "../types/orchestrator.js";
 import type {
@@ -197,9 +198,9 @@ export function evaluateTrailingTP(
   position: TrackedPosition,
   currentPnlPct: number | null,
   pnlSuspicious: boolean | undefined,
-  config: ManagementConfig
+  mgmtConfig: ManagementConfig
 ): ExitAction | null {
-  if (!config.trailingTakeProfit) return null;
+  if (!config.features.trailingTakeProfit) return null;
   if (pnlSuspicious) return null;
   if (currentPnlPct == null) return null;
 
@@ -207,7 +208,7 @@ export function evaluateTrailingTP(
   if (!position.trailing_active) return null;
 
   const dropFromPeak = (position.peak_pnl_pct ?? 0) - currentPnlPct;
-  const trailingDropPct = config.trailingDropPct ?? 1.5;
+  const trailingDropPct = mgmtConfig.trailingDropPct ?? 1.5;
 
   if (dropFromPeak >= trailingDropPct) {
     return {
@@ -228,12 +229,12 @@ export function evaluateTrailingTP(
  */
 export function shouldActivateTrailingTP(
   position: TrackedPosition,
-  config: ManagementConfig
+  mgmtConfig: ManagementConfig
 ): boolean {
-  if (!config.trailingTakeProfit) return false;
+  if (!config.features.trailingTakeProfit) return false;
   if (position.trailing_active) return false;
 
-  const triggerPct = config.trailingTriggerPct ?? 3;
+  const triggerPct = mgmtConfig.trailingTriggerPct ?? 3;
   return (position.peak_pnl_pct ?? 0) >= triggerPct;
 }
 

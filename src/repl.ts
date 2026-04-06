@@ -171,7 +171,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         await sendMessage("No open positions.");
         return;
       }
-      const cur = config.management.solMode ? "◎" : "$";
+      const cur = config.features.solMode ? "◎" : "$";
       const lines = positions.map((p, i) => {
         const pnl =
           (p.pnl_usd ?? 0) >= 0 ? `+${cur}${p.pnl_usd ?? 0}` : `-${cur}${Math.abs(p.pnl_usd ?? 0)}`;
@@ -207,7 +207,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
           ? `\nClaim txs: ${closeResult.claim_txs.join(", ")}`
           : "";
         await sendMessage(
-          `✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${closeResult.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`
+          `✅ Closed ${pos.pair}\nPnL: ${config.features.solMode ? "◎" : "$"}${closeResult.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`
         );
       } else {
         await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
@@ -503,7 +503,7 @@ Commands:
         for (const p of positionsResult.positions || []) {
           const status = p.in_range ? "in-range ✓" : "OUT OF RANGE ⚠";
           console.log(
-            `  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
+            `  ${p.pair.padEnd(16)} ${status}  fees: ${config.features.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`
           );
         }
         console.log();
