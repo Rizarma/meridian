@@ -1,12 +1,50 @@
 # Config Reference
 
-`src/config/config.ts` loads `user-config.json` at startup. Runtime mutations go through the `update_config` tool, which:
+Configuration follows 12-Factor App best practices with clear separation of concerns:
 
+- **`.env`** — Secrets and environment-specific overrides (never committed)
+- **`user-config.json`** — User preferences and tuning (portable, can be shared)
+- **Hardcoded defaults** — Sensible fallbacks for all settings
+
+**Precedence:** `.env` > `user-config.json` > hardcoded defaults
+
+Runtime mutations go through the `update_config` tool, which:
 - Updates the live `config` object immediately
 - Persists to `user-config.json`
 - Restarts cron jobs if schedule intervals changed
 
-All defaults below are sourced from `user-config.example.json`.
+## What goes where
+
+| Setting Type | File | Examples |
+|-------------|------|----------|
+| Secrets | `.env` | `WALLET_PRIVATE_KEY`, `OPENROUTER_API_KEY`, `HELIUS_API_KEY` |
+| Environment overrides | `.env` | `RPC_URL` (for staging/prod), `DRY_RUN` |
+| Models | `user-config.json` | `managementModel`, `screeningModel`, `generalModel`, `llmModel` |
+| Thresholds | `user-config.json` | `minTvl`, `maxTvl`, `stopLossPct`, `minOrganic` |
+| Strategy | `user-config.json` | `strategy`, `binsBelow`, `deployAmountSol` |
+| Intervals | `user-config.json` | `managementIntervalMin`, `screeningIntervalMin` |
+
+## Environment variables
+
+| Var | Required | Purpose |
+|-----|----------|---------|
+| `WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array private key |
+| `RPC_URL` | Yes* | Solana RPC endpoint (*can be set in user-config.json) |
+| `OPENROUTER_API_KEY` | Yes* | LLM API key (*or set `llmBaseUrl`+`llmApiKey` in user-config.json for local LLM) |
+| `HELIUS_API_KEY` | No | Enhanced wallet balance data |
+| `LPAGENT_API_KEY` | No | LP Agent API access |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram notifications |
+| `TELEGRAM_CHAT_ID` | No | Telegram chat target (auto-filled on first message) |
+| `TELEGRAM_ALLOWED_USER_IDS` | No | Comma-separated list of user IDs allowed to send commands |
+| `LLM_BASE_URL` | No | Override for local LLM (e.g. LM Studio) |
+| `LLM_API_KEY` | No | Override LLM auth (local endpoints) |
+| `LLM_MODEL` | No | Override all models (takes precedence over user-config.json) |
+| `DRY_RUN` | No | Skip all on-chain transactions |
+| `HIVE_MIND_URL` | No | Collective intelligence server |
+| `HIVE_MIND_API_KEY` | No | Hive mind auth token |
+| `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` / `OKX_PROJECT_ID` | No | OKX OnchainOS risk data |
+| `ALLOW_SELF_UPDATE` | No | Enable dangerous admin actions (default: false) |
+| `LOG_LEVEL` | No | Log verbosity: `debug`, `info`, `warn`, `error` (default: info) |
 
 ## Screening
 
