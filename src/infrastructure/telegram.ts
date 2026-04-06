@@ -123,7 +123,10 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
 
 export async function sendMessage(text: string): Promise<unknown> {
   if (!TOKEN || !chatId) return null;
-  return postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
+  return postTelegram("sendMessage", {
+    text: String(text).slice(0, 4096),
+    parse_mode: "Markdown",
+  });
 }
 
 export async function sendHTML(html: string): Promise<void> {
@@ -136,6 +139,7 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
   return postTelegram("editMessageText", {
     message_id: messageId,
     text: String(text).slice(0, 4096),
+    parse_mode: "Markdown",
   });
 }
 
