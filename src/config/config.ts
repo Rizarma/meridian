@@ -25,6 +25,11 @@ const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
 //   - user-config.json = user preferences (portable, can be shared)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Copy user-config values to process.env if not already set (maintains precedence)
+// These are needed by tools/ that read directly from process.env
+if (u.rpcUrl) process.env.RPC_URL ||= u.rpcUrl;
+if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
+
 // Helper: Get value with precedence env > user-config > default
 const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
   const envValue = process.env[envKey];

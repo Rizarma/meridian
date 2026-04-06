@@ -123,10 +123,21 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
 
 export async function sendMessage(text: string): Promise<unknown> {
   if (!TOKEN || !chatId) return null;
-  return postTelegram("sendMessage", {
-    text: String(text).slice(0, 4096),
-    parse_mode: "Markdown",
-  });
+  const safeText = String(text).slice(0, 4096);
+  try {
+    return await postTelegram("sendMessage", {
+      text: safeText,
+      parse_mode: "Markdown",
+    });
+  } catch (error) {
+    // If Markdown parsing fails, retry as plain text
+    const errorMessage = String((error as { message?: string }).message || "");
+    if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
+      log("telegram_warn", "Markdown parsing failed, sending as plain text");
+      return postTelegram("sendMessage", { text: safeText });
+    }
+    throw error;
+  }
 }
 
 export async function sendHTML(html: string): Promise<void> {
@@ -136,11 +147,22 @@ export async function sendHTML(html: string): Promise<void> {
 
 export async function editMessage(text: string, messageId: number): Promise<unknown> {
   if (!TOKEN || !chatId || !messageId) return null;
-  return postTelegram("editMessageText", {
-    message_id: messageId,
-    text: String(text).slice(0, 4096),
-    parse_mode: "Markdown",
-  });
+  const safeText = String(text).slice(0, 4096);
+  try {
+    return await postTelegram("editMessageText", {
+      message_id: messageId,
+      text: safeText,
+      parse_mode: "Markdown",
+    });
+  } catch (error) {
+    // If Markdown parsing fails, retry as plain text
+    const errorMessage = String((error as { message?: string }).message || "");
+    if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
+      log("telegram_warn", "Markdown parsing failed, editing as plain text");
+      return postTelegram("editMessageText", { message_id: messageId, text: safeText });
+    }
+    throw error;
+  }
 }
 
 export function hasActiveLiveMessage(): boolean {
