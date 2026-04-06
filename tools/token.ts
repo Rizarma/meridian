@@ -1,5 +1,7 @@
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
+import { config } from "../src/config/config.js";
+import { log } from "../src/infrastructure/logger.js";
 import type {
   OKXAdvancedResult,
   OKXClusterResult,
@@ -19,7 +21,14 @@ import type {
 } from "../src/types/index.js";
 import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
 import type { TokenInfoResult } from "../src/types/token.js";
+import { cache } from "../src/utils/cache.js";
+import { isEnabled as isOKXEnabled } from "./okx.js";
 import { registerTool } from "./registry.js";
+
+// TTL constants (in milliseconds)
+const TOKEN_INFO_TTL = 300000; // 5 minutes
+const TOKEN_HOLDERS_TTL = 600000; // 10 minutes
+const TOKEN_NARRATIVE_TTL = 1800000; // 30 minutes
 
 // Jupiter API response types
 interface JupiterNarrativeResponse {
@@ -119,6 +128,13 @@ interface PnLResponse {
  * Useful for understanding if a token has a real community/theme vs nothing.
  */
 export async function getTokenNarrative({ mint }: TokenNarrativeInput): Promise<TokenNarrative> {
+  const normalizedMint = mint.trim().toLowerCase();
+  const cacheKey = `token:narrative:${normalizedMint}`;
+  const cached = cache.get(cacheKey) as TokenNarrative | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const res = await fetch(`${DATAPI_BASE}/chaininsight/narrative/${mint}`);
   if (!res.ok) throw new Error(`Narrative API error: ${res.status}`);
   const data = (await res.json()) as JupiterNarrativeResponse;
@@ -127,6 +143,8 @@ export async function getTokenNarrative({ mint }: TokenNarrativeInput): Promise<
     narrative: data.narrative || null,
     status: data.status,
   };
+
+  cache.set(cacheKey, result, TOKEN_NARRATIVE_TTL);
   return result;
 }
 
@@ -135,6 +153,13 @@ export async function getTokenNarrative({ mint }: TokenNarrativeInput): Promise<
  * Returns condensed token info useful for confidence scoring.
  */
 export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfoResult> {
+  const normalizedQuery = query.trim().toLowerCase();
+  const cacheKey = `token:info:${normalizedQuery}`;
+  const cached = cache.get(cacheKey) as TokenInfoResult | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const url = `${DATAPI_BASE}/assets/search?query=${encodeURIComponent(query)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Token search API error: ${res.status}`);
@@ -187,11 +212,17 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
   });
 
   // Enrich first result with OKX smart money + risk data (public endpoint, no key needed)
-  if (results[0]?.mint) {
+  if (isOKXEnabled() && results[0]?.mint) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
-      getAdvancedInfo(results[0].mint).catch(() => null),
-      getClusterList(results[0].mint).catch(() => []),
+      getAdvancedInfo(results[0].mint).catch((err) => {
+        log("token", `OKX advanced info failed: ${err.message}`);
+        return null;
+      }),
+      getClusterList(results[0].mint).catch((err) => {
+        log("token", `OKX cluster list failed: ${err.message}`);
+        return [];
+      }),
     ]);
     if (adv) {
       results[0].risk_level = adv.risk_level ?? undefined;
@@ -210,6 +241,7 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
   }
 
   const successResult: TokenInfoResult = { found: true, query, results };
+  cache.set(cacheKey, successResult, TOKEN_INFO_TTL);
   return successResult;
 }
 
@@ -221,6 +253,13 @@ export async function getTokenHolders({
   mint,
   limit = 20,
 }: TokenHoldersInput): Promise<TokenHoldersResult> {
+  const normalizedMint = mint.trim().toLowerCase();
+  const cacheKey = `token:holders:${normalizedMint}`;
+  const cached = cache.get(cacheKey) as TokenHoldersResult | undefined;
+  if (cached) {
+    return cached;
+  }
+
   // Fetch holders and total supply in parallel
   const [holdersRes, tokenRes] = await Promise.all([
     fetch(`${DATAPI_BASE}/holders/${mint}?limit=100`),
@@ -268,11 +307,23 @@ export async function getTokenHolders({
   const top10Pct = realHolders.slice(0, 10).reduce((s, h) => s + (Number(h.pct) || 0), 0);
 
   // ─── Bundle / Cluster Analysis (OKX) ─────────────────────────
-  const { getAdvancedInfo, getClusterList } = await import("./okx.js");
-  const [advancedData, clusterList] = await Promise.all([
-    getAdvancedInfo(mint).catch(() => null),
-    getClusterList(mint).catch(() => []),
-  ]);
+  let advancedData: OKXAdvancedResult | null = null;
+  let clusterList: OKXClusterResult[] = [];
+  if (isOKXEnabled()) {
+    const { getAdvancedInfo, getClusterList } = await import("./okx.js");
+    const [adv, clusters] = await Promise.all([
+      getAdvancedInfo(mint).catch((err) => {
+        log("token", `OKX advanced info failed: ${err.message}`);
+        return null;
+      }),
+      getClusterList(mint).catch((err) => {
+        log("token", `OKX cluster list failed: ${err.message}`);
+        return [];
+      }),
+    ]);
+    advancedData = adv;
+    clusterList = clusters;
+  }
 
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────
   // Use targeted holders endpoint — only returns matching wallets, no noise
@@ -352,7 +403,7 @@ export async function getTokenHolders({
     );
   }
 
-  return {
+  const result: TokenHoldersResult = {
     mint,
     global_fees_sol: tokenInfo?.fees != null ? parseFloat(tokenInfo.fees.toFixed(2)) : null,
     total_fetched: holders.length,
@@ -369,6 +420,9 @@ export async function getTokenHolders({
     smart_wallets_holding: smartWalletsHolding,
     holders: mapped,
   };
+
+  cache.set(cacheKey, result, TOKEN_HOLDERS_TTL);
+  return result;
 }
 
 // Tool registrations
