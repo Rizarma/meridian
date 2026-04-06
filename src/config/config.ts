@@ -32,6 +32,19 @@ if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
 if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
 
+/**
+ * Get the effective RPC_URL with fallback chain:
+ * 1. process.env.RPC_URL (if set and non-empty)
+ * 2. user-config.json rpcUrl
+ * 3. Default Solana mainnet
+ *
+ * This is needed because tools read RPC_URL directly from process.env,
+ * and we need to ensure they get a valid URL even if .env has an empty value.
+ */
+export function getRpcUrl(): string {
+  return process.env.RPC_URL || u.rpcUrl || "https://api.mainnet-beta.solana.com";
+}
+
 // Helper: Get value with precedence env > user-config > default
 const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
   const envValue = process.env[envKey];
