@@ -6,8 +6,8 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { config } from "../config.js";
-import { log } from "../logger.js";
+import { config } from "../src/config/config.js";
+import { log } from "../src/infrastructure/logger.js";
 import { registerTool } from "./registry.js";
 
 // Type imports from types/wallet.d.ts

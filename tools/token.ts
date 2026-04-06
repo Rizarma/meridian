@@ -13,13 +13,12 @@ import type {
   TokenHoldersResult,
   TokenInfo,
   TokenInfoInput,
-  TokenInfoResult,
   TokenNarrative,
   TokenNarrativeInput,
   TokenStats1h,
-} from "../types/index.js";
-
-import type { SmartWallet, SmartWalletList } from "../types/smart-wallets.js";
+} from "../src/types/index.js";
+import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
+import type { TokenInfoResult } from "../src/types/token.js";
 import { registerTool } from "./registry.js";
 
 // Jupiter API response types
@@ -277,7 +276,7 @@ export async function getTokenHolders({
 
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────
   // Use targeted holders endpoint — only returns matching wallets, no noise
-  const { listSmartWallets } = await import("../smart-wallets.js");
+  const { listSmartWallets } = await import("../src/domain/smart-wallets.js");
   const { wallets: smartWallets } = listSmartWallets() as SmartWalletList;
   const smartWalletsHolding: SmartWalletHolding[] = [];
 

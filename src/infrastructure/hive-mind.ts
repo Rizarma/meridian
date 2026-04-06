@@ -21,18 +21,18 @@
  */
 
 import fs from "fs";
-import { USER_CONFIG_PATH, LESSONS_FILE, POOL_MEMORY_FILE } from "./paths.js";
+import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   HiveMindConfig,
-  SyncPayload,
-  SyncResult,
-  PoolConsensus,
+  HivePulse,
   LessonConsensus,
   PatternConsensus,
-  ThresholdConsensus,
-  HivePulse,
+  PoolConsensus,
   RegistrationResult,
-} from "./types/hive-mind.js";
+  SyncPayload,
+  SyncResult,
+  ThresholdConsensus,
+} from "../types/hive-mind.js";
 
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 const GET_TIMEOUT_MS = 5_000;
@@ -204,9 +204,9 @@ export async function syncToHive(): Promise<void> {
     };
 
     // Agent stats via dynamic import (avoids circular deps)
-    let agentStats = null;
+    let agentStats: import("../types/lessons.js").PerformanceMetrics | null = null;
     try {
-      const { getPerformanceSummary } = await import("./lessons.js");
+      const { getPerformanceSummary } = await import("../domain/lessons.js");
       agentStats = getPerformanceSummary();
     } catch (e: any) {
       console.log("[hive]", `Could not load agent stats: ${e.message}`);

@@ -5,13 +5,13 @@
  * Tools self-register at module load time — no central switch statement needed.
  */
 
-import type { ToolFunction } from "../types/executor.js";
-import type { AgentType } from "../types/index.js";
+import type { ToolFunction } from "../src/types/executor.js";
+import type { AgentType } from "../src/types/index.js";
 
 // Re-export ToolFunction as ToolHandler for semantic clarity
 export type ToolHandler = ToolFunction;
 
-import type { ToolName } from "../types/executor.js";
+import type { ToolName } from "../src/types/executor.js";
 
 /** Tool registration structure */
 export interface ToolRegistration {

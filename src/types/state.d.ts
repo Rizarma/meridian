@@ -66,17 +66,17 @@ export interface PositionState {
 }
 
 export interface PositionData {
-  pnl_pct: number;
+  pnl_pct: number | null;
   pnl_pct_suspicious?: boolean;
   in_range: boolean;
-  fee_per_tvl_24h?: number;
-  age_minutes?: number;
+  fee_per_tvl_24h?: number | null;
+  age_minutes?: number | null;
 }
 
 export interface ManagementConfig {
   trailingTakeProfit?: boolean;
   trailingTriggerPct?: number;
-  trailingDropPct?: number;
+  trailingDropPct?: number | null;
   stopLossPct?: number;
   outOfRangeWaitMinutes?: number;
   minFeePerTvl24h?: number;
@@ -91,8 +91,8 @@ export interface ExitAction {
   action: "STOP_LOSS" | "TRAILING_TP" | "OUT_OF_RANGE" | "LOW_YIELD";
   reason: string;
   needs_confirmation?: boolean;
-  peak_pnl_pct?: number;
-  current_pnl_pct?: number;
+  peak_pnl_pct?: number | null;
+  current_pnl_pct?: number | null;
 }
 
 export interface PeakConfirmation {

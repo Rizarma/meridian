@@ -25,23 +25,23 @@ import type {
   LessonsListOutput,
   PerformanceOutput,
   PoolMemoryOutput,
-} from "./types/cli.js";
+} from "../types/cli.js";
 import type {
   ActiveBinResult,
   PositionPnL,
   PositionsResult,
   SearchPoolsResult,
   WalletPositionsResult,
-} from "./types/dlmm.js";
-import type { PoolMemoryEntry } from "./types/pool-memory.js";
-import type { CondensedPool, TopCandidatesResult } from "./types/screening.js";
-import type { WalletPositionCheck } from "./types/smart-wallets.js";
+} from "../types/dlmm.js";
+import type { PoolMemoryEntry } from "../types/pool-memory.js";
+import type { CondensedPool, TopCandidatesResult } from "../types/screening.js";
+import type { WalletPositionCheck } from "../types/smart-wallets.js";
 import type {
   TokenHoldersResult,
   TokenInfo,
   TokenInfoResult,
   TokenNarrative,
-} from "./types/token.js";
+} from "../types/token.js";
 
 // ─── DRY_RUN must be set before any tool imports ─────────────────
 if (process.argv.includes("--dry-run")) process.env.DRY_RUN = "true";
@@ -301,14 +301,14 @@ const typedFlags = flags as CLIFlags;
 switch (subcommand as CLISubcommand) {
   // ── balance ──────────────────────────────────────────────────────
   case "balance": {
-    const { getWalletBalances } = await import("./tools/wallet.js");
+    const { getWalletBalances } = await import("../../tools/wallet.js");
     out(await getWalletBalances());
     break;
   }
 
   // ── positions ────────────────────────────────────────────────────
   case "positions": {
-    const { getMyPositions } = await import("./tools/dlmm.js");
+    const { getMyPositions } = await import("../../tools/dlmm.js");
     out(await getMyPositions({ force: true }));
     break;
   }
@@ -322,8 +322,8 @@ switch (subcommand as CLISubcommand) {
     const positionAddress: string | undefined = typedFlags.position || posAddr;
     if (!positionAddress) die("Usage: meridian pnl <position_address>");
 
-    const { getTrackedPosition } = await import("./state.js");
-    const { getPositionPnl, getMyPositions } = await import("./tools/dlmm.js");
+    const { getTrackedPosition } = await import("../infrastructure/state.js");
+    const { getPositionPnl, getMyPositions } = await import("../../tools/dlmm.js");
 
     let poolAddress: string | undefined;
     const tracked = getTrackedPosition(positionAddress);
@@ -355,11 +355,13 @@ switch (subcommand as CLISubcommand) {
 
   // ── candidates ───────────────────────────────────────────────────
   case "candidates": {
-    const { getTopCandidates } = await import("./tools/screening.js");
-    const { getActiveBin } = await import("./tools/dlmm.js");
-    const { getTokenInfo, getTokenHolders, getTokenNarrative } = await import("./tools/token.js");
-    const { checkSmartWalletsOnPool } = await import("./smart-wallets.js");
-    const { recallForPool } = await import("./pool-memory.js");
+    const { getTopCandidates } = await import("../../tools/screening.js");
+    const { getActiveBin } = await import("../../tools/dlmm.js");
+    const { getTokenInfo, getTokenHolders, getTokenNarrative } = await import(
+      "../../tools/token.js"
+    );
+    const { checkSmartWalletsOnPool } = await import("../domain/smart-wallets.js");
+    const { recallForPool } = await import("../domain/pool-memory.js");
 
     const limit: number = parseInt(typedFlags.limit || "5");
     const raw: TopCandidatesResult = await getTopCandidates({ limit });
@@ -410,7 +412,7 @@ switch (subcommand as CLISubcommand) {
           price_change_1h: ti?.stats_1h?.price_change
             ? parseFloat(ti.stats_1h.price_change)
             : undefined,
-          net_buyers_1h: ti?.stats_1h?.net_buyers,
+          net_buyers_1h: ti?.stats_1h?.net_buyers ?? undefined,
           audit: {
             top10_pct: ti?.audit?.top_holders_pct
               ? parseFloat(ti.audit.top_holders_pct)
@@ -440,7 +442,7 @@ switch (subcommand as CLISubcommand) {
       typedFlags.mint ||
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-info");
     if (!query) die("Usage: meridian token-info --query <mint_or_symbol>");
-    const { getTokenInfo } = await import("./tools/token.js");
+    const { getTokenInfo } = await import("../../tools/token.js");
     out(await getTokenInfo({ query }));
     break;
   }
@@ -451,7 +453,7 @@ switch (subcommand as CLISubcommand) {
       typedFlags.mint ||
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-holders");
     if (!mint) die("Usage: meridian token-holders --mint <addr>");
-    const { getTokenHolders } = await import("./tools/token.js");
+    const { getTokenHolders } = await import("../../tools/token.js");
     const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 20;
     out(await getTokenHolders({ mint, limit }));
     break;
@@ -463,7 +465,7 @@ switch (subcommand as CLISubcommand) {
       typedFlags.mint ||
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-narrative");
     if (!mint) die("Usage: meridian token-narrative --mint <addr>");
-    const { getTokenNarrative } = await import("./tools/token.js");
+    const { getTokenNarrative } = await import("../../tools/token.js");
     out(await getTokenNarrative({ mint }));
     break;
   }
@@ -471,7 +473,7 @@ switch (subcommand as CLISubcommand) {
   // ── pool-detail ───────────────────────────────────────────────
   case "pool-detail": {
     if (!typedFlags.pool) die("Usage: meridian pool-detail --pool <addr> [--timeframe 5m]");
-    const { getPoolDetail } = await import("./tools/screening.js");
+    const { getPoolDetail } = await import("../../tools/screening.js");
     out(
       await getPoolDetail({
         pool_address: typedFlags.pool,
@@ -487,7 +489,7 @@ switch (subcommand as CLISubcommand) {
       typedFlags.query ||
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "search-pools");
     if (!query) die("Usage: meridian search-pools --query <name_or_symbol>");
-    const { searchPools } = await import("./tools/dlmm.js");
+    const { searchPools } = await import("../../tools/dlmm.js");
     const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 10;
     out(await searchPools({ query, limit }));
     break;
@@ -496,7 +498,7 @@ switch (subcommand as CLISubcommand) {
   // ── active-bin ────────────────────────────────────────────────
   case "active-bin": {
     if (!typedFlags.pool) die("Usage: meridian active-bin --pool <addr>");
-    const { getActiveBin } = await import("./tools/dlmm.js");
+    const { getActiveBin } = await import("../../tools/dlmm.js");
     out(await getActiveBin({ pool_address: typedFlags.pool }));
     break;
   }
@@ -507,7 +509,7 @@ switch (subcommand as CLISubcommand) {
       typedFlags.wallet ||
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "wallet-positions");
     if (!wallet) die("Usage: meridian wallet-positions --wallet <addr>");
-    const { getWalletPositions } = await import("./tools/dlmm.js");
+    const { getWalletPositions } = await import("../../tools/dlmm.js");
     out(await getWalletPositions({ wallet_address: wallet }));
     break;
   }
@@ -520,7 +522,7 @@ switch (subcommand as CLISubcommand) {
       : undefined;
     if (!typedFlags.amount && !amountX) die("--amount or --amount-x is required");
 
-    const { executeTool } = await import("./tools/executor.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(
       await executeTool("deploy_position", {
         pool_address: typedFlags.pool,
@@ -539,7 +541,7 @@ switch (subcommand as CLISubcommand) {
   // ── claim ────────────────────────────────────────────────────────
   case "claim": {
     if (!typedFlags.position) die("Usage: meridian claim --position <addr>");
-    const { executeTool } = await import("./tools/executor.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(await executeTool("claim_fees", { position_address: typedFlags.position }));
     break;
   }
@@ -547,7 +549,7 @@ switch (subcommand as CLISubcommand) {
   // ── close ────────────────────────────────────────────────────────
   case "close": {
     if (!typedFlags.position) die("Usage: meridian close --position <addr>");
-    const { executeTool } = await import("./tools/executor.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(
       await executeTool("close_position", {
         position_address: typedFlags.position,
@@ -561,7 +563,7 @@ switch (subcommand as CLISubcommand) {
   case "swap": {
     if (!typedFlags.from || !typedFlags.to || !typedFlags.amount)
       die("Usage: meridian swap --from <mint> --to <mint> --amount <n>");
-    const { executeTool } = await import("./tools/executor.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(
       await executeTool("swap_token", {
         input_mint: typedFlags.from,
@@ -574,8 +576,8 @@ switch (subcommand as CLISubcommand) {
 
   // ── screen ───────────────────────────────────────────────────────
   case "screen": {
-    const { runScreeningCycle } = await import("./src/orchestrator.js");
-    const report: string | undefined = await runScreeningCycle({ silent });
+    const { runScreeningCycle } = await import("../cycles/screening.js");
+    const report: string | null = await runScreeningCycle({ silent });
     const output: CycleOutput = { done: true, report: report || "No action taken" };
     out(output);
     break;
@@ -583,8 +585,8 @@ switch (subcommand as CLISubcommand) {
 
   // ── manage ───────────────────────────────────────────────────────
   case "manage": {
-    const { runManagementCycle } = await import("./src/orchestrator.js");
-    const report: string | undefined = await runManagementCycle({ silent });
+    const { runManagementCycle } = await import("../orchestrator.js");
+    const report: string | null = await runManagementCycle({ silent });
     const output: CycleOutput = { done: true, report: report || "No action taken" };
     out(output);
     break;
@@ -593,7 +595,7 @@ switch (subcommand as CLISubcommand) {
   // ── config ───────────────────────────────────────────────────────
   case "config": {
     if (sub2 === "get" || !sub2) {
-      const { config } = await import("./config.js");
+      const { config } = await import("../config/config.js");
       out(config as unknown as Record<string, unknown>);
     } else if (sub2 === "set") {
       const key: string | undefined = argv.filter((a: string) => !a.startsWith("-"))[2];
@@ -605,7 +607,7 @@ switch (subcommand as CLISubcommand) {
       } catch {
         /* keep as string */
       }
-      const { executeTool } = await import("./tools/executor.js");
+      const { executeTool } = await import("../../tools/executor.js");
       out(
         await executeTool("update_config", { changes: { [key]: value }, reason: "CLI config set" })
       );
@@ -618,7 +620,7 @@ switch (subcommand as CLISubcommand) {
   // ── study ────────────────────────────────────────────────────────
   case "study": {
     if (!typedFlags.pool) die("Usage: meridian study --pool <addr> [--limit 4]");
-    const { studyTopLPers } = await import("./tools/study.js");
+    const { studyTopLPers } = await import("../../tools/study.js");
     const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 4;
     out(await studyTopLPers({ pool_address: typedFlags.pool, limit }));
     break;
@@ -626,7 +628,7 @@ switch (subcommand as CLISubcommand) {
 
   // ── start ────────────────────────────────────────────────────────
   case "start": {
-    const { startCronJobs } = await import("./src/orchestrator.js");
+    const { startCronJobs } = await import("../orchestrator.js");
     process.stderr.write("[meridian] Starting autonomous agent...\n");
     startCronJobs();
     break;
@@ -640,12 +642,12 @@ switch (subcommand as CLISubcommand) {
         .slice(2)
         .join(" ");
       if (!text) die("Usage: meridian lessons add <text>");
-      const { addLesson } = await import("./lessons.js");
+      const { addLesson } = await import("../domain/lessons.js");
       addLesson(text, [], { pinned: false, role: null });
       const output: LessonsAddOutput = { saved: true, rule: text, outcome: "manual", role: null };
       out(output);
     } else {
-      const { listLessons } = await import("./lessons.js");
+      const { listLessons } = await import("../domain/lessons.js");
       const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 50;
       out(listLessons({ limit }) as unknown as LessonsListOutput);
     }
@@ -655,15 +657,15 @@ switch (subcommand as CLISubcommand) {
   // ── pool-memory ──────────────────────────────────────────────────
   case "pool-memory": {
     if (!typedFlags.pool) die("Usage: meridian pool-memory --pool <addr>");
-    const { getPoolMemory } = await import("./pool-memory.js");
+    const { getPoolMemory } = await import("../domain/pool-memory.js");
     out(getPoolMemory({ pool_address: typedFlags.pool }) as unknown as PoolMemoryOutput);
     break;
   }
 
   // ── evolve ───────────────────────────────────────────────────────
   case "evolve": {
-    const { config } = await import("./config.js");
-    const { evolveThresholds } = await import("./lessons.js");
+    const { config } = await import("../config/config.js");
+    const { evolveThresholds } = await import("../domain/threshold-evolution.js");
     const fs2: typeof fs = await import("fs");
     const lessonsFile: string = "./lessons.json";
     interface LessonsData {
@@ -679,7 +681,7 @@ switch (subcommand as CLISubcommand) {
       }
     }
     const result = evolveThresholds(
-      perfData as unknown as import("./types/lessons.js").PerformanceRecord[],
+      perfData as unknown as import("../types/lessons.js").PerformanceRecord[],
       config
     );
     if (!result) {
@@ -707,7 +709,7 @@ switch (subcommand as CLISubcommand) {
     if (sub2 === "add") {
       if (!typedFlags.mint) die("Usage: meridian blacklist add --mint <addr> --reason <text>");
       if (!typedFlags.reason) die("--reason is required");
-      const { addToBlacklist } = await import("./token-blacklist.js");
+      const { addToBlacklist } = await import("../domain/token-blacklist.js");
       out(
         addToBlacklist({
           mint: typedFlags.mint,
@@ -715,7 +717,7 @@ switch (subcommand as CLISubcommand) {
         }) as unknown as BlacklistAddOutput
       );
     } else if (sub2 === "list" || !sub2) {
-      const { listBlacklist } = await import("./token-blacklist.js");
+      const { listBlacklist } = await import("../domain/token-blacklist.js");
       out(listBlacklist() as unknown as BlacklistListOutput);
     } else {
       die(`Unknown blacklist subcommand: ${sub2}. Use: add, list`);
@@ -725,7 +727,7 @@ switch (subcommand as CLISubcommand) {
 
   // ── performance ──────────────────────────────────────────────────
   case "performance": {
-    const { getPerformanceHistory, getPerformanceSummary } = await import("./lessons.js");
+    const { getPerformanceHistory, getPerformanceSummary } = await import("../domain/lessons.js");
     const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 200;
     const history = getPerformanceHistory({ hours: 999999, limit });
     const summary = getPerformanceSummary();
@@ -743,7 +745,7 @@ switch (subcommand as CLISubcommand) {
     if (!typedFlags.position)
       die("Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]");
     if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("./tools/dlmm.js");
+    const dlmmModule = await import("../../tools/dlmm.js");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const withdrawLiquidity = (dlmmModule as Record<string, unknown>).withdrawLiquidity as (
       ...args: unknown[]
@@ -766,7 +768,7 @@ switch (subcommand as CLISubcommand) {
         "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>]"
       );
     if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("./tools/dlmm.js");
+    const dlmmModule = await import("../../tools/dlmm.js");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addLiquidity = (dlmmModule as Record<string, unknown>).addLiquidity as (
       ...args: unknown[]

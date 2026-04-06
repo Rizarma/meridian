@@ -1,15 +1,15 @@
-import { config } from "../config.js";
-import { getBlockedDevs, isDevBlocked } from "../dev-blocklist.js";
-import { log } from "../logger.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { isBlacklisted } from "../token-blacklist.js";
-import type { Config } from "../types/config.js";
+import { config } from "../src/config/config.js";
+import { getBlockedDevs, isDevBlocked } from "../src/domain/dev-blocklist.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { isBlacklisted } from "../src/domain/token-blacklist.js";
+import { log } from "../src/infrastructure/logger.js";
+import type { Config } from "../src/types/config.js";
 import type {
   OKXAdvancedResult,
   OKXClusterResult,
   OKXPriceResult,
   OKXRiskFlags,
-} from "../types/okx.js";
+} from "../src/types/okx.js";
 import type {
   CondensedPool,
   DiscoverPoolsInput,
@@ -18,7 +18,7 @@ import type {
   RawPoolData,
   TopCandidatesInput,
   TopCandidatesResult,
-} from "../types/screening.js";
+} from "../src/types/screening.js";
 import { registerTool } from "./registry.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
@@ -170,7 +170,7 @@ interface OKXEnrichmentResult {
 export async function getTopCandidates({
   limit = 10,
 }: TopCandidatesInput = {}): Promise<TopCandidatesResult> {
-  const { config } = (await import("../config.js")) as { config: Config };
+  const { config } = (await import("../src/config/config.js")) as { config: Config };
   const { pools } = await discoverPools({ page_size: 50 });
 
   // Exclude pools where the wallet already has an open position
@@ -379,10 +379,10 @@ function condensePool(p: RawPoolData): CondensedPool {
     volume_window: round(p.volume),
     // API sometimes returns 0 for fee_active_tvl_ratio on short timeframes — compute from raw values as fallback
     fee_active_tvl_ratio:
-      p.fee_active_tvl_ratio > 0
-        ? fix(p.fee_active_tvl_ratio, 4)
-        : p.active_tvl > 0
-          ? fix((p.fee / p.active_tvl) * 100, 4)
+      (p.fee_active_tvl_ratio ?? 0) > 0
+        ? fix(p.fee_active_tvl_ratio ?? 0, 4)
+        : (p.active_tvl ?? 0) > 0
+          ? fix(((p.fee ?? 0) / (p.active_tvl ?? 1)) * 100, 4)
           : 0,
     volatility: fix(p.volatility, 2),
 

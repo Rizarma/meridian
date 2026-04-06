@@ -192,7 +192,7 @@ Or run without installing:
 
 ```bash
 pnpm build
-node dist/cli.js <command> [flags]
+node dist/src/cli/cli.js <command> [flags]
 ```
 
 **Positions & PnL**

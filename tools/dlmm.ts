@@ -7,20 +7,16 @@ import {
 } from "@solana/web3.js";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { config } from "../config.js";
-import { recordPerformance } from "../lessons.js";
-import { log } from "../logger.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
+import { config } from "../src/config/config.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { log } from "../src/infrastructure/logger.js";
 import {
   getTrackedPosition,
   markInRange,
   markOutOfRange,
   minutesOutOfRange,
-  recordClaim,
-  recordClose,
   syncOpenPositions,
-  trackPosition,
-} from "../state.js";
+} from "../src/infrastructure/state.js";
 import type {
   ActiveBinParams,
   ActiveBinResult,
@@ -38,7 +34,7 @@ import type {
   SearchPoolsResult,
   WalletPositionsParams,
   WalletPositionsResult,
-} from "../types/dlmm.js";
+} from "../src/types/dlmm.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
@@ -282,26 +278,6 @@ export async function deployPosition({
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
 
     _positionsCacheAt = 0;
-    trackPosition({
-      position: newPosition.publicKey.toString(),
-      pool: pool_address,
-      pool_name,
-      strategy: activeStrategy,
-      bin_range: {
-        min: minBinId,
-        max: maxBinId,
-        bins_below: activeBinsBelow,
-        bins_above: activeBinsAbove,
-      },
-      bin_step,
-      volatility,
-      fee_tvl_ratio,
-      organic_score,
-      amount_sol: finalAmountY,
-      amount_x: finalAmountX,
-      active_bin: activeBin.binId,
-      initial_value_usd,
-    });
 
     const actualBinStep = pool.lbPair.binStep;
     const activePrice = parseFloat(activeBin.price);
@@ -328,6 +304,13 @@ export async function deployPosition({
       amount_x: finalAmountX,
       amount_y: finalAmountY,
       txs: txHashes,
+      // Additional fields for persistence (trackPosition)
+      volatility,
+      fee_tvl_ratio,
+      organic_score,
+      initial_value_usd,
+      active_bin: activeBin.binId,
+      amount_sol: finalAmountY,
     };
   } catch (error: any) {
     log("deploy_error", error.message);
@@ -764,13 +747,14 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
     }
     log("claim", `SUCCESS txs: ${txHashes.join(", ")}`);
     _positionsCacheAt = 0; // invalidate cache after claim
-    recordClaim(position_address, 0); // Fees are tracked separately via API
 
     return {
       success: true,
       position: position_address,
       txs: txHashes,
       base_mint: pool.lbPair.tokenXMint.toString(),
+      // Flag for middleware to record claim
+      _recordClaim: true,
     };
   } catch (error: any) {
     log("claim_error", error.message);
@@ -914,8 +898,6 @@ export async function closePosition({
       };
     }
 
-    recordClose(position_address, reason || "agent decision");
-
     // Record performance for learning
     if (tracked) {
       const deployedAt = new Date(tracked.deployed_at).getTime();
@@ -983,27 +965,6 @@ export async function closePosition({
         }
       }
 
-      await recordPerformance({
-        position: position_address,
-        pool: poolAddress,
-        pool_name: tracked.pool_name || poolAddress.slice(0, 8),
-        strategy: tracked.strategy,
-        bin_range: tracked.bin_range,
-        bin_step: tracked.bin_step || null,
-        volatility: tracked.volatility || null,
-        fee_tvl_ratio: tracked.fee_tvl_ratio || null,
-        organic_score: tracked.organic_score || null,
-        amount_sol: tracked.amount_sol,
-        fees_earned_usd: feesUsd,
-        final_value_usd: finalValueUsd,
-        initial_value_usd: initialUsd,
-        minutes_in_range: minutesHeld - minutesOOR,
-        minutes_held: minutesHeld,
-        close_reason: reason || "agent decision",
-        base_mint: pool.lbPair.tokenXMint.toString(),
-        deployed_at: tracked.deployed_at,
-      });
-
       return {
         success: true,
         position: position_address,
@@ -1015,6 +976,30 @@ export async function closePosition({
         pnl_usd: pnlUsd,
         pnl_pct: pnlPct,
         base_mint: pool.lbPair.tokenXMint.toString(),
+        // Additional fields for persistence (recordClose + recordPerformance)
+        _recordClose: true,
+        close_reason: reason || "agent decision",
+        _recordPerformance: true,
+        _perf_data: {
+          position: position_address,
+          pool: poolAddress,
+          pool_name: tracked.pool_name || poolAddress.slice(0, 8),
+          strategy: tracked.strategy,
+          bin_range: tracked.bin_range,
+          bin_step: tracked.bin_step || null,
+          volatility: tracked.volatility || null,
+          fee_tvl_ratio: tracked.fee_tvl_ratio || null,
+          organic_score: tracked.organic_score || null,
+          amount_sol: tracked.amount_sol,
+          fees_earned_usd: feesUsd,
+          final_value_usd: finalValueUsd,
+          initial_value_usd: initialUsd,
+          minutes_in_range: minutesHeld - minutesOOR,
+          minutes_held: minutesHeld,
+          close_reason: reason || "agent decision",
+          base_mint: pool.lbPair.tokenXMint.toString(),
+          deployed_at: tracked.deployed_at,
+        },
       };
     }
 
@@ -1027,6 +1012,9 @@ export async function closePosition({
       close_txs: closeTxHashes,
       txs: txHashes,
       base_mint: pool.lbPair.tokenXMint.toString(),
+      // Flag for middleware to record close even without tracked data
+      _recordClose: true,
+      close_reason: reason || "agent decision",
     };
   } catch (error: any) {
     log("close_error", error.message);

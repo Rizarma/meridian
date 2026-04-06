@@ -1,8 +1,8 @@
 /**
  * Build a specialized system prompt based on the agent's current role.
  */
-import { config } from "./config.js";
-import type { AgentType } from "./types/prompt.d.ts";
+import { config } from "../config/config.js";
+import type { AgentType } from "../types/prompt.d.ts";
 
 export function buildSystemPrompt(
   agentType: AgentType,

@@ -6,19 +6,26 @@
  * by middleware — this file just wires them together.
  */
 
-import { log } from "../logger.js";
-import type { AgentType, ToolExecutionResult, ToolName } from "../types/index.js";
+import { log } from "../src/infrastructure/logger.js";
+import type { ToolName } from "../src/types/executor.js";
+import type { AgentType, ToolExecutionResult } from "../src/types/index.js";
 import {
   applyMiddleware,
   loggingMiddleware,
   notificationMiddleware,
+  persistenceMiddleware,
   safetyCheckMiddleware,
 } from "./middleware.js";
 import { getTool } from "./registry.js";
 import "./discover.js"; // Auto-discover and register all tools
 
-// Middleware chain — order matters (safety first, notifications last)
-const MIDDLEWARE_CHAIN = [safetyCheckMiddleware, loggingMiddleware, notificationMiddleware];
+// Middleware chain — order matters (safety first, notifications last, persistence after notifications)
+const MIDDLEWARE_CHAIN = [
+  safetyCheckMiddleware,
+  loggingMiddleware,
+  notificationMiddleware,
+  persistenceMiddleware,
+];
 
 /**
  * Execute a tool call with safety checks, logging, and notifications.

@@ -1,8 +1,7 @@
 /**
  * Tool Discovery Module
  *
- * Automatically discovers and imports all tool modules in the tools/ directory
- * AND explicitly imports root-level tool files that contain registrations.
+ * Automatically discovers and imports all tool modules in the tools/ directory.
  *
  * Phase 2: "Drop in a new tool with no central edits"
  * - New tool files added to tools/ are auto-discovered at startup
@@ -10,12 +9,11 @@
  */
 
 import { readdirSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const ROOT_DIR = resolve(__dirname, "..");
 
 /**
  * Files to skip during discovery (core infrastructure, not tools)
@@ -30,24 +28,13 @@ const SKIP_FILES = [
 ];
 
 /**
- * Root-level files containing tool registrations.
- * These are outside the tools/ directory and must be explicitly imported.
+ * All tool files are now in src/ directory and imported explicitly.
+ * Auto-discovery handles tools/ directory only.
  */
-const ROOT_TOOL_FILES = [
-  "smart-wallets.js",
-  "strategy-library.js",
-  "pool-memory.js",
-  "token-blacklist.js",
-  "dev-blocklist.js",
-  "lessons.js",
-  "state.js",
-  "config.js",
-];
 
 /**
  * Discovers and dynamically imports all tool modules.
  * - Scans tools/ directory for auto-discovery
- * - Explicitly imports root-level tool files
  * Runs at module load time to trigger side-effect registrations.
  */
 export async function discoverTools(): Promise<void> {
@@ -62,16 +49,6 @@ export async function discoverTools(): Promise<void> {
       await import(filePath);
     } catch (error) {
       console.error(`[discover] Failed to import tools/${file}:`, (error as Error).message);
-    }
-  }
-
-  // 2. Explicitly import root-level tool files
-  for (const file of ROOT_TOOL_FILES) {
-    try {
-      const filePath = pathToFileURL(join(ROOT_DIR, file)).href;
-      await import(filePath);
-    } catch (error) {
-      console.error(`[discover] Failed to import ${file}:`, (error as Error).message);
     }
   }
 }

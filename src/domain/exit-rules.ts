@@ -8,14 +8,14 @@
  * Pattern: Domain-Driven Structure + Single Responsibility Principle
  */
 
-import type { EnrichedPosition } from "../../types/dlmm.js";
-import type { ActionDecision } from "../../types/orchestrator.js";
+import type { EnrichedPosition } from "../types/dlmm.js";
+import type { ActionDecision } from "../types/orchestrator.js";
 import type {
   ExitAction,
   ManagementConfig,
   PositionData,
   TrackedPosition,
-} from "../../types/state.js";
+} from "../types/state.js";
 
 /**
  * Evaluate all exit conditions for a position and return an exit action if triggered.

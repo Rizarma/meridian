@@ -78,6 +78,13 @@ export interface DeployResult {
   dry_run?: boolean;
   would_deploy?: Record<string, unknown>;
   message?: string;
+  // Additional fields for persistence (trackPosition)
+  volatility?: number;
+  fee_tvl_ratio?: number;
+  organic_score?: number;
+  initial_value_usd?: number;
+  active_bin?: number;
+  amount_sol?: number;
 }
 
 // ─── Position PnL Types ─────────────────────────────────────────
@@ -213,6 +220,11 @@ export interface CloseResult {
   dry_run?: boolean;
   would_close?: string;
   message?: string;
+  // Internal flags for middleware to trigger persistence
+  _recordClose?: boolean;
+  close_reason?: string;
+  _recordPerformance?: boolean;
+  _perf_data?: Record<string, unknown>;
 }
 
 // ─── Claim Fees Types ─────────────────────────────────────────────
@@ -230,6 +242,8 @@ export interface ClaimResult {
   dry_run?: boolean;
   would_claim?: string;
   message?: string;
+  // Internal flag for middleware to trigger recordClaim
+  _recordClaim?: boolean;
 }
 
 // ─── Search Pools Types ───────────────────────────────────────────

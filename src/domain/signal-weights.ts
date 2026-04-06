@@ -10,14 +10,14 @@
  */
 
 import fs from "fs";
-import { log } from "./logger.js";
+import { log } from "../infrastructure/logger.js";
 import type {
+  PerformanceRecord,
   SignalWeights,
-  WeightHistoryEntry,
   WeightChange,
   WeightConfig,
-  PerformanceRecord,
-} from "./types/weights.d.ts";
+  WeightHistoryEntry,
+} from "../types/weights.js";
 
 const WEIGHTS_FILE = "./signal-weights.json";
 

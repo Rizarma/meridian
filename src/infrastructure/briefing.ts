@@ -1,13 +1,13 @@
 import fs from "fs";
-import { log } from "./logger.js";
-import { getPerformanceSummary } from "./lessons.js";
+import { getPerformanceSummary } from "../domain/lessons.js";
 import type {
-  StateFile,
-  StatePosition,
   LessonsFile,
   PerformanceEntry,
   PerformanceSummary,
-} from "./types/briefing.js";
+  StateFile,
+  StatePosition,
+} from "../types/briefing.js";
+import { log } from "./logger.js";
 
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";

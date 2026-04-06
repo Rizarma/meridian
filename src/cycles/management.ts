@@ -1,30 +1,6 @@
-import { agentLoop } from "../../agent.js";
-import { computeDeployAmount, config } from "../../config.js";
-import { log } from "../../logger.js";
-import { addPoolNote, recallForPool, recordPositionSnapshot } from "../../pool-memory.js";
-import { checkSmartWalletsOnPool } from "../../smart-wallets.js";
-import {
-  getTrackedPosition,
-  queuePeakConfirmation,
-  queueTrailingDropConfirmation,
-  resolvePendingPeak,
-  resolvePendingTrailingDrop,
-  updatePnlAndCheckExits,
-} from "../../state.js";
-import {
-  createLiveMessage,
-  notifyOutOfRange,
-  sendHTML,
-  sendMessage,
-  isEnabled as telegramEnabled,
-} from "../../telegram.js";
 import { closePosition, getMyPositions } from "../../tools/dlmm.js";
-import type {
-  ActionDecision,
-  CycleOptions,
-  EnrichedPosition,
-  LiveMessageHandler,
-} from "../../types/index.js";
+import { agentLoop } from "../agent/agent.js";
+import { computeDeployAmount, config } from "../config/config.js";
 import {
   TRAILING_DROP_CONFIRM_DELAY_MS,
   TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
@@ -32,6 +8,30 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { evaluateManagementExitRules } from "../domain/exit-rules.js";
+import { addPoolNote, recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
+import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import { log } from "../infrastructure/logger.js";
+import {
+  getTrackedPosition,
+  queuePeakConfirmation,
+  queueTrailingDropConfirmation,
+  resolvePendingPeak,
+  resolvePendingTrailingDrop,
+  updatePnlAndCheckExits,
+} from "../infrastructure/state.js";
+import {
+  createLiveMessage,
+  notifyOutOfRange,
+  sendHTML,
+  sendMessage,
+  isEnabled as telegramEnabled,
+} from "../infrastructure/telegram.js";
+import type {
+  ActionDecision,
+  CycleOptions,
+  EnrichedPosition,
+  LiveMessageHandler,
+} from "../types/index.js";
 
 // Timer maps for peak and trailing drop confirmations
 const _peakConfirmTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -160,9 +160,9 @@ export async function runManagementCycle(
           if (
             queueTrailingDropConfirmation(
               p.position,
-              exit.peak_pnl_pct,
-              exit.current_pnl_pct,
-              config.management.trailingDropPct
+              exit.peak_pnl_pct ?? null,
+              exit.current_pnl_pct ?? null,
+              config.management.trailingDropPct ?? null
             )
           ) {
             scheduleTrailingDropConfirmation(p.position, () => {

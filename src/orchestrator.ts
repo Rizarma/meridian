@@ -1,24 +1,8 @@
 import type { ScheduledTask } from "node-cron";
 import cron from "node-cron";
-import { agentLoop } from "../agent.js";
-import { generateBriefing } from "../briefing.js";
-import { config, registerCronRestarter } from "../config.js";
-import { log } from "../logger.js";
-import {
-  getLastBriefingDate,
-  queuePeakConfirmation,
-  queueTrailingDropConfirmation,
-  setLastBriefingDate,
-  updatePnlAndCheckExits,
-} from "../state.js";
-import {
-  createLiveMessage,
-  sendHTML,
-  stopPolling,
-  isEnabled as telegramEnabled,
-} from "../telegram.js";
 import { getMyPositions } from "../tools/dlmm.js";
-import type { CronTaskList, CycleOptions, CycleTimers } from "../types/index.js";
+import { agentLoop } from "./agent/agent.js";
+import { config, registerCronRestarter } from "./config/config.js";
 import {
   runManagementCycle as runManagementCycleImpl,
   schedulePeakConfirmation,
@@ -30,7 +14,23 @@ import {
   runScreeningCycle as runScreeningCycleImpl,
   setScreeningLastTriggered,
 } from "./cycles/screening.js";
+import { generateBriefing } from "./infrastructure/briefing.js";
+import { log } from "./infrastructure/logger.js";
+import {
+  getLastBriefingDate,
+  queuePeakConfirmation,
+  queueTrailingDropConfirmation,
+  setLastBriefingDate,
+  updatePnlAndCheckExits,
+} from "./infrastructure/state.js";
+import {
+  createLiveMessage,
+  sendHTML,
+  stopPolling,
+  isEnabled as telegramEnabled,
+} from "./infrastructure/telegram.js";
 import { startNonTTY, startREPL } from "./repl.js";
+import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
 
 // ═══════════════════════════════════════════
 //  GLOBAL STATE
@@ -223,9 +223,9 @@ Summarize the current portfolio health, total fees earned, and performance of al
             if (
               queueTrailingDropConfirmation(
                 p.position,
-                exit.peak_pnl_pct,
-                exit.current_pnl_pct,
-                config.management.trailingDropPct
+                exit.peak_pnl_pct ?? null,
+                exit.current_pnl_pct ?? null,
+                config.management.trailingDropPct ?? null
               )
             ) {
               scheduleTrailingDropConfirmation(p.position, () => {

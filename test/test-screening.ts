@@ -3,8 +3,8 @@
  * Run: node dist/test/test-screening.js
  */
 
+import type { DiscoverPoolsResult, RawPoolData } from "../src/types/screening.js";
 import { discoverPools, getPoolDetail } from "../tools/screening.js";
-import type { DiscoverPoolsResult, RawPoolData } from "../types/screening.js";
 
 async function main(): Promise<void> {
   console.log("=== Testing Pool Discovery API ===\n");

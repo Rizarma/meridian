@@ -1,20 +1,24 @@
-import { agentLoop } from "../../agent.js";
-import { computeDeployAmount, config } from "../../config.js";
-import { log } from "../../logger.js";
-import { recallForPool } from "../../pool-memory.js";
-import { checkSmartWalletsOnPool } from "../../smart-wallets.js";
-import { createLiveMessage, sendMessage, isEnabled as telegramEnabled } from "../../telegram.js";
 import { getActiveBin, getMyPositions } from "../../tools/dlmm.js";
 import { getTopCandidates } from "../../tools/screening.js";
 import { getTokenInfo, getTokenNarrative } from "../../tools/token.js";
 import { getWalletBalances } from "../../tools/wallet.js";
+import { agentLoop } from "../agent/agent.js";
+import { computeDeployAmount, config } from "../config/config.js";
+import { recallForPool } from "../domain/pool-memory.js";
+import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import { log } from "../infrastructure/logger.js";
+import {
+  createLiveMessage,
+  sendMessage,
+  isEnabled as telegramEnabled,
+} from "../infrastructure/telegram.js";
 import type {
   CondensedPool,
   CycleOptions,
   EnrichedPosition,
   LiveMessageHandler,
   ReconCandidate,
-} from "../../types/index.js";
+} from "../types/index.js";
 
 // Module-level state for race condition guards
 let _screeningBusy = false;
@@ -140,7 +144,7 @@ export async function runScreeningCycle(
     log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL)`);
 
     // Load active strategy
-    const { getActiveStrategy } = await import("../../strategy-library.js");
+    const { getActiveStrategy } = await import("../domain/strategy-library.js");
     const activeStrategy = getActiveStrategy();
     const strategyBlock = activeStrategy
       ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${(activeStrategy.range as { bins_above?: number })?.bins_above ?? 0} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`

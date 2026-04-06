@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../../types/index.js";
+import type { ToolDefinition } from "../../src/types/index.js";
 
 export const screeningTools: ToolDefinition[] = [
   {

@@ -18,7 +18,7 @@ import {
   MANAGER_TOOLS,
   SCREENER_TOOLS,
 } from "../src/agent/tool-sets.js";
-import type { AgentType } from "../types/agent.js";
+import type { AgentType } from "../src/types/agent.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
 
 // Mock config for safety checks

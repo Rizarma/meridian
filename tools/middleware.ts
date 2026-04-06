@@ -10,19 +10,22 @@
  * No framework — just functions.
  */
 
-import { config } from "../config.js";
-import { log, logAction } from "../logger.js";
-import { addPoolNote } from "../pool-memory.js";
-import { notifyClose, notifyDeploy, notifySwap } from "../telegram.js";
+import { config } from "../src/config/config.js";
+import { recordPerformance } from "../src/domain/lessons.js";
+import { addPoolNote } from "../src/domain/pool-memory.js";
+import { log, logAction } from "../src/infrastructure/logger.js";
+import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
+import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
 import type {
   ClosePositionArgs,
   DeployPositionArgs,
   SafetyCheckResult,
   SwapTokenArgs,
-} from "../types/executor.js";
-import type { AgentType } from "../types/index.js";
-import type { MyPositionsResult } from "../types/position.js";
-import type { TokenBalance, WalletBalances } from "../types/wallet.js";
+} from "../src/types/executor.js";
+import type { AgentType } from "../src/types/index.js";
+import type { PositionPerformance } from "../src/types/lessons.js";
+import type { MyPositionsResult } from "../src/types/position.js";
+import type { TokenBalance, WalletBalances } from "../src/types/wallet.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
@@ -188,6 +191,61 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
     result.base_mint
   ) {
     await handleAutoSwapAfterClaim(result.base_mint as string);
+  }
+
+  return result;
+};
+
+/**
+ * Persistence middleware.
+ * Handles state tracking after successful deploy/close operations.
+ * Decouples dlmm.ts from persistence concerns.
+ */
+export const persistenceMiddleware: MiddlewareFn = async (tool, args, _role, next) => {
+  const result = (await next()) as Record<string, unknown>;
+
+  // Only persist on successful write operations
+  if (result?.error || result?.blocked || !result?.success) {
+    return result;
+  }
+
+  // After deploy_position: track the new position
+  if (tool.name === "deploy_position") {
+    const deployArgs = args as DeployPositionArgs & { pool_name?: string };
+    trackPosition({
+      position: result.position as string,
+      pool: result.pool as string,
+      pool_name: (result.pool_name as string) || deployArgs.pool_name || "unknown",
+      strategy: (result.strategy as string) || "spot",
+      bin_range: result.bin_range as { min: number; max: number; active?: number },
+      bin_step: (result.bin_step as number) || 80,
+      volatility: (result.volatility as number) || 0,
+      fee_tvl_ratio: (result.fee_tvl_ratio as number) || 0,
+      organic_score: (result.organic_score as number) || 0,
+      amount_sol: (result.amount_sol as number) || (result.amount_y as number) || 0,
+      amount_x: result.amount_x as number | undefined,
+      active_bin: (result.active_bin as number) || 0,
+      initial_value_usd: (result.initial_value_usd as number) || 0,
+    });
+    log("middleware", `Tracked position ${result.position?.toString().slice(0, 8)}...`);
+  }
+
+  // After claim_fees: record the claim
+  if (tool.name === "claim_fees" && result._recordClaim) {
+    recordClaim(result.position as string, 0); // Fees tracked separately via API
+    log("middleware", `Recorded claim for ${result.position?.toString().slice(0, 8)}...`);
+  }
+
+  // After close_position: record close and performance
+  if (tool.name === "close_position") {
+    if (result._recordClose) {
+      recordClose(result.position as string, (result.close_reason as string) || "agent decision");
+      log("middleware", `Recorded close for ${result.position?.toString().slice(0, 8)}...`);
+    }
+    if (result._recordPerformance && result._perf_data) {
+      await recordPerformance(result._perf_data as PositionPerformance);
+      log("middleware", `Recorded performance for ${result.position?.toString().slice(0, 8)}...`);
+    }
   }
 
   return result;

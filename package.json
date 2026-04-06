@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Autonomous DLMM LP agent for Meteora on Solana",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "bin": {
-    "meridian": "dist/cli.js"
+    "meridian": "dist/src/cli/cli.js"
   },
   "scripts": {
-    "setup": "pnpm run build && node dist/setup.js",
+    "setup": "pnpm run build && node dist/src/cli/setup.js",
     "build": "tsc && node build.js",
-    "start": "pnpm run build && node dist/index.js",
-    "dev": "pnpm run build && cross-env DRY_RUN=true node dist/index.js",
+    "start": "pnpm run build && node dist/src/index.js",
+    "dev": "pnpm run build && cross-env DRY_RUN=true node dist/src/index.js",
     "test:phase0:exit": "pnpm run build && node dist/test/phase-0-exit-rules.test.js",
     "test:phase0:trailing": "pnpm run build && node dist/test/phase-0-trailing-tp.test.js",
     "test:phase0:config": "pnpm run build && node dist/test/phase-0-config-mutation.test.js",
