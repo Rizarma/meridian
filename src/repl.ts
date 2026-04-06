@@ -842,7 +842,6 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     deps.launchCron();
     if (!wasAlreadyStarted) {
       console.log(colors.green("✓ Autonomous cycles are now running.\n"));
-      refreshPrompt(deps);
     }
   }
 
@@ -929,15 +928,14 @@ Commands:
 `)
       );
 
-      // Show prompt and initial status bar
-      rl.prompt();
-      drawStatusBar(deps);
-
-      // Start background services after all UI is rendered
+      // Start background services (logs autonomous message)
       launchCron();
       deps.maybeRunMissedBriefing().catch(() => {});
       const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
       startPolling(boundTelegramHandler);
+
+      // Show prompt after all logs
+      rl.prompt();
     }
   })();
 
