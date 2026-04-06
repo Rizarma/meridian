@@ -1,0 +1,118 @@
+# Config Reference
+
+`src/config/config.ts` loads `user-config.json` at startup. Runtime mutations go through the `update_config` tool, which:
+
+- Updates the live `config` object immediately
+- Persists to `user-config.json`
+- Restarts cron jobs if schedule intervals changed
+
+All defaults below are sourced from `user-config.example.json`.
+
+## Screening
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `minFeeActiveTvlRatio` | `0.05` | Minimum fee / active-TVL ratio |
+| `minTvl` / `maxTvl` | `10000` / `150000` | Pool TVL bounds (USD) |
+| `minVolume` | `500` | Minimum pool volume |
+| `minOrganic` | `60` | Minimum organic score (0–100) |
+| `minHolders` | `500` | Minimum token holder count |
+| `minMcap` / `maxMcap` | `150000` / `10000000` | Market cap bounds (USD) |
+| `minBinStep` / `maxBinStep` | `80` / `125` | Bin step bounds |
+| `timeframe` | `"5m"` | Candle timeframe for screening |
+| `category` | `"trending"` | Pool category filter |
+| `minTokenFeesSol` | `30` | Minimum all-time fees in SOL |
+| `maxBundlePct` | `30` | Max bundler % in top 100 holders |
+| `maxBotHoldersPct` | `30` | Max bot-holder % (Jupiter audit) |
+| `maxTop10Pct` | `60` | Max top-10 holder concentration |
+| `minFeePerTvl24h` | `7` | Minimum 24h fee/TVL ratio |
+| `minTokenAgeHours` / `maxTokenAgeHours` | `null` / `null` | Token age bounds in hours (null = disabled) |
+| `athFilterPct` | `null` | Skip pools within this % of ATH |
+| `blockedLaunchpads` | `[]` | Launchpad names to never deploy into |
+
+## Management
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `deployAmountSol` | `0.5` | Base SOL per new position (floor) |
+| `maxDeployAmount` | `50` | Max SOL cap per position (ceiling) |
+| `maxPositions` | `3` | Max concurrent open positions |
+| `positionSizePct` | `0.35` | Fraction of deployable balance to use |
+| `minSolToOpen` | `0.55` | Minimum wallet SOL before opening a new position |
+| `gasReserve` | `0.2` | Minimum SOL to keep for gas |
+| `outOfRangeWaitMinutes` | `30` | Minutes OOR before acting |
+| `outOfRangeBinsToClose` | `10` | Bin distance past range before close is considered |
+| `oorCooldownTriggerCount` | `3` | OOR closes on a pool before cooldown kicks in |
+| `oorCooldownHours` | `12` | Hours to skip a pool after cooldown trigger |
+| `minVolumeToRebalance` | `1000` | Minimum 24h volume required to rebalance |
+| `minAgeBeforeYieldCheck` | `60` | Minutes after open before yield checks apply |
+| `stopLossPct` | `-50` | Close position if PnL drops by this % |
+| `emergencyPriceDropPct` | `-50` | Emergency exit if token price drops this % |
+| `takeProfitFeePct` | `5` | Take profit when accrued fees hit this % of position |
+| `minClaimAmount` | `5` | Minimum USD value of fees before claiming |
+| `autoSwapAfterClaim` | `false` | Swap claimed base token to SOL automatically |
+| `trailingTakeProfit` | `true` | Enable trailing take-profit |
+| `trailingTriggerPct` | `3` | PnL % at which trailing TP arms |
+| `trailingDropPct` | `1.5` | Drop from peak that triggers trailing close |
+| `pnlSanityMaxDiffPct` | `5` | Max allowed divergence between PnL sources |
+| `solMode` | `false` | Display values in SOL instead of USD |
+
+## Schedule
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `managementIntervalMin` | `10` | Management cycle frequency (minutes) |
+| `screeningIntervalMin` | `30` | Screening cycle frequency (minutes) |
+| `healthCheckIntervalMin` | `60` | Health check frequency (minutes) |
+
+## Darwinian signal weights
+
+Flat keys (not dotted).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `darwinEnabled` | `true` | Enable signal-weight evolution |
+| `darwinWindowDays` | `60` | Lookback window for performance data |
+| `darwinMinSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwinRecalcEvery` | `5` | Recalculate weights every N closed positions |
+| `darwinBoost` | `1.05` | Multiplier applied to winning signals |
+| `darwinDecay` | `0.95` | Multiplier applied to losing signals |
+| `darwinFloor` | `0.3` | Minimum allowed weight |
+| `darwinCeiling` | `2.5` | Maximum allowed weight |
+
+## LLM
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
+| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
+| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `temperature` | `0.373` | Sampling temperature |
+| `maxTokens` | `4096` | Max output tokens per call (minimum 2048 for free models) |
+| `maxSteps` | `20` | Max ReAct iterations per cycle |
+
+## computeDeployAmount
+
+Scales position size with wallet balance (compounding):
+
+```
+clamp(deployable × positionSizePct, floor = deployAmountSol, ceil = maxDeployAmount)
+```
+
+## Environment variables
+
+| Var | Required | Purpose |
+|-----|----------|---------|
+| `WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array private key |
+| `RPC_URL` | Yes | Solana RPC endpoint |
+| `OPENROUTER_API_KEY` | Yes | LLM API key |
+| `HELIUS_API_KEY` | No | Enhanced wallet balance data |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram notifications |
+| `TELEGRAM_CHAT_ID` | No | Telegram chat target (auto-filled on first message) |
+| `LLM_BASE_URL` | No | Override for local LLM (e.g. LM Studio) |
+| `LLM_API_KEY` | No | Override LLM auth (local endpoints) |
+| `LLM_MODEL` | No | Override default model |
+| `DRY_RUN` | No | Skip all on-chain transactions |
+| `HIVE_MIND_URL` | No | Collective intelligence server |
+| `HIVE_MIND_API_KEY` | No | Hive mind auth token |
+| `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` | No | OKX OnchainOS risk data |
