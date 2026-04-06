@@ -122,7 +122,7 @@ export const config: Config = {
     managementModel:
       process.env.LLM_MODEL ?? u.managementModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
     screeningModel:
-      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "openrouter/optimus-alpha",
+      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
     generalModel: process.env.LLM_MODEL ?? u.generalModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
   },
 

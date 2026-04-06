@@ -45,10 +45,7 @@ export const SYNC_GRACE_PERIOD_MS = 5 * 60_000; // 5 minutes
 export const MAX_REACT_STEPS = 20;
 
 /** Fallback LLM models to try on 502/503/529 errors */
-export const FALLBACK_MODELS: string[] = [
-  "stepfun/step-3.5-flash:free",
-  "openrouter/optimus-alpha",
-];
+export const FALLBACK_MODELS: string[] = ["stepfun/step-3.5-flash:free", "xiaomi/mimo-v2-omni"];
 
 // ═══════════════════════════════════════════
 //  TELEGRAM / UI
