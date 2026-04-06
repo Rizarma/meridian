@@ -87,6 +87,16 @@ function save(state: PositionState): void {
   }
 }
 
+/**
+ * Clear all positions from state (useful for testing).
+ */
+export function clearPositions(): void {
+  const state = load();
+  state.positions = {};
+  save(state);
+  log("state", "Cleared all positions");
+}
+
 // ─── Position Registry ─────────────────────────────────────────
 
 /**
