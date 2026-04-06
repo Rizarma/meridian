@@ -305,13 +305,6 @@ registerCronRestarter(() => {
 });
 
 export async function start(): Promise<void> {
-  log("startup", "DLMM LP Agent starting...");
-  log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
-  log(
-    "startup",
-    `Models: general=${config.llm.generalModel}, screening=${config.llm.screeningModel}, management=${config.llm.managementModel}`
-  );
-
   // Start REPL or non-TTY mode
   const isTTY = process.stdin.isTTY;
 
@@ -333,6 +326,13 @@ export async function start(): Promise<void> {
   if (isTTY) {
     await startREPL(replDeps);
   } else {
+    // Log startup only for non-TTY mode (REPL has its own formatted output)
+    log("startup", "DLMM LP Agent starting...");
+    log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
+    log(
+      "startup",
+      `Models: general=${config.llm.generalModel}, screening=${config.llm.screeningModel}, management=${config.llm.managementModel}`
+    );
     await startNonTTY(replDeps);
   }
 }

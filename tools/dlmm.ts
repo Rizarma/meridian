@@ -73,7 +73,10 @@ function getWallet(): Keypair {
       throw new Error("WALLET_PRIVATE_KEY not set");
     }
     _wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-    log("init", `Wallet: ${_wallet.publicKey.toString()}`);
+    // Only log in non-TTY mode to avoid disrupting REPL formatted output
+    if (!process.stdin.isTTY) {
+      log("init", `Wallet: ${_wallet.publicKey.toString()}`);
+    }
   }
   return _wallet;
 }

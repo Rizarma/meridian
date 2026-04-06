@@ -52,6 +52,9 @@ const _telegramQueue: TelegramMessage[] = [];
 // TTY interface reference for prompt refresh (null in non-TTY mode)
 let _ttyInterface: readline.Interface | null = null;
 
+// Track if there's been output since last status bar draw (prevents corrupting logs)
+let _outputSinceLastStatus = false;
+
 // Current candidates for number-based selection
 let _startupCandidates: CondensedPool[] = [];
 
@@ -270,6 +273,12 @@ function buildStatusBar(deps: REPLDependencies): string {
 
 function drawStatusBar(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
+
+  // Skip if there's been output since last draw (prevents corrupting logs)
+  if (_outputSinceLastStatus) {
+    _outputSinceLastStatus = false; // Reset for next time
+    return;
+  }
 
   // @ts-ignore - line is a private property
   const currentLine = _ttyInterface.line;
@@ -824,12 +833,8 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
     saveHistory(rl.history || []);
   }, HISTORY_SAVE_INTERVAL);
 
-  // Update prompt countdown every 10 seconds (smooth refresh)
-  const promptRefreshInterval = setInterval(() => {
-    if (!busy) {
-      refreshPrompt(deps);
-    }
-  }, 10_000);
+  // Note: Status bar is drawn once at startup, not refreshed periodically
+  // to avoid corrupting log output. The prompt remains static "> ".
 
   // Wrapper that calls orchestrator's launchCron and adds REPL-specific UI updates
   function launchCron(): void {
@@ -990,7 +995,6 @@ Commands:
   });
 
   rl.on("close", () => {
-    clearInterval(promptRefreshInterval);
     clearInterval(historySaveInterval);
     // @ts-ignore - history is private but accessible
     saveHistory(rl.history || []);
