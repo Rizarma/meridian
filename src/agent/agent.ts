@@ -101,10 +101,11 @@ function isSystemRoleError(error: unknown): boolean {
   return /invalid message role:\s*system/i.test(message);
 }
 
-function isToolChoiceRequiredError(error: unknown): boolean {
+function isToolChoiceError(error: unknown): boolean {
   const err = error as OpenAIError;
   const message = String(err?.message || err?.error?.message || error || "");
-  return /tool_choice/i.test(message) && /required/i.test(message);
+  // Catch any tool_choice related errors (provider doesn't support the parameter)
+  return /tool_choice/i.test(message) || /no endpoints found.*tool/i.test(message);
 }
 
 /**
@@ -174,19 +175,23 @@ export async function agentLoop(
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
       const ACTION_INTENTS: RegExp =
         /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
-      let toolChoice: ToolChoice =
+      let toolChoice: ToolChoice | null =
         step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool) ? "required" : "auto";
 
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          response = await client.chat.completions.create({
+          const requestParams: any = {
             model: usedModel,
             messages,
             tools: getToolsForRole(agentType, goal),
-            tool_choice: toolChoice,
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
-          });
+          };
+          // Only include tool_choice if provider supports it
+          if (toolChoice !== null) {
+            requestParams.tool_choice = toolChoice;
+          }
+          response = await client.chat.completions.create(requestParams);
         } catch (error) {
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";
@@ -198,9 +203,9 @@ export async function agentLoop(
             attempt -= 1;
             continue;
           }
-          if (toolChoice === "required" && isToolChoiceRequiredError(error)) {
-            toolChoice = "auto";
-            log("agent", "Provider rejected tool_choice=required — retrying with tool_choice=auto");
+          if (toolChoice !== null && isToolChoiceError(error)) {
+            toolChoice = null; // Disable tool_choice entirely for this provider
+            log("agent", "Provider rejected tool_choice — retrying without tool_choice parameter");
             attempt -= 1;
             continue;
           }
