@@ -6,7 +6,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { config } from "../src/config/config.js";
+import { config, getRpcUrl } from "../src/config/config.js";
 import { log } from "../src/infrastructure/logger.js";
 import { registerTool } from "./registry.js";
 
@@ -90,7 +90,7 @@ let _connection: Connection | null = null;
 let _wallet: Keypair | null = null;
 
 function getConnection(): Connection {
-  if (!_connection) _connection = new Connection(process.env.RPC_URL!, "confirmed");
+  if (!_connection) _connection = new Connection(getRpcUrl(), "confirmed");
   return _connection;
 }
 

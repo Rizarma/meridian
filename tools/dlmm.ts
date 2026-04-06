@@ -7,7 +7,7 @@ import {
 } from "@solana/web3.js";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { config } from "../src/config/config.js";
+import { config, getRpcUrl } from "../src/config/config.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
 import { log } from "../src/infrastructure/logger.js";
 import {
@@ -62,7 +62,7 @@ let _wallet: Keypair | null = null;
 
 function getConnection(): Connection {
   if (!_connection) {
-    _connection = new Connection(process.env.RPC_URL!, "confirmed");
+    _connection = new Connection(getRpcUrl(), "confirmed");
   }
   return _connection;
 }
