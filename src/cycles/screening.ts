@@ -153,7 +153,7 @@ export async function runScreeningCycle(
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
     const topCandidatesResult = await getTopCandidates({
-      limit: config.screening.maxPoolsPerCycle,
+      limit: config.screening.maxCandidatesEnriched,
     }).catch((e) => {
       log("screening_warn", `Failed to fetch top candidates: ${(e as Error).message}`);
       return null;
