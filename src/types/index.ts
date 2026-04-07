@@ -140,7 +140,7 @@ export type {
   PoolBase,
   PoolCandidate,
   PoolMemory,
-  TopCandidatesResult,
+  PoolTopCandidatesResult,
 } from "./pool.js";
 
 // Export from pool-memory.d.ts (unique only)
@@ -170,7 +170,17 @@ export type {
 export * from "./prompt.js";
 
 // Export all from screening.d.ts (all unique)
-export * from "./screening.js";
+export type {
+  CondensedPool,
+  DiscoverPoolsInput,
+  DiscoverPoolsResult,
+  FilteredExample,
+  PoolDetailInput,
+  PoolTokenInfo,
+  RawPoolData,
+  TopCandidatesInput,
+  TopCandidatesResult,
+} from "./screening.js";
 
 // Export all from setup.d.ts (all unique)
 export * from "./setup.js";
