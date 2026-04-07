@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
+import logUpdate from "log-update";
 import { join } from "path";
 import type { Interface as ReadlineInterface } from "readline";
 import readline from "readline";
@@ -216,6 +217,8 @@ function setupSignalHandlers(deps: REPLDependencies): void {
     shuttingDown = true;
     console.log(colors.yellow(`\nReceived ${signal}, shutting down gracefully...`));
     try {
+      // Clear the status bar before shutdown to leave terminal clean
+      clearStatusBar();
       await deps.shutdown(signal);
       process.exit(0);
     } catch (e) {
@@ -280,12 +283,6 @@ function buildStatusBar(deps: REPLDependencies): string {
 function drawStatusBar(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
 
-  // Skip if there's been output since last draw (prevents corrupting logs)
-  if (_outputSinceLastStatus) {
-    _outputSinceLastStatus = false; // Reset for next time
-    return;
-  }
-
   // @ts-ignore - line is a private property
   const currentLine = _ttyInterface.line;
 
@@ -294,17 +291,13 @@ function drawStatusBar(deps: REPLDependencies): void {
 
   const statusText = buildStatusBar(deps);
 
-  // ANSI escape sequence to:
-  // 1. Save cursor position
-  // 2. Move to beginning of current line
-  // 3. Clear to end of line
-  // 4. Write status bar
-  // 5. Restore cursor position
-  process.stdout.write("\x1b[s"); // Save cursor
-  process.stdout.write("\x1b[1G"); // Move to column 1
-  process.stdout.write("\x1b[K"); // Clear to end of line
-  process.stdout.write(statusText); // Write status
-  process.stdout.write("\x1b[u"); // Restore cursor
+  // Use log-update to render status bar at the bottom of the terminal
+  // This handles terminal resize gracefully and avoids race conditions with console output
+  logUpdate(statusText);
+}
+
+function clearStatusBar(): void {
+  logUpdate.clear();
 }
 
 function refreshPrompt(deps: REPLDependencies): void {
@@ -832,6 +825,32 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
 
   // Store reference for prompt refresh
   _ttyInterface = rl;
+
+  // Intercept console output to track when logs occur (prevents status bar corruption)
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalWarn = console.warn;
+
+  console.log = (...args: unknown[]) => {
+    logUpdate.clear(); // Clear status bar before writing
+    _outputSinceLastStatus = true;
+    originalLog.apply(console, args);
+    drawStatusBar(deps); // Redraw after writing
+  };
+
+  console.error = (...args: unknown[]) => {
+    logUpdate.clear();
+    _outputSinceLastStatus = true;
+    originalError.apply(console, args);
+    drawStatusBar(deps);
+  };
+
+  console.warn = (...args: unknown[]) => {
+    logUpdate.clear();
+    _outputSinceLastStatus = true;
+    originalWarn.apply(console, args);
+    drawStatusBar(deps);
+  };
 
   // Save history periodically and on exit
   const historySaveInterval = setInterval(() => {
