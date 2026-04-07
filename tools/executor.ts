@@ -28,6 +28,30 @@ const MIDDLEWARE_CHAIN = [
 ];
 
 /**
+ * Validate that a value is a valid ToolExecutionResult shape.
+ * Returns the value if valid, or creates a safe error result.
+ */
+function validateToolResult(result: unknown): ToolExecutionResult {
+  if (typeof result !== "object" || result === null) {
+    return { success: false, error: "Invalid result: not an object" };
+  }
+  const r = result as Record<string, unknown>;
+
+  // Must have at least one of: success flag, error, blocked, or other result fields
+  const hasSuccess = typeof r.success === "boolean";
+  const hasError = typeof r.error === "string";
+  const hasBlocked = typeof r.blocked === "boolean";
+  const hasReason = typeof r.reason === "string";
+
+  // If it has none of the expected fields, wrap it as a success result
+  if (!hasSuccess && !hasError && !hasBlocked && !hasReason) {
+    return { success: true, ...r };
+  }
+
+  return r as ToolExecutionResult;
+}
+
+/**
  * Execute a tool call with safety checks, logging, and notifications.
  * Thin dispatcher — all heavy lifting is in registry and middleware.
  */
@@ -56,15 +80,9 @@ export async function executeTool(
 
   // Execute through middleware chain
   try {
-    const result = (await applyMiddleware(
-      tool,
-      args,
-      role,
-      MIDDLEWARE_CHAIN,
-      tool.handler
-    )) as ToolExecutionResult;
+    const rawResult = await applyMiddleware(tool, args, role, MIDDLEWARE_CHAIN, tool.handler);
 
-    return result;
+    return validateToolResult(rawResult);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     log("error", `Tool ${cleanName} threw: ${errorMsg}`);
