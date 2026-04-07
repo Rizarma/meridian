@@ -154,6 +154,11 @@ export function trackPosition({
     const strategyResult = getStrategy({ id: strategy });
     if (!strategyResult.error && strategyResult.id) {
       strategyConfig = strategyResult as Strategy;
+    } else {
+      log(
+        "state_warn",
+        `Strategy "${strategy}" not found for position ${position.slice(0, 8)} — falling back to global config for exit rules`
+      );
     }
   }
 
@@ -535,7 +540,8 @@ export function getStateSummary(): StateSummary {
 export function updatePnlAndCheckExits(
   position_address: string,
   positionData: PositionData,
-  mgmtConfig: ManagementConfig
+  mgmtConfig: ManagementConfig,
+  strategyConfig?: import("../types/strategy.js").Strategy | null
 ): ExitAction | null {
   const { in_range } = positionData;
   const state = load();
@@ -584,7 +590,9 @@ export function updatePnlAndCheckExits(
   if (changed) save(state);
 
   // Delegate exit condition evaluation to exit-rules module
-  return evaluateExitConditions(pos, positionData, mgmtConfig);
+  // If no strategyConfig was passed, try loading from the tracked position
+  const resolvedStrategyConfig = strategyConfig ?? pos.strategy_config ?? null;
+  return evaluateExitConditions(pos, positionData, mgmtConfig, resolvedStrategyConfig);
 }
 
 // ─── Briefing Tracking ─────────────────────────────────────────
