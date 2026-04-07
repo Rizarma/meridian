@@ -140,7 +140,6 @@ export type {
   PoolBase,
   PoolCandidate,
   PoolMemory,
-  PoolTopCandidatesResult,
 } from "./pool.js";
 
 // Export from pool-memory.d.ts (unique only)
