@@ -21,6 +21,7 @@ import {
 } from "../config/constants.js";
 import { PROJECT_ROOT } from "../config/paths.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
+import { getStrategy } from "../domain/strategy-library.js";
 import type { SetPositionNoteArgs } from "../types/executor.js";
 import type { SignalSnapshot } from "../types/signals.js";
 import type {
@@ -35,6 +36,7 @@ import type {
   TrackedPosition,
   TrailingConfirmation,
 } from "../types/state.js";
+import type { Strategy } from "../types/strategy.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
 import { log } from "./logger.js";
 
@@ -56,6 +58,7 @@ export interface TrackPositionParams {
   organic_score: number;
   initial_value_usd: number;
   signal_snapshot?: SignalSnapshot | null;
+  strategy_config?: Strategy | null;
 }
 
 function sanitizeStoredText(text: unknown, maxLen: number = MAX_INSTRUCTION_LENGTH): string | null {
@@ -141,13 +144,25 @@ export function trackPosition({
   organic_score,
   initial_value_usd,
   signal_snapshot = null,
+  strategy_config,
 }: TrackPositionParams): void {
   const state = load();
+
+  // Load full strategy config if not provided
+  let strategyConfig = strategy_config;
+  if (!strategyConfig && strategy) {
+    const strategyResult = getStrategy({ id: strategy });
+    if (!strategyResult.error && strategyResult.id) {
+      strategyConfig = strategyResult as Strategy;
+    }
+  }
+
   state.positions[position] = {
     position,
     pool,
     pool_name,
     strategy,
+    strategy_config: strategyConfig || null,
     bin_range,
     amount_sol,
     amount_x,

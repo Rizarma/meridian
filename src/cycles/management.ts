@@ -228,7 +228,16 @@ export async function runManagementCycle(
       })();
 
       // Use extracted exit-rules module for deterministic rule checks
-      const exitDecision = evaluateManagementExitRules(p, config.management, pnlSuspect);
+      // Load tracked position to get strategy config
+      const trackedPosition = getTrackedPosition(p.position);
+      const strategyConfig = trackedPosition?.strategy_config;
+
+      const exitDecision = evaluateManagementExitRules(
+        p,
+        config.management,
+        pnlSuspect,
+        strategyConfig
+      );
       if (exitDecision) {
         actionMap.set(p.position, exitDecision);
         continue;
