@@ -198,12 +198,15 @@ export async function runScreeningCycle(
 
       // Launchpad allow filter
       const allowlist = config.screening.allowedLaunchpads;
-      if (allowlist && allowlist.length > 0 && launchpad && !allowlist.includes(launchpad)) {
-        log("screening", `Skipping ${pool.name} — not in launchpad allowlist (${launchpad})`);
+      if (allowlist && allowlist.length > 0 && (!launchpad || !allowlist.includes(launchpad))) {
+        log(
+          "screening",
+          `Skipping ${pool.name} — no launchpad / not in allowlist (${launchpad ?? "unknown"})`
+        );
         lateFilteredExamples.push({
           pool_address: pool.pool,
           name: pool.name || "Unknown",
-          filter_reason: "Not in launchpad allowlist",
+          filter_reason: "No launchpad / not in allowlist",
         });
         return false;
       }
