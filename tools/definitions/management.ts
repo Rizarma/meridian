@@ -122,6 +122,76 @@ Returns current feePerTvl24h which indicates the current APY of the pool.`,
   {
     type: "function",
     function: {
+      name: "add_liquidity",
+      description: `Add liquidity to an existing DLMM position. Used for multi_layer strategy (layering shapes) and fee_compounding (reinvesting fees).`,
+      parameters: {
+        type: "object",
+        properties: {
+          position_address: {
+            type: "string",
+            description: "The position public key to add liquidity to",
+          },
+          pool_address: {
+            type: "string",
+            description: "The DLMM pool address",
+          },
+          amount_x: {
+            type: "number",
+            description: "Amount of base token to add (optional, for dual-sided)",
+          },
+          amount_y: {
+            type: "number",
+            description: "Amount of quote token (usually SOL) to add (optional, for dual-sided)",
+          },
+          strategy: {
+            type: "string",
+            enum: ["bid_ask", "spot"],
+            description: "DLMM strategy type for the added liquidity",
+          },
+          single_sided_x: {
+            type: "boolean",
+            description: "If true, add liquidity single-sided with base token only",
+          },
+        },
+        required: ["position_address", "pool_address"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "withdraw_liquidity",
+      description: `Withdraw partial or full liquidity from an existing position. Used for partial_harvest strategy (taking profits) and single_sided_reseed (redeploying).`,
+      parameters: {
+        type: "object",
+        properties: {
+          position_address: {
+            type: "string",
+            description: "The position public key to withdraw liquidity from",
+          },
+          pool_address: {
+            type: "string",
+            description: "The DLMM pool address",
+          },
+          bps: {
+            type: "number",
+            description:
+              "Basis points (0-10000) of liquidity to withdraw. 10000 = full withdrawal. Default: 10000",
+          },
+          claim_fees: {
+            type: "boolean",
+            description: "If true, also claim accumulated fees during withdrawal. Default: true",
+          },
+        },
+        required: ["position_address", "pool_address"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
       name: "get_my_positions",
       description: `List all open DLMM positions for the agent wallet.
 Returns positions grouped by pool, each with:

@@ -87,6 +87,48 @@ export interface DeployResult {
   amount_sol?: number;
 }
 
+// ─── Add Liquidity Types ────────────────────────────────────────
+
+export interface AddLiquidityParams {
+  position_address: string;
+  pool_address: string;
+  amount_x?: number;
+  amount_y?: number;
+  strategy?: string;
+  single_sided_x?: boolean;
+}
+
+export interface AddLiquidityResult {
+  success: boolean;
+  position?: string;
+  pool?: string;
+  amount_x?: number;
+  amount_y?: number;
+  txs?: string[];
+  error?: string;
+}
+
+// ─── Withdraw Liquidity Types ───────────────────────────────────
+
+export interface WithdrawLiquidityParams {
+  position_address: string;
+  pool_address: string;
+  bps?: number;
+  claim_fees?: boolean;
+}
+
+export interface WithdrawLiquidityResult {
+  success: boolean;
+  position?: string;
+  pool?: string;
+  bps?: number;
+  amount_x_withdrawn?: number;
+  amount_y_withdrawn?: number;
+  fees_claimed?: number;
+  txs?: string[];
+  error?: string;
+}
+
 // ─── Position PnL Types ─────────────────────────────────────────
 
 export interface PositionPnL {

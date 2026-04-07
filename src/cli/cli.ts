@@ -741,25 +741,39 @@ switch (subcommand as CLISubcommand) {
   }
 
   // ── withdraw-liquidity ─────────────────────────────────────────
-  // DISABLED: P1 fix from strategy audit - function not implemented in dlmm.ts
-  // See: plan/strategy-audit/01-problem-statement.md
   case "withdraw-liquidity": {
-    die(
-      "withdraw-liquidity is temporarily disabled. " +
-        "The underlying function is not yet implemented. " +
-        "See audit: plan/strategy-audit/06-audit-partial_harvest.md"
+    if (!typedFlags.position || !typedFlags.pool)
+      die(
+        "Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps <n>] [--no-claim]"
+      );
+    const { withdrawLiquidity } = await import("../../tools/dlmm.js");
+    out(
+      await withdrawLiquidity({
+        position_address: typedFlags.position,
+        pool_address: typedFlags.pool,
+        bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
+        claim_fees: !argv.includes("--no-claim"),
+      })
     );
     break;
   }
 
   // ── add-liquidity ──────────────────────────────────────────────
-  // DISABLED: P1 fix from strategy audit - function not implemented in dlmm.ts
-  // See: plan/strategy-audit/01-problem-statement.md
   case "add-liquidity": {
-    die(
-      "add-liquidity is temporarily disabled. " +
-        "The underlying function is not yet implemented. " +
-        "See audit: plan/strategy-audit/05-audit-multi_layer.md"
+    if (!typedFlags.position || !typedFlags.pool)
+      die(
+        "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>] [--strategy <spot|bid_ask>] [--single-sided-x]"
+      );
+    const { addLiquidity } = await import("../../tools/dlmm.js");
+    out(
+      await addLiquidity({
+        position_address: typedFlags.position,
+        pool_address: typedFlags.pool,
+        amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
+        amount_y: typedFlags["amount-y"] ? parseFloat(typedFlags["amount-y"]) : 0,
+        strategy: typedFlags.strategy || "spot",
+        single_sided_x: argv.includes("--single-sided-x"),
+      })
     );
     break;
   }

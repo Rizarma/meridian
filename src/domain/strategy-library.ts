@@ -294,9 +294,9 @@ export function addStrategy({
 
 // Strategies that are documented but not fully implemented
 // See: plan/strategy-audit/ for detailed audit reports
+// P2A complete: multi_layer and partial_harvest are now functional (addLiquidity and withdrawLiquidity implemented)
 const NON_FUNCTIONAL_STRATEGIES = new Set([
-  "multi_layer", // addLiquidity not implemented - audit: 05-audit-multi_layer.md
-  "partial_harvest", // withdrawLiquidity not implemented - audit: 06-audit-partial_harvest.md
+  // Empty - all documented strategies are now functional. Add new non-functional strategies here.
 ]);
 
 /**

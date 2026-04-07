@@ -22,6 +22,8 @@ export type ToolName =
   | "list_smart_wallets"
   | "check_smart_wallets_on_pool"
   | "claim_fees"
+  | "withdraw_liquidity"
+  | "add_liquidity"
   | "close_position"
   | "get_wallet_balance"
   | "swap_token"
@@ -50,7 +52,13 @@ export type ToolName =
   | "clear_lessons"
   | "update_config";
 
-export type WriteTool = "deploy_position" | "claim_fees" | "close_position" | "swap_token";
+export type WriteTool =
+  | "deploy_position"
+  | "claim_fees"
+  | "withdraw_liquidity"
+  | "add_liquidity"
+  | "close_position"
+  | "swap_token";
 export type ProtectedTool = WriteTool | "self_update";
 
 // Tool function type - handlers can have any parameter type
