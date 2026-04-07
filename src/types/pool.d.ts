@@ -67,10 +67,3 @@ export interface PoolSnapshot {
   volume_24h: number;
   fee_apr: number;
 }
-
-export interface PoolTopCandidatesResult {
-  candidates: PoolCandidate[];
-  total_eligible: number;
-  total_screened: number;
-  pools?: PoolCandidate[]; // Alternative field name
-}
