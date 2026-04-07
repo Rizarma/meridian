@@ -10,9 +10,18 @@ import type {
 } from "../types/index.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
-const u: UserConfigPartial = fs.existsSync(USER_CONFIG_PATH)
-  ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial)
-  : {};
+let u: UserConfigPartial = {};
+if (fs.existsSync(USER_CONFIG_PATH)) {
+  try {
+    u = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial;
+  } catch (e) {
+    log(
+      "config_warn",
+      `Failed to parse user-config.json: ${(e as Error).message}. Using empty config.`
+    );
+    u = {};
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Configuration Precedence:
@@ -32,6 +41,19 @@ if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
 if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
 
+// Helper to check if env value is meaningfully set
+function hasEnvValue(value: string | undefined): value is string {
+  return value !== undefined && value.trim() !== "";
+}
+
+// Helper to check for non-empty env values
+function hasNonEmptyEnv(...keys: string[]): boolean {
+  return keys.every((key) => {
+    const val = process.env[key];
+    return val !== undefined && val.trim() !== "";
+  });
+}
+
 /**
  * Get the effective RPC_URL with fallback chain:
  * 1. process.env.RPC_URL (if set and non-empty)
@@ -42,17 +64,21 @@ if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
  * and we need to ensure they get a valid URL even if .env has an empty value.
  */
 export function getRpcUrl(): string {
-  return process.env.RPC_URL || u.rpcUrl || "https://api.mainnet-beta.solana.com";
+  return hasEnvValue(process.env.RPC_URL)
+    ? process.env.RPC_URL
+    : u.rpcUrl || "https://api.mainnet-beta.solana.com";
 }
 
 // Helper: Get value with precedence env > user-config > default
 const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
   const envValue = process.env[envKey];
-  if (envValue !== undefined) {
+  if (hasEnvValue(envValue)) {
     // Try to parse as the same type as default
     if (typeof defaultValue === "boolean") return (envValue === "true") as unknown as T;
-    if (typeof defaultValue === "number")
-      return (parseFloat(envValue) || defaultValue) as unknown as T;
+    if (typeof defaultValue === "number") {
+      const parsed = parseFloat(envValue);
+      return (Number.isNaN(parsed) ? defaultValue : parsed) as unknown as T;
+    }
     return envValue as unknown as T;
   }
   return (u[userKey] as T) ?? defaultValue;
@@ -169,15 +195,13 @@ export const config: Config = {
     trailingTakeProfit: u.features?.trailingTakeProfit ?? u.trailingTakeProfit ?? true,
     // Hive Mind sync: requires HIVE_MIND_URL and HIVE_MIND_API_KEY env vars
     hiveMind:
-      u.features?.hiveMind ??
-      u.hiveMind ??
-      Boolean(process.env.HIVE_MIND_URL && process.env.HIVE_MIND_API_KEY),
+      u.features?.hiveMind ?? u.hiveMind ?? hasNonEmptyEnv("HIVE_MIND_URL", "HIVE_MIND_API_KEY"),
     // Darwin evolution: enabled via features.darwinEvolution or flat darwinEvolution key
     darwinEvolution: u.features?.darwinEvolution ?? u.darwinEvolution ?? false,
     // SOL mode: migrated from management.solMode
     solMode: u.features?.solMode ?? u.solMode ?? false,
     // OKX integration: requires OKX_API_KEY and OKX_API_SECRET env vars
-    okx: u.features?.okx ?? u.okx ?? Boolean(process.env.OKX_API_KEY && process.env.OKX_API_SECRET),
+    okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_API_SECRET"),
   },
 };
 
