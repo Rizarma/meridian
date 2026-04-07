@@ -30,13 +30,28 @@ function getOKXCredentials() {
   };
 }
 
+// Common placeholder patterns to reject
+const PLACEHOLDER_PATTERNS = [
+  /enter your (passphrase|api key|secret|key) here/i,
+  /your?_(passphrase|api_key|secret|key)/i,
+  /^(xxx+|todo|placeholder|example|test|mock|fake|dummy|none|nil|null|undefined|empty|changeme|default)$/i,
+  /^\*+$/,
+  /^(YOUR|MY)_(API_KEY|SECRET|PASSPHRASE|KEY)/i,
+];
+
+function isPlaceholder(value: string): boolean {
+  return PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
+
 function hasAuth(): boolean {
   const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE } = getOKXCredentials();
   return !!(
     OKX_API_KEY &&
     OKX_SECRET_KEY &&
     OKX_PASSPHRASE &&
-    !/enter your passphrase here/i.test(OKX_PASSPHRASE)
+    !isPlaceholder(OKX_API_KEY) &&
+    !isPlaceholder(OKX_SECRET_KEY) &&
+    !isPlaceholder(OKX_PASSPHRASE)
   );
 }
 
