@@ -741,47 +741,25 @@ switch (subcommand as CLISubcommand) {
   }
 
   // ── withdraw-liquidity ─────────────────────────────────────────
+  // DISABLED: P1 fix from strategy audit - function not implemented in dlmm.ts
+  // See: plan/strategy-audit/01-problem-statement.md
   case "withdraw-liquidity": {
-    if (!typedFlags.position)
-      die("Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]");
-    if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("../../tools/dlmm.js");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const withdrawLiquidity = (dlmmModule as Record<string, unknown>).withdrawLiquidity as (
-      ...args: unknown[]
-    ) => Promise<unknown>;
-    out(
-      await withdrawLiquidity({
-        position_address: typedFlags.position,
-        pool_address: typedFlags.pool,
-        bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
-        claim_fees: !argv.includes("--no-claim"),
-      })
+    die(
+      "withdraw-liquidity is temporarily disabled. " +
+        "The underlying function is not yet implemented. " +
+        "See audit: plan/strategy-audit/06-audit-partial_harvest.md"
     );
     break;
   }
 
   // ── add-liquidity ──────────────────────────────────────────────
+  // DISABLED: P1 fix from strategy audit - function not implemented in dlmm.ts
+  // See: plan/strategy-audit/01-problem-statement.md
   case "add-liquidity": {
-    if (!typedFlags.position)
-      die(
-        "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>]"
-      );
-    if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("../../tools/dlmm.js");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const addLiquidity = (dlmmModule as Record<string, unknown>).addLiquidity as (
-      ...args: unknown[]
-    ) => Promise<unknown>;
-    out(
-      await addLiquidity({
-        position_address: typedFlags.position,
-        pool_address: typedFlags.pool,
-        amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
-        amount_y: typedFlags["amount-y"] ? parseFloat(typedFlags["amount-y"]) : 0,
-        strategy: typedFlags.strategy || "spot",
-        single_sided_x: argv.includes("--single-sided-x"),
-      })
+    die(
+      "add-liquidity is temporarily disabled. " +
+        "The underlying function is not yet implemented. " +
+        "See audit: plan/strategy-audit/05-audit-multi_layer.md"
     );
     break;
   }
