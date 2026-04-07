@@ -13,6 +13,7 @@
 import { config } from "../src/config/config.js";
 import { recordPerformance } from "../src/domain/lessons.js";
 import { addPoolNote } from "../src/domain/pool-memory.js";
+import { getActiveStrategy, getStrategy } from "../src/domain/strategy-library.js";
 import { log, logAction } from "../src/infrastructure/logger.js";
 import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
 import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
@@ -25,6 +26,7 @@ import type {
 import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
+import type { Strategy } from "../src/types/strategy.js";
 import type { TokenBalance, WalletBalances } from "../src/types/wallet.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
@@ -226,11 +228,17 @@ export const persistenceMiddleware: MiddlewareFn = async (tool, args, _role, nex
   // After deploy_position: track the new position
   if (tool.name === "deploy_position") {
     const deployArgs = args as DeployPositionArgs & { pool_name?: string };
+
+    // Load full strategy config to store with position
+    const activeStrategy = await getActiveStrategy();
+    const strategyConfig = activeStrategy;
+
     trackPosition({
       position: result.position as string,
       pool: result.pool as string,
       pool_name: (result.pool_name as string) || deployArgs.pool_name || "unknown",
       strategy: (result.strategy as string) || "spot",
+      strategy_config: strategyConfig,
       bin_range: result.bin_range as { min: number; max: number; active?: number },
       bin_step: (result.bin_step as number) || 80,
       volatility: (result.volatility as number) || 0,
@@ -324,6 +332,54 @@ async function handleAutoSwapAfterClaim(baseMint: string): Promise<void> {
 }
 
 /**
+ * Validate that deploy args comply with active strategy constraints.
+ * Returns { pass: true } if valid, { pass: false, reason: string } if violated.
+ */
+async function validateStrategyCompliance(
+  deployArgs: DeployPositionArgs
+): Promise<SafetyCheckResult> {
+  // Get active strategy
+  const activeStrategy = await getActiveStrategy();
+  if (!activeStrategy) {
+    return { pass: true }; // No active strategy, no validation needed
+  }
+
+  const strategy = activeStrategy;
+
+  // Validate 1: single_side constraint
+  if (strategy.entry?.single_side) {
+    if (strategy.entry.single_side === "token" && deployArgs.amount_y !== 0) {
+      return {
+        pass: false,
+        reason: `Strategy '${strategy.name}' requires single_side: "token" with amount_y=0. Received amount_y=${deployArgs.amount_y}`,
+      };
+    }
+    if (strategy.entry.single_side === "sol" && deployArgs.amount_x !== 0) {
+      return {
+        pass: false,
+        reason: `Strategy '${strategy.name}' requires single_side: "sol" with amount_x=0. Received amount_x=${deployArgs.amount_x}`,
+      };
+    }
+  }
+
+  // Validate 2: lp_strategy match (if not "any" or "mixed")
+  if (
+    strategy.lp_strategy &&
+    strategy.lp_strategy !== "any" &&
+    strategy.lp_strategy !== "mixed" &&
+    deployArgs.strategy !== strategy.lp_strategy
+  ) {
+    return {
+      pass: false,
+      reason: `Strategy '${strategy.name}' requires lp_strategy: "${strategy.lp_strategy}", but deploy used: "${deployArgs.strategy}"`,
+    };
+  }
+
+  // All validations passed
+  return { pass: true };
+}
+
+/**
  * Run safety checks before executing write operations.
  */
 async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheckResult> {
@@ -407,6 +463,12 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
             reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
           };
         }
+      }
+
+      // Strategy compliance check
+      const strategyCheck = await validateStrategyCompliance(deployArgs);
+      if (!strategyCheck.pass) {
+        return strategyCheck;
       }
 
       return { pass: true };
