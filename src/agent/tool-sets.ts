@@ -13,6 +13,8 @@ export const MANAGER_TOOLS: Set<string> = new Set([
   "get_position_pnl",
   "get_my_positions",
   "get_wallet_balance",
+  "add_liquidity",
+  "withdraw_liquidity",
 ]);
 
 /** Tools available to the SCREENER role (pool discovery and deployment) */
