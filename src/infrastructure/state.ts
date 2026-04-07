@@ -20,6 +20,7 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { PROJECT_ROOT } from "../config/paths.js";
+import { clearAllConfirmationTimers } from "../cycles/management.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
 import type { SetPositionNoteArgs } from "../types/executor.js";
 import type { SignalSnapshot } from "../types/signals.js";
@@ -85,7 +86,28 @@ function save(state: PositionState): void {
     state.lastUpdated = new Date().toISOString();
     const tmpFile = `${STATE_FILE}.tmp`;
     fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
-    fs.renameSync(tmpFile, STATE_FILE); // Atomic on POSIX
+
+    // Retry rename for Windows compatibility (EBUSY errors)
+    const maxRetries = 3;
+    const delayMs = 50;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        fs.renameSync(tmpFile, STATE_FILE);
+        return; // Success
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        const isBusy = code === "EBUSY" || code === "EPERM" || code === "EACCES";
+        if (isBusy && attempt < maxRetries) {
+          // Wait briefly before retry
+          const start = Date.now();
+          while (Date.now() - start < delayMs) {
+            // Busy-wait for 50ms
+          }
+          continue;
+        }
+        throw err; // Final attempt or non-busy error
+      }
+    }
   } catch (err) {
     log("state_error", `Failed to write state.json: ${(err as Error).message}`);
   }
@@ -244,6 +266,8 @@ export function recordClose(position_address: string, reason: string): void {
     reason,
   });
   save(state);
+  // Clear any pending confirmation timers to prevent memory leaks
+  clearAllConfirmationTimers(position_address);
   log("state", `Position ${position_address} marked closed: ${reason}`);
 }
 
@@ -257,6 +281,7 @@ export function recordRebalance(old_position: string, new_position: string): voi
     old.closed = true;
     old.closed_at = new Date().toISOString();
     old.notes.push(`Rebalanced into ${new_position} at ${old.closed_at}`);
+    clearAllConfirmationTimers(old_position);
   }
   const newPos = state.positions[new_position];
   if (newPos) {
@@ -591,6 +616,8 @@ export function syncOpenPositions(active_addresses: string[]): void {
     pos.closed = true;
     pos.closed_at = new Date().toISOString();
     pos.notes.push(`Auto-closed during state sync (not found on-chain)`);
+    // Clear any pending confirmation timers to prevent memory leaks
+    clearAllConfirmationTimers(posId);
     changed = true;
     log("state", `Position ${posId} auto-closed (missing from on-chain data)`);
   }

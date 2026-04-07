@@ -120,6 +120,15 @@ export function clearTrailingDropConfirmationTimer(positionAddress: string): voi
   }
 }
 
+/**
+ * Clear all confirmation timers for a position.
+ * Should be called when a position is closed to prevent timer leaks.
+ */
+export function clearAllConfirmationTimers(positionAddress: string): void {
+  clearPeakConfirmationTimer(positionAddress);
+  clearTrailingDropConfirmationTimer(positionAddress);
+}
+
 export async function runManagementCycle(
   options: CycleOptions = {},
   deps: {
