@@ -10,10 +10,35 @@ import type {
 } from "../types/index.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
+/**
+ * Sanitize parsed JSON to prevent prototype pollution.
+ * Removes __proto__, constructor, and prototype keys from objects.
+ */
+function sanitizeJson<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeJson) as unknown as T;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    // Block prototype pollution keys
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
+    sanitized[key] = sanitizeJson(value);
+  }
+  return sanitized as T;
+}
+
 let u: UserConfigPartial = {};
 if (fs.existsSync(USER_CONFIG_PATH)) {
   try {
-    u = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial;
+    const raw = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial;
+    u = sanitizeJson(raw);
   } catch (e) {
     log(
       "config_warn",
@@ -239,25 +264,29 @@ export function computeDeployAmount(walletSol: number): number {
 export function reloadScreeningThresholds(): void {
   if (!fs.existsSync(USER_CONFIG_PATH)) return;
   try {
-    const fresh = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial;
+    const raw = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfigPartial;
+    const fresh = sanitizeJson(raw);
     const s = config.screening;
-    if (fresh.minFeeActiveTvlRatio != null) s.minFeeActiveTvlRatio = fresh.minFeeActiveTvlRatio;
-    if (fresh.minOrganic != null) s.minOrganic = fresh.minOrganic;
-    if (fresh.minHolders != null) s.minHolders = fresh.minHolders;
-    if (fresh.minMcap != null) s.minMcap = fresh.minMcap;
-    if (fresh.maxMcap != null) s.maxMcap = fresh.maxMcap;
-    if (fresh.minTvl != null) s.minTvl = fresh.minTvl;
-    if (fresh.maxTvl != null) s.maxTvl = fresh.maxTvl;
-    if (fresh.minVolume != null) s.minVolume = fresh.minVolume;
-    if (fresh.minBinStep != null) s.minBinStep = fresh.minBinStep;
-    if (fresh.maxBinStep != null) s.maxBinStep = fresh.maxBinStep;
-    if (fresh.timeframe != null) s.timeframe = fresh.timeframe;
-    if (fresh.category != null) s.category = fresh.category;
-    if (fresh.minTokenAgeHours !== undefined) s.minTokenAgeHours = fresh.minTokenAgeHours;
-    if (fresh.maxTokenAgeHours !== undefined) s.maxTokenAgeHours = fresh.maxTokenAgeHours;
-    if (fresh.athFilterPct !== undefined) s.athFilterPct = fresh.athFilterPct;
-    if (fresh.maxBundlePct != null) s.maxBundlePct = fresh.maxBundlePct;
-    if (fresh.maxBotHoldersPct != null) s.maxBotHoldersPct = fresh.maxBotHoldersPct;
+
+    // Dynamically update all screening fields that exist in both fresh config and current config
+    for (const key of Object.keys(fresh)) {
+      const value = fresh[key as keyof UserConfigPartial];
+      if (value !== undefined && key in s) {
+        // Type-safe assignment: only copy if types match or value is null
+        const currentValue = s[key as keyof typeof s];
+        const typeofCurrent = typeof currentValue;
+        const typeofFresh = typeof value;
+
+        // Allow: same type, or null replacing nullable field, or number for null field
+        if (
+          typeofCurrent === typeofFresh ||
+          (currentValue === null && typeofFresh === "number") ||
+          (value === null && currentValue !== undefined)
+        ) {
+          (s as unknown as Record<string, unknown>)[key] = value;
+        }
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -371,7 +400,28 @@ registerTool({
       return { success: false, unknown, reason } as UpdateConfigResult;
     }
 
-    // Apply to live config immediately
+    // Persist to user-config.json FIRST (atomic write), then apply to live config
+    type UserConfig = Record<string, unknown> & { _lastAgentTune?: string };
+    let userConfig: UserConfig = {};
+    if (fs.existsSync(USER_CONFIG_PATH)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfig;
+        userConfig = sanitizeJson(raw);
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+    Object.assign(userConfig, applied);
+    userConfig._lastAgentTune = new Date().toISOString();
+
+    try {
+      fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    } catch (e) {
+      log("config_error", `Failed to write user-config.json: ${(e as Error).message}`);
+      return { success: false, unknown, reason, applied: {} } as UpdateConfigResult;
+    }
+
+    // Apply to live config AFTER successful disk write
     for (const [key, val] of Object.entries(applied)) {
       const [section, field] = CONFIG_MAP[key];
       if (!isValidConfigSection(section)) {
@@ -390,20 +440,6 @@ registerTool({
         `update_config: config.${section}.${field} ${before} → ${val} (verify: ${configSection[field]})`
       );
     }
-
-    // Persist to user-config.json
-    type UserConfig = Record<string, unknown> & { _lastAgentTune?: string };
-    let userConfig: UserConfig = {};
-    if (fs.existsSync(USER_CONFIG_PATH)) {
-      try {
-        userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as UserConfig;
-      } catch {
-        /* ignore parse errors */
-      }
-    }
-    Object.assign(userConfig, applied);
-    userConfig._lastAgentTune = new Date().toISOString();
-    fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 
     // Restart cron jobs if intervals changed
     const intervalChanged =
