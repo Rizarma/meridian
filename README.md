@@ -118,6 +118,8 @@ Copy config and edit as needed:
 cp user-config.example.json user-config.json
 ```
 
+**Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
+
 See [Config reference](#config-reference) below.
 
 ### 3. Run
@@ -356,6 +358,9 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `maxMcap` | `10000000` | Maximum market cap (USD) |
 | `minBinStep` | `80` | Minimum bin step |
 | `maxBinStep` | `125` | Maximum bin step |
+| `strategy` | `bid_ask` | Deploy shape — `bid_ask`, `spot`, or `curve` |
+| `binsBelow` | `69` | Number of bins below active to deploy liquidity into |
+| `preset` | `custom` | Named preset label (informational) |
 | `timeframe` | `5m` | Candle timeframe for screening |
 | `category` | `trending` | Pool category filter |
 | `minTokenFeesSol` | `30` | Minimum all-time fees in SOL |
@@ -375,6 +380,7 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `deployAmountSol` | `0.5` | Base SOL per new position |
 | `positionSizePct` | `0.35` | Fraction of deployable balance to use |
 | `maxDeployAmount` | `50` | Maximum SOL cap per position |
+| `maxPositions` | `3` | Maximum concurrent open positions |
 | `gasReserve` | `0.2` | Minimum SOL to keep for gas |
 | `minSolToOpen` | `0.55` | Minimum wallet SOL before opening |
 | `outOfRangeWaitMinutes` | `30` | Minutes OOR before acting |
@@ -409,6 +415,9 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
 | `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
 | `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `temperature` | `0.373` | Sampling temperature for agent calls |
+| `maxTokens` | `4096` | Max tokens per LLM response |
+| `maxSteps` | `20` | Max tool-call iterations per ReAct loop |
 
 > Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-6`
 
@@ -544,11 +553,12 @@ src/
     token-blacklist.ts  Permanent token blacklist
     dev-blocklist.ts    Deployer wallet blocklist
   infrastructure/
-    telegram.ts         Bot polling + notifications
-    briefing.ts         Daily HTML briefing
-    logger.ts           Daily-rotating logs + audit trail
-    state.ts            Position registry (state.json)
-    hive-mind.ts        Optional collective intelligence sync
+    telegram.ts             Bot polling + notifications
+    briefing.ts             Daily HTML briefing
+    logger.ts               Daily-rotating logs + audit trail
+    state.ts                Position registry (state.json)
+    confirmation-timers.ts  Peak / trailing-TP confirmation timer registry
+    hive-mind.ts            Optional collective intelligence sync
   config/
     config.ts           Runtime config from user-config.json + .env
     constants.ts        Shared constants
