@@ -14,6 +14,7 @@ import { config } from "./config/config.js";
 import {
   getScreeningLastTriggered,
   isScreeningBusy,
+  sanitizeUntrustedPromptText,
   setScreeningLastTriggered,
 } from "./cycles/screening.js";
 import { getPerformanceSummary } from "./domain/lessons.js";
@@ -491,8 +492,9 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
     const agentModel =
       agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
+    const sanitizedText = sanitizeUntrustedPromptText(text);
     const { content } = await agentLoop(
-      text,
+      sanitizedText,
       config.llm.maxSteps,
       sessionHistory as unknown as Parameters<typeof agentLoop>[2],
       agentRole,

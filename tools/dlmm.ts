@@ -162,6 +162,13 @@ function startPoolCacheInterval() {
   }
 }
 
+export function stopPoolCache(): void {
+  if (_poolCacheInterval) {
+    clearInterval(_poolCacheInterval);
+    _poolCacheInterval = null;
+  }
+}
+
 async function getPool(poolAddress: string): Promise<any> {
   const key = poolAddress.toString();
   if (!poolCache.has(key)) {
@@ -351,7 +358,9 @@ export async function deployPosition({
 
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
 
-    _positionsCacheAt = 0;
+    await withPositionsCacheLock(async () => {
+      _positionsCacheAt = 0;
+    });
 
     const actualBinStep = pool.lbPair.binStep;
     const activePrice = parseFloat(activeBin.price);
@@ -397,6 +406,35 @@ const POSITIONS_CACHE_TTL = 5 * 60_000; // 5 minutes
 let _positionsCache: PositionsResult | null = null;
 let _positionsCacheAt = 0;
 let _positionsInflight: Promise<PositionsResult> | null = null;
+
+// ─── Position Cache Lock ───────────────────────────────────────
+// Simple async mutex to prevent race conditions on cache state
+let _positionsCacheLock: Promise<void> = Promise.resolve();
+let _positionsCacheLockResolve: (() => void) | null = null;
+
+async function acquirePositionsCacheLock(): Promise<void> {
+  // Wait for current lock to release, then create new lock
+  await _positionsCacheLock;
+  _positionsCacheLock = new Promise((resolve) => {
+    _positionsCacheLockResolve = resolve;
+  });
+}
+
+function releasePositionsCacheLock(): void {
+  if (_positionsCacheLockResolve) {
+    _positionsCacheLockResolve();
+    _positionsCacheLockResolve = null;
+  }
+}
+
+async function withPositionsCacheLock<T>(fn: () => Promise<T>): Promise<T> {
+  await acquirePositionsCacheLock();
+  try {
+    return await fn();
+  } finally {
+    releasePositionsCacheLock();
+  }
+}
 
 // ─── Fetch DLMM PnL API for all positions in a pool ────────────
 async function fetchDlmmPnlForPool(
@@ -667,8 +705,10 @@ export async function getMyPositions({
         positions,
       };
       syncOpenPositions(positions.map((p) => p.position));
-      _positionsCache = result;
-      _positionsCacheAt = Date.now();
+      await withPositionsCacheLock(async () => {
+        _positionsCache = result;
+        _positionsCacheAt = Date.now();
+      });
       return result;
     } catch (error: any) {
       log("positions_error", `Portfolio fetch failed: ${error.stack || error.message}`);
@@ -817,7 +857,9 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
       txHashes.push(txHash);
     }
     log("claim", `SUCCESS txs: ${txHashes.join(", ")}`);
-    _positionsCacheAt = 0; // invalidate cache after claim
+    await withPositionsCacheLock(async () => {
+      _positionsCacheAt = 0; // invalidate cache after claim
+    });
 
     return {
       success: true,
@@ -936,7 +978,9 @@ export async function closePosition({
     // Wait for RPC to reflect withdrawn balances before returning — prevents
     // agent from seeing zero balance when attempting post-close swap
     await new Promise((r) => setTimeout(r, 5000));
-    _positionsCacheAt = 0;
+    await withPositionsCacheLock(async () => {
+      _positionsCacheAt = 0;
+    });
 
     let closedConfirmed = false;
     for (let attempt = 0; attempt < 4; attempt++) {

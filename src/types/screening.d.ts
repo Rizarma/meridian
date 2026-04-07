@@ -77,9 +77,17 @@ export interface TopCandidatesInput {
   limit?: number;
 }
 
+export interface FilteredExample {
+  pool_address: string;
+  name: string;
+  filter_reason: string;
+}
+
 export interface TopCandidatesResult {
   candidates: CondensedPool[];
+  total_eligible: number;
   total_screened: number;
+  filtered_examples: FilteredExample[];
 }
 
 // Pool Detail

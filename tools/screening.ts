@@ -14,6 +14,7 @@ import type {
   CondensedPool,
   DiscoverPoolsInput,
   DiscoverPoolsResult,
+  FilteredExample,
   PoolDetailInput,
   RawPoolData,
   TopCandidatesInput,
@@ -173,7 +174,18 @@ export async function getTopCandidates({
   limit = 10,
 }: TopCandidatesInput = {}): Promise<TopCandidatesResult> {
   const { config } = (await import("../src/config/config.js")) as { config: Config };
+  // Note: page_size is hardcoded to 50 for API fetch; config.screening.maxCandidatesEnriched limits post-fetch enrichment
   const { pools } = await discoverPools({ page_size: 50 });
+
+  // Collect structured filter reasons for debugging
+  const filtered_examples: FilteredExample[] = [];
+  const pushFilteredReason = (pool: CondensedPool, reason: string) => {
+    filtered_examples.push({
+      pool_address: pool.pool,
+      name: pool.name || pool.base?.symbol || "Unknown",
+      filter_reason: reason,
+    });
+  };
 
   // Exclude pools where the wallet already has an open position
   const { getMyPositions } = (await import("./dlmm.js")) as unknown as DLMMModule;
@@ -183,9 +195,13 @@ export async function getTopCandidates({
 
   const eligible: CondensedPool[] = pools
     .filter((p) => {
-      if (occupiedPools.has(p.pool) || occupiedMints.has(p.base?.mint)) return false;
+      if (occupiedPools.has(p.pool) || occupiedMints.has(p.base?.mint)) {
+        pushFilteredReason(p, "Pool already has position");
+        return false;
+      }
       if (isPoolOnCooldown(p.pool)) {
         log("screening", `Filtered cooldown pool ${p.name} (${p.pool.slice(0, 8)})`);
+        pushFilteredReason(p, "Pool on cooldown");
         return false;
       }
       if (isBaseMintOnCooldown(p.base?.mint)) {
@@ -193,6 +209,7 @@ export async function getTopCandidates({
           "screening",
           `Filtered cooldown token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)})`
         );
+        pushFilteredReason(p, "Base mint on cooldown");
         return false;
       }
       return true;
@@ -269,6 +286,7 @@ export async function getTopCandidates({
       ...eligible.filter((p) => {
         if (p.is_wash) {
           log("screening", `Risk filter: dropped ${p.name} — wash trading flagged`);
+          pushFilteredReason(p, "Wash trading detected");
           return false;
         }
         return true;
@@ -278,7 +296,7 @@ export async function getTopCandidates({
     // ATH filter — drop pools where price is too close to ATH
     const athFilter = config.screening.athFilterPct;
     if (athFilter != null) {
-      const threshold = 100 + athFilter; // e.g. -20 → threshold = 80 (price must be <= 80% of ATH)
+      const threshold = 100 + athFilter; // e.g. athFilter=-20 → threshold=80 (max allowed % of ATH; pools above this are too close to ATH)
       const before = eligible.length;
       eligible.splice(
         0,
@@ -290,6 +308,7 @@ export async function getTopCandidates({
               "screening",
               `ATH filter: dropped ${p.name} — ${p.price_vs_ath_pct}% of ATH (limit: ${threshold}%)`
             );
+            pushFilteredReason(p, "ATH filter failed");
             return false;
           }
           return true;
@@ -307,6 +326,7 @@ export async function getTopCandidates({
           "dev_blocklist",
           `Filtered blocked deployer (okx) ${p.dev.slice(0, 8)} token ${p.base?.symbol}`
         );
+        pushFilteredReason(p, "Deployer blocked");
         return false;
       }
       return true;
@@ -318,7 +338,9 @@ export async function getTopCandidates({
 
   return {
     candidates: eligible,
+    total_eligible: eligible.length,
     total_screened: pools.length,
+    filtered_examples,
   };
 }
 

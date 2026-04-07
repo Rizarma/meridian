@@ -1,6 +1,6 @@
 import type { ScheduledTask } from "node-cron";
 import cron from "node-cron";
-import { getMyPositions } from "../tools/dlmm.js";
+import { getMyPositions, stopPoolCache } from "../tools/dlmm.js";
 import { agentLoop } from "./agent/agent.js";
 import { config, registerCronRestarter } from "./config/config.js";
 import {
@@ -289,12 +289,15 @@ Summarize the current portfolio health, total fees earned, and performance of al
       }
     })().catch((e) => {
       // This catches async errors outside the try block (should be rare)
-      _pnlPollConsecutiveFailures++;
-      log(
-        "error",
-        `PnL poll unhandled error (failure #${_pnlPollConsecutiveFailures}): ${(e as Error).message}`
-      );
-      _pnlPollBusy = false;
+      try {
+        _pnlPollConsecutiveFailures++;
+        log(
+          "error",
+          `PnL poll unhandled error (failure #${_pnlPollConsecutiveFailures}): ${(e as Error).message}`
+        );
+      } finally {
+        _pnlPollBusy = false;
+      }
     });
   }, 30_000);
 
@@ -314,6 +317,7 @@ export async function shutdown(signal: string): Promise<void> {
   log("shutdown", `Received ${signal}. Shutting down...`);
   stopPolling();
   stopCronJobs();
+  stopPoolCache();
   cache.destroy();
   const positionsResult = await getMyPositions();
   log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
