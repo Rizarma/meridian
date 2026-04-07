@@ -51,7 +51,7 @@ function createTestConfig(partial: UserConfigPartial): Config {
       minTokenAgeHours: u.minTokenAgeHours ?? null,
       maxTokenAgeHours: u.maxTokenAgeHours ?? null,
       athFilterPct: u.athFilterPct ?? null,
-      maxPoolsPerCycle: u.maxPoolsPerCycle ?? 10,
+      maxCandidatesEnriched: u.maxCandidatesEnriched ?? 10,
     },
     management: {
       minClaimAmount: u.minClaimAmount ?? 5,

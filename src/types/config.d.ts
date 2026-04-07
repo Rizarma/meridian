@@ -28,7 +28,7 @@ export interface ScreeningConfig {
   minTokenAgeHours: number | null;
   maxTokenAgeHours: number | null;
   athFilterPct: number | null;
-  maxPoolsPerCycle: number;
+  maxCandidatesEnriched: number;
 }
 
 export interface ManagementConfig {
@@ -138,7 +138,7 @@ export interface UserConfigPartial {
   minTokenAgeHours?: number | null;
   maxTokenAgeHours?: number | null;
   athFilterPct?: number | null;
-  maxPoolsPerCycle?: number;
+  maxCandidatesEnriched?: number;
   minClaimAmount?: number;
   autoSwapAfterClaim?: boolean;
   outOfRangeBinsToClose?: number;
