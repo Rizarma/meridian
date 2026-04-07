@@ -12,6 +12,30 @@ import type {
 } from "../types/telegram.d.ts";
 import { log } from "./logger.js";
 
+/**
+ * Sanitize parsed JSON to prevent prototype pollution.
+ * Removes __proto__, constructor, and prototype keys from objects.
+ */
+function sanitizeJson<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeJson) as unknown as T;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    // Block prototype pollution keys
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
+    sanitized[key] = sanitizeJson(value);
+  }
+  return sanitized as T;
+}
+
 const TOKEN: string | null = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE: string | null = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 const ALLOWED_USER_IDS: Set<string> = new Set(
@@ -32,9 +56,10 @@ let _warnedMissingAllowedUsers = false;
 function loadChatId(): void {
   try {
     if (fs.existsSync(USER_CONFIG_PATH)) {
-      const cfg = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as {
+      const raw = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as {
         telegramChatId?: string;
       };
+      const cfg = sanitizeJson(raw);
       if (cfg.telegramChatId) chatId = cfg.telegramChatId;
     }
   } catch {
@@ -44,13 +69,14 @@ function loadChatId(): void {
 
 function saveChatId(id: string): void {
   try {
-    const cfg: { telegramChatId?: string } & Record<string, unknown> = fs.existsSync(
+    const raw: { telegramChatId?: string } & Record<string, unknown> = fs.existsSync(
       USER_CONFIG_PATH
     )
       ? (JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) as {
           telegramChatId?: string;
         } & Record<string, unknown>)
       : {};
+    const cfg = sanitizeJson(raw);
     cfg.telegramChatId = id;
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
   } catch (e) {
@@ -122,11 +148,38 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
   } catch (e) {
     // Only log if it's not a parse entities error (those are expected and handled)
     const msg = (e as Error).message || "";
-    if (!msg.includes("parse entities") && !msg.includes("message is not modified")) {
+    if (msg.includes("parse entities")) {
+      log("telegram_debug", `Parse entities error: ${msg}`);
+      // Continue to suppress from error level logging
+    } else if (!msg.includes("message is not modified")) {
       log("telegram_error", `${method} failed: ${msg}`);
     }
     throw e; // Re-throw so callers can handle it
   }
+}
+
+function escapeMarkdown(text: string): string {
+  // Escape Markdown special characters: * _ [ ] ( ) ~ ` > # + - = | { } . !
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/~/g, "\\~")
+    .replace(/`/g, "\\`")
+    .replace(/>/g, "\\>")
+    .replace(/#/g, "\\#")
+    .replace(/\+/g, "\\+")
+    .replace(/-/g, "\\-")
+    .replace(/=/g, "\\=")
+    .replace(/\|/g, "\\|")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\./g, "\\.")
+    .replace(/!/g, "\\!");
 }
 
 export async function sendMessage(text: string): Promise<unknown> {
@@ -138,11 +191,11 @@ export async function sendMessage(text: string): Promise<unknown> {
       parse_mode: "Markdown",
     });
   } catch (error) {
-    // If Markdown parsing fails, retry as plain text
+    // If Markdown parsing fails, retry with escaped text as plain text
     const errorMessage = String((error as { message?: string }).message || "");
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
-      log("telegram_warn", "Markdown parsing failed, sending as plain text");
-      return postTelegram("sendMessage", { text: safeText });
+      log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
+      return postTelegram("sendMessage", { text: escapeMarkdown(safeText) });
     }
     // Ignore "message is not modified" — content hasn't changed, no need to update
     if (errorMessage.includes("message is not modified")) {
@@ -171,7 +224,7 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
     const errorMessage = String((error as { message?: string }).message || "");
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
       log("telegram_warn", "Markdown parsing failed, editing as plain text");
-      return postTelegram("editMessageText", { message_id: messageId, text: safeText });
+      return postTelegram("editMessageText", { message_id: messageId, text: escapeMarkdown(safeText) });
     }
     // Ignore "message is not modified" — content hasn't changed, no need to update
     if (errorMessage.includes("message is not modified")) {
