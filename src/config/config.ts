@@ -227,8 +227,8 @@ export const config: Config = {
     darwinEvolution: u.features?.darwinEvolution ?? u.darwinEvolution ?? false,
     // SOL mode: migrated from management.solMode
     solMode: u.features?.solMode ?? u.solMode ?? false,
-    // OKX integration: requires OKX_API_KEY and OKX_API_SECRET env vars
-    okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_API_SECRET"),
+    // OKX integration: requires OKX_API_KEY and OKX_SECRET_KEY env vars
+    okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_SECRET_KEY"),
   },
 };
 
