@@ -47,9 +47,11 @@ function createTestConfig(partial: UserConfigPartial): Config {
       maxBotHoldersPct: u.maxBotHoldersPct ?? 30,
       maxTop10Pct: u.maxTop10Pct ?? 60,
       blockedLaunchpads: u.blockedLaunchpads ?? [],
+      allowedLaunchpads: u.allowedLaunchpads ?? [],
       minTokenAgeHours: u.minTokenAgeHours ?? null,
       maxTokenAgeHours: u.maxTokenAgeHours ?? null,
       athFilterPct: u.athFilterPct ?? null,
+      maxPoolsPerCycle: u.maxPoolsPerCycle ?? 10,
     },
     management: {
       minClaimAmount: u.minClaimAmount ?? 5,
