@@ -174,6 +174,7 @@ export async function getTopCandidates({
   limit = 10,
 }: TopCandidatesInput = {}): Promise<TopCandidatesResult> {
   const { config } = (await import("../src/config/config.js")) as { config: Config };
+  // Note: page_size is hardcoded to 50 for API fetch; config.screening.maxCandidatesEnriched limits post-fetch enrichment
   const { pools } = await discoverPools({ page_size: 50 });
 
   // Collect structured filter reasons for debugging
@@ -295,7 +296,7 @@ export async function getTopCandidates({
     // ATH filter — drop pools where price is too close to ATH
     const athFilter = config.screening.athFilterPct;
     if (athFilter != null) {
-      const threshold = 100 + athFilter; // e.g. -20 → threshold = 80 (price must be <= 80% of ATH)
+      const threshold = 100 + athFilter; // e.g. athFilter=-20 → threshold=80 (max allowed % of ATH; pools above this are too close to ATH)
       const before = eligible.length;
       eligible.splice(
         0,
@@ -339,7 +340,7 @@ export async function getTopCandidates({
     candidates: eligible,
     total_eligible: eligible.length,
     total_screened: pools.length,
-    filtered_examples: filtered_examples.slice(0, 3),
+    filtered_examples,
   };
 }
 
