@@ -24,9 +24,11 @@ export interface ScreeningConfig {
   maxBotHoldersPct: number;
   maxTop10Pct: number;
   blockedLaunchpads: string[];
+  allowedLaunchpads: string[];
   minTokenAgeHours: number | null;
   maxTokenAgeHours: number | null;
   athFilterPct: number | null;
+  maxPoolsPerCycle: number;
 }
 
 export interface ManagementConfig {
@@ -132,9 +134,11 @@ export interface UserConfigPartial {
   maxBotHoldersPct?: number;
   maxTop10Pct?: number;
   blockedLaunchpads?: string[];
+  allowedLaunchpads?: string[];
   minTokenAgeHours?: number | null;
   maxTokenAgeHours?: number | null;
   athFilterPct?: number | null;
+  maxPoolsPerCycle?: number;
   minClaimAmount?: number;
   autoSwapAfterClaim?: boolean;
   outOfRangeBinsToClose?: number;

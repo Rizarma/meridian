@@ -142,9 +142,11 @@ export const config: Config = {
     maxBotHoldersPct: u.maxBotHoldersPct ?? 30, // max bot holder addresses % (Jupiter audit)
     maxTop10Pct: u.maxTop10Pct ?? 60, // max top 10 holders concentration
     blockedLaunchpads: u.blockedLaunchpads ?? [], // e.g. ["letsbonk.fun", "pump.fun"]
+    allowedLaunchpads: u.allowedLaunchpads ?? [], // e.g. ["pump.fun"] - if set, only allow these
     minTokenAgeHours: u.minTokenAgeHours ?? null, // null = no minimum
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
+    maxPoolsPerCycle: u.maxPoolsPerCycle ?? 10, // max candidates to fetch per screening cycle
   },
 
   // ─── Position Management ────────────────
