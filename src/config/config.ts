@@ -146,7 +146,7 @@ export const config: Config = {
     minTokenAgeHours: u.minTokenAgeHours ?? null, // null = no minimum
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
-    maxPoolsPerCycle: u.maxPoolsPerCycle ?? 10, // max candidates to fetch per screening cycle
+    maxCandidatesEnriched: u.maxCandidatesEnriched ?? 10, // max pools to enrich with OKX + sent to recon per cycle
   },
 
   // ─── Position Management ────────────────
