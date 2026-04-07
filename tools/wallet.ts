@@ -1,13 +1,14 @@
 import {
   Connection,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-  VersionedTransaction,
   Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { log } from "../logger.js";
-import { config } from "../config.js";
+import { config, getRpcUrl } from "../src/config/config.js";
+import { log } from "../src/infrastructure/logger.js";
+import { registerTool } from "./registry.js";
 
 // Type imports from types/wallet.d.ts
 interface WalletBalance {
@@ -89,14 +90,41 @@ let _connection: Connection | null = null;
 let _wallet: Keypair | null = null;
 
 function getConnection(): Connection {
-  if (!_connection) _connection = new Connection(process.env.RPC_URL!, "confirmed");
+  if (!_connection) _connection = new Connection(getRpcUrl(), "confirmed");
   return _connection;
+}
+
+// Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
+const MIN_SECRET_KEY_LENGTH = 64; // 64 bytes = 88 base58 chars typically
+
+function validateWalletKey(key: string | undefined): string {
+  if (!key || key.trim() === "") {
+    throw new Error("WALLET_PRIVATE_KEY not set (env var is missing or empty)");
+  }
+  const trimmed = key.trim();
+  if (!BASE58_REGEX.test(trimmed)) {
+    throw new Error("WALLET_PRIVATE_KEY contains invalid characters (not valid base58)");
+  }
+  // Try decoding to validate length
+  try {
+    const decoded = bs58.decode(trimmed);
+    if (decoded.length < MIN_SECRET_KEY_LENGTH) {
+      throw new Error(
+        `WALLET_PRIVATE_KEY decoded to ${decoded.length} bytes, expected at least ${MIN_SECRET_KEY_LENGTH}`
+      );
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+  }
+  return trimmed;
 }
 
 function getWallet(): Keypair {
   if (!_wallet) {
-    if (!process.env.WALLET_PRIVATE_KEY) throw new Error("WALLET_PRIVATE_KEY not set");
-    _wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
+    const validKey = validateWalletKey(process.env.WALLET_PRIVATE_KEY);
+    _wallet = Keypair.fromSecretKey(bs58.decode(validKey));
   }
   return _wallet;
 }
@@ -104,7 +132,10 @@ function getWallet(): Keypair {
 const JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
 const JUPITER_ULTRA_API: string = "https://api.jup.ag/ultra/v1";
 const JUPITER_QUOTE_API: string = "https://api.jup.ag/swap/v1";
-const JUPITER_API_KEY: string = "b15d42e9-e0e4-4f90-a424-ae41ceeaa382";
+const JUPITER_API_KEY: string = process.env.JUPITER_API_KEY || "";
+if (!JUPITER_API_KEY) {
+  log("warn", "JUPITER_API_KEY not set in environment, Jupiter API calls may fail");
+}
 
 /**
  * Get current wallet balances: SOL, USDC, and all SPL tokens using Helius Wallet API.
@@ -357,3 +388,17 @@ async function swapViaQuoteApi({
   log("swap", `SUCCESS (fallback) tx: ${txHash}`);
   return { success: true, tx: txHash, input_mint, output_mint };
 }
+
+// Tool registrations
+registerTool({
+  name: "get_wallet_balance",
+  handler: getWalletBalances,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "swap_token",
+  handler: swapToken,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});

@@ -4,36 +4,67 @@
  * Docs: https://web3.okx.com/build/dev-docs/
  */
 import crypto from "crypto";
+import { config } from "../src/config/config.js";
 import type {
-  OKXRiskFlags,
-  OKXAdvancedResult,
-  OKXClusterResult,
-  OKXPriceResult,
-  OKXFullAnalysis,
-  OKXRiskAnalysis,
   OKXAdvancedInfo,
+  OKXAdvancedResult,
   OKXCluster,
+  OKXClusterResult,
+  OKXFullAnalysis,
   OKXPriceData,
-} from "../types/index.js";
+  OKXPriceResult,
+  OKXRiskAnalysis,
+  OKXRiskFlags,
+} from "../src/types/index.js";
 
 const BASE = "https://web3.okx.com";
 const CHAIN_SOLANA = "501";
 const PUBLIC_HEADERS = { "Ok-Access-Client-type": "agent-cli" };
-const OKX_API_KEY = process.env.OKX_API_KEY || process.env.OK_ACCESS_KEY || "";
-const OKX_SECRET_KEY = process.env.OKX_SECRET_KEY || process.env.OK_ACCESS_SECRET || "";
-const OKX_PASSPHRASE = process.env.OKX_PASSPHRASE || process.env.OK_ACCESS_PASSPHRASE || "";
-const OKX_PROJECT_ID = process.env.OKX_PROJECT_ID || process.env.OK_ACCESS_PROJECT || "";
+
+function getOKXCredentials() {
+  return {
+    OKX_API_KEY: process.env.OKX_API_KEY || process.env.OK_ACCESS_KEY || "",
+    OKX_SECRET_KEY: process.env.OKX_SECRET_KEY || process.env.OK_ACCESS_SECRET || "",
+    OKX_PASSPHRASE: process.env.OKX_PASSPHRASE || process.env.OK_ACCESS_PASSPHRASE || "",
+    OKX_PROJECT_ID: process.env.OKX_PROJECT_ID || process.env.OK_ACCESS_PROJECT || "",
+  };
+}
+
+// Common placeholder patterns to reject
+const PLACEHOLDER_PATTERNS = [
+  /enter your (passphrase|api key|secret|key) here/i,
+  /your?_(passphrase|api_key|secret|key)/i,
+  /^(xxx+|todo|placeholder|example|test|mock|fake|dummy|none|nil|null|undefined|empty|changeme|default)$/i,
+  /^\*+$/,
+  /^(YOUR|MY)_(API_KEY|SECRET|PASSPHRASE|KEY)/i,
+];
+
+function isPlaceholder(value: string): boolean {
+  return PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
 
 function hasAuth(): boolean {
+  const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE } = getOKXCredentials();
   return !!(
     OKX_API_KEY &&
     OKX_SECRET_KEY &&
     OKX_PASSPHRASE &&
-    !/enter your passphrase here/i.test(OKX_PASSPHRASE)
+    !isPlaceholder(OKX_API_KEY) &&
+    !isPlaceholder(OKX_SECRET_KEY) &&
+    !isPlaceholder(OKX_PASSPHRASE)
   );
 }
 
+/**
+ * Check whether OKX integration is enabled.
+ * Requires both the feature flag AND environment variables.
+ */
+export function isEnabled(): boolean {
+  return config.features.okx && hasAuth();
+}
+
 function buildAuthHeaders(method: string, path: string, body = ""): Record<string, string> {
+  const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE, OKX_PROJECT_ID } = getOKXCredentials();
   const timestamp = new Date().toISOString();
   const prehash = `${timestamp}${method.toUpperCase()}${path}${body}`;
   const sign = crypto.createHmac("sha256", OKX_SECRET_KEY).update(prehash).digest("base64");

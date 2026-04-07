@@ -1,24 +1,27 @@
-import { config } from "../config.js";
-import { isBlacklisted } from "../token-blacklist.js";
-import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
-import { log } from "../logger.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import type {
-  DiscoverPoolsInput,
-  DiscoverPoolsResult,
-  CondensedPool,
-  TopCandidatesInput,
-  TopCandidatesResult,
-  PoolDetailInput,
-  RawPoolData,
-} from "../types/screening.js";
-import type { Config } from "../types/config.js";
+import { config } from "../src/config/config.js";
+import { getBlockedDevs, isDevBlocked } from "../src/domain/dev-blocklist.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { isBlacklisted } from "../src/domain/token-blacklist.js";
+import { log } from "../src/infrastructure/logger.js";
+import type { Config } from "../src/types/config.js";
 import type {
   OKXAdvancedResult,
-  OKXPriceResult,
   OKXClusterResult,
+  OKXPriceResult,
   OKXRiskFlags,
-} from "../types/okx.js";
+} from "../src/types/okx.js";
+import type {
+  CondensedPool,
+  DiscoverPoolsInput,
+  DiscoverPoolsResult,
+  PoolDetailInput,
+  RawPoolData,
+  TopCandidatesInput,
+  TopCandidatesResult,
+} from "../src/types/screening.js";
+import { cache } from "../src/utils/cache.js";
+import { isEnabled as isOKXEnabled } from "./okx.js";
+import { registerTool } from "./registry.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -169,7 +172,7 @@ interface OKXEnrichmentResult {
 export async function getTopCandidates({
   limit = 10,
 }: TopCandidatesInput = {}): Promise<TopCandidatesResult> {
-  const { config } = (await import("../config.js")) as { config: Config };
+  const { config } = (await import("../src/config/config.js")) as { config: Config };
   const { pools } = await discoverPools({ page_size: 50 });
 
   // Exclude pools where the wallet already has an open position
@@ -197,7 +200,7 @@ export async function getTopCandidates({
     .slice(0, limit);
 
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
-  if (eligible.length > 0) {
+  if (eligible.length > 0 && isOKXEnabled()) {
     const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = (await import(
       "./okx.js"
     )) as OKXModule;
@@ -323,11 +326,21 @@ export async function getTopCandidates({
  * Get full raw details for a specific pool.
  * Fetches top 50 pools from discovery API and finds the matching address.
  * Returns the full unfiltered API object (all fields, not condensed).
+ * Cached for 2 minutes to reduce API load.
  */
 export async function getPoolDetail({
   pool_address,
   timeframe = "5m",
 }: PoolDetailInput): Promise<RawPoolData> {
+  const normalizedAddress = pool_address.trim().toLowerCase();
+  const cacheKey = `pool:detail:${normalizedAddress}:${timeframe || "default"}`;
+  const CACHE_TTL_MS = 120000; // 2 minutes
+
+  const cached = cache.get(cacheKey) as RawPoolData | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const url =
     `${POOL_DISCOVERY_BASE}/pools?` +
     `page_size=1` +
@@ -347,6 +360,7 @@ export async function getPoolDetail({
     throw new Error(`Pool ${pool_address} not found`);
   }
 
+  cache.set(cacheKey, pool, CACHE_TTL_MS);
   return pool;
 }
 
@@ -378,10 +392,10 @@ function condensePool(p: RawPoolData): CondensedPool {
     volume_window: round(p.volume),
     // API sometimes returns 0 for fee_active_tvl_ratio on short timeframes — compute from raw values as fallback
     fee_active_tvl_ratio:
-      p.fee_active_tvl_ratio > 0
-        ? fix(p.fee_active_tvl_ratio, 4)
-        : p.active_tvl > 0
-          ? fix((p.fee / p.active_tvl) * 100, 4)
+      (p.fee_active_tvl_ratio ?? 0) > 0
+        ? fix(p.fee_active_tvl_ratio ?? 0, 4)
+        : (p.active_tvl ?? 0) > 0
+          ? fix(((p.fee ?? 0) / (p.active_tvl ?? 1)) * 100, 4)
           : 0,
     volatility: fix(p.volatility, 2),
 
@@ -421,3 +435,22 @@ function round(n: number | null | undefined): number | null {
 function fix(n: number | null | undefined, decimals: number): number | null {
   return n != null ? Number(n.toFixed(decimals)) : null;
 }
+
+// Tool registrations
+registerTool({
+  name: "discover_pools",
+  handler: discoverPools,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_top_candidates",
+  handler: getTopCandidates,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_pool_detail",
+  handler: getPoolDetail,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});

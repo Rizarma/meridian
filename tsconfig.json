@@ -5,7 +5,6 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "outDir": "./dist",
-    "rootDir": ".",
     "strict": false,
     "noImplicitAny": false,
     "allowJs": true,
@@ -19,14 +18,11 @@
     "noEmit": false
   },
   "include": [
-    "*.js",
-    "*.ts",
-    "*.d.ts",
-    "types/**/*.d.ts",
-    "tools/**/*.js",
+    "src/**/*.ts",
+    "src/**/*.d.ts",
     "tools/**/*.ts",
-    "scripts/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "exclude": [
     "node_modules",

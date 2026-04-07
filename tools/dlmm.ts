@@ -7,39 +7,82 @@ import {
 } from "@solana/web3.js";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { config } from "../config.js";
-import { log } from "../logger.js";
+import { config, getRpcUrl } from "../src/config/config.js";
+import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { log } from "../src/infrastructure/logger.js";
 import {
-  trackPosition,
-  markOutOfRange,
-  markInRange,
-  recordClaim,
-  recordClose,
   getTrackedPosition,
+  markInRange,
+  markOutOfRange,
   minutesOutOfRange,
   syncOpenPositions,
-} from "../state.js";
-import { recordPerformance } from "../lessons.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint } from "./wallet.js";
+} from "../src/infrastructure/state.js";
 import type {
-  DeployParams,
-  DeployResult,
-  PositionPnL,
-  RawPnLData,
-  EnrichedPosition,
-  PositionsResult,
-  CloseParams,
-  CloseResult,
+  ActiveBinParams,
+  ActiveBinResult,
   ClaimParams,
   ClaimResult,
+  CloseParams,
+  CloseResult,
+  DeployParams,
+  DeployResult,
+  EnrichedPosition,
+  PositionPnL,
+  PositionsResult,
+  RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
   WalletPositionsParams,
   WalletPositionsResult,
-  ActiveBinParams,
-  ActiveBinResult,
-} from "../types/dlmm.js";
+} from "../src/types/dlmm.js";
+import { registerTool } from "./registry.js";
+import { normalizeMint } from "./wallet.js";
+
+// Helper function for fetch with timeout (30 seconds)
+async function fetchWithTimeout(url: string, timeoutMs = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Simple LRU cache implementation
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private maxSize: number) {}
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      // Remove oldest (first item)
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+  }
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+  delete(key: K): boolean {
+    return this.cache.delete(key);
+  }
+  clear(): void {
+    this.cache.clear();
+  }
+}
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
@@ -65,36 +108,70 @@ let _wallet: Keypair | null = null;
 
 function getConnection(): Connection {
   if (!_connection) {
-    _connection = new Connection(process.env.RPC_URL!, "confirmed");
+    _connection = new Connection(getRpcUrl(), "confirmed");
   }
   return _connection;
 }
 
+// Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
+const MIN_SECRET_KEY_LENGTH = 64; // 64 bytes = 88 base58 chars typically
+
+function validateWalletKey(key: string | undefined): string {
+  if (!key || key.trim() === "") {
+    throw new Error("WALLET_PRIVATE_KEY not set (env var is missing or empty)");
+  }
+  const trimmed = key.trim();
+  if (!BASE58_REGEX.test(trimmed)) {
+    throw new Error("WALLET_PRIVATE_KEY contains invalid characters (not valid base58)");
+  }
+  // Try decoding to validate length
+  try {
+    const decoded = bs58.decode(trimmed);
+    if (decoded.length < MIN_SECRET_KEY_LENGTH) {
+      throw new Error(
+        `WALLET_PRIVATE_KEY decoded to ${decoded.length} bytes, expected at least ${MIN_SECRET_KEY_LENGTH}`
+      );
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+  }
+  return trimmed;
+}
+
 function getWallet(): Keypair {
   if (!_wallet) {
-    if (!process.env.WALLET_PRIVATE_KEY) {
-      throw new Error("WALLET_PRIVATE_KEY not set");
+    const validKey = validateWalletKey(process.env.WALLET_PRIVATE_KEY);
+    _wallet = Keypair.fromSecretKey(bs58.decode(validKey));
+    // Only log in non-TTY mode to avoid disrupting REPL formatted output
+    if (!process.stdin.isTTY) {
+      log("init", `Wallet: ${_wallet.publicKey.toString()}`);
     }
-    _wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-    log("init", `Wallet: ${_wallet.publicKey.toString()}`);
   }
   return _wallet;
 }
 
 // ─── Pool Cache ────────────────────────────────────────────────
-const poolCache = new Map<string, any>();
+const poolCache = new LRUCache<string, unknown>(100);
+let _poolCacheInterval: NodeJS.Timeout | null = null;
+
+function startPoolCacheInterval() {
+  if (!_poolCacheInterval) {
+    _poolCacheInterval = setInterval(() => poolCache.clear(), 5 * 60 * 1000);
+  }
+}
 
 async function getPool(poolAddress: string): Promise<any> {
   const key = poolAddress.toString();
   if (!poolCache.has(key)) {
+    startPoolCacheInterval(); // lazy start - only when actually needed
     const { DLMM } = await getDLMM();
     const pool = await DLMM.create(getConnection(), new PublicKey(poolAddress));
     poolCache.set(key, pool);
   }
-  return poolCache.get(key);
+  return poolCache.get(key) as unknown;
 }
-
-setInterval(() => poolCache.clear(), 5 * 60 * 1000);
 
 // ─── Get Active Bin ────────────────────────────────────────────
 export async function getActiveBin({ pool_address }: ActiveBinParams): Promise<ActiveBinResult> {
@@ -275,26 +352,6 @@ export async function deployPosition({
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
 
     _positionsCacheAt = 0;
-    trackPosition({
-      position: newPosition.publicKey.toString(),
-      pool: pool_address,
-      pool_name,
-      strategy: activeStrategy,
-      bin_range: {
-        min: minBinId,
-        max: maxBinId,
-        bins_below: activeBinsBelow,
-        bins_above: activeBinsAbove,
-      },
-      bin_step,
-      volatility,
-      fee_tvl_ratio,
-      organic_score,
-      amount_sol: finalAmountY,
-      amount_x: finalAmountX,
-      active_bin: activeBin.binId,
-      initial_value_usd,
-    });
 
     const actualBinStep = pool.lbPair.binStep;
     const activePrice = parseFloat(activeBin.price);
@@ -321,6 +378,13 @@ export async function deployPosition({
       amount_x: finalAmountX,
       amount_y: finalAmountY,
       txs: txHashes,
+      // Additional fields for persistence (trackPosition)
+      volatility,
+      fee_tvl_ratio,
+      organic_score,
+      initial_value_usd,
+      active_bin: activeBin.binId,
+      amount_sol: finalAmountY,
     };
   } catch (error: any) {
     log("deploy_error", error.message);
@@ -341,7 +405,7 @@ async function fetchDlmmPnlForPool(
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
   try {
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log(
@@ -463,13 +527,13 @@ export async function getMyPositions({
       // Single portfolio API call — returns all positions with full PnL data
       if (!silent) log("positions", "Fetching portfolio via Meteora portfolio API...");
       const portfolioUrl = `https://dlmm.datapi.meteora.ag/portfolio/open?user=${walletAddress}`;
-      const res = await fetch(portfolioUrl);
+      const res = await fetchWithTimeout(portfolioUrl);
       if (!res.ok)
         throw new Error(`Portfolio API ${res.status}: ${await res.text().catch(() => "")}`);
       const portfolio = (await res.json()) as { pools?: any[] };
 
       const pools = portfolio.pools || [];
-      log("positions", `Found ${pools.length} pool(s) with open positions`);
+      if (!silent) log("positions", `Found ${pools.length} pool(s) with open positions`);
 
       // Fetch bin data (lowerBinId, upperBinId, poolActiveBinId) for all pools in parallel
       // Needed for rules 3 & 4 (active_bin vs upper_bin comparison)
@@ -507,14 +571,12 @@ export async function getMyPositions({
             : null;
           const reportedPnlPct = binData
             ? Number(
-                config.management.solMode
+                config.features.solMode
                   ? (binData.pnlSolPctChange ?? 0)
                   : (binData.pnlPctChange ?? 0)
               )
             : null;
-          const derivedPnlPct = binData
-            ? deriveOpenPnlPct(binData, config.management.solMode)
-            : null;
+          const derivedPnlPct = binData ? deriveOpenPnlPct(binData, config.features.solMode) : null;
           const pnlPctDiff =
             reportedPnlPct != null && derivedPnlPct != null
               ? Math.abs(reportedPnlPct - derivedPnlPct)
@@ -539,7 +601,7 @@ export async function getMyPositions({
             in_range: binData ? !binData.isOutOfRange : !isOOR,
             unclaimed_fees_usd: binData
               ? Math.round(
-                  (config.management.solMode
+                  (config.features.solMode
                     ? Number(binData.unrealizedPnl?.unclaimedFeeTokenX?.amountSol ?? 0) +
                       Number(binData.unrealizedPnl?.unclaimedFeeTokenY?.amountSol ?? 0)
                     : Number(binData.unrealizedPnl?.unclaimedFeeTokenX?.usd ?? 0) +
@@ -548,7 +610,7 @@ export async function getMyPositions({
               : null,
             total_value_usd: binData
               ? Math.round(
-                  (config.management.solMode
+                  (config.features.solMode
                     ? Number(binData.unrealizedPnl?.balancesSol ?? 0)
                     : Number(binData.unrealizedPnl?.balances ?? 0)) * 10000
                 ) / 10000
@@ -560,7 +622,7 @@ export async function getMyPositions({
             collected_fees_usd: binData
               ? Math.round(
                   Number(
-                    config.management.solMode
+                    config.features.solMode
                       ? (binData.allTimeFees?.total?.sol ?? 0)
                       : (binData.allTimeFees?.total?.usd ?? 0)
                   ) * 10000
@@ -571,9 +633,8 @@ export async function getMyPositions({
               : null,
             pnl_usd: binData
               ? Math.round(
-                  Number(
-                    config.management.solMode ? (binData.pnlSol ?? 0) : (binData.pnlUsd ?? 0)
-                  ) * 10000
+                  Number(config.features.solMode ? (binData.pnlSol ?? 0) : (binData.pnlUsd ?? 0)) *
+                    10000
                 ) / 10000
               : null,
             pnl_true_usd: binData ? Math.round(Number(binData.pnlUsd ?? 0) * 10000) / 10000 : null,
@@ -687,7 +748,7 @@ export async function searchPools({
   limit = 10,
 }: SearchPoolsParams): Promise<SearchPoolsResult> {
   const url = `https://dlmm.datapi.meteora.ag/pools?query=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Pool search API error: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as any[] | { data?: any[] };
   const pools = (Array.isArray(data) ? data : (data as { data?: any[] }).data || []).slice(
@@ -757,13 +818,14 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
     }
     log("claim", `SUCCESS txs: ${txHashes.join(", ")}`);
     _positionsCacheAt = 0; // invalidate cache after claim
-    recordClaim(position_address, 0); // Fees are tracked separately via API
 
     return {
       success: true,
       position: position_address,
       txs: txHashes,
       base_mint: pool.lbPair.tokenXMint.toString(),
+      // Flag for middleware to record claim
+      _recordClaim: true,
     };
   } catch (error: any) {
     log("claim_error", error.message);
@@ -907,8 +969,6 @@ export async function closePosition({
       };
     }
 
-    recordClose(position_address, reason || "agent decision");
-
     // Record performance for learning
     if (tracked) {
       const deployedAt = new Date(tracked.deployed_at).getTime();
@@ -929,7 +989,7 @@ export async function closePosition({
       let feesUsd = tracked.total_fees_claimed_usd || 0;
       try {
         const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
-        const res = await fetch(closedUrl);
+        const res = await fetchWithTimeout(closedUrl);
         if (res.ok) {
           const data = (await res.json()) as { positions?: any[] };
           const posEntry = (data.positions || []).find(
@@ -976,27 +1036,6 @@ export async function closePosition({
         }
       }
 
-      await recordPerformance({
-        position: position_address,
-        pool: poolAddress,
-        pool_name: tracked.pool_name || poolAddress.slice(0, 8),
-        strategy: tracked.strategy,
-        bin_range: tracked.bin_range,
-        bin_step: tracked.bin_step || null,
-        volatility: tracked.volatility || null,
-        fee_tvl_ratio: tracked.fee_tvl_ratio || null,
-        organic_score: tracked.organic_score || null,
-        amount_sol: tracked.amount_sol,
-        fees_earned_usd: feesUsd,
-        final_value_usd: finalValueUsd,
-        initial_value_usd: initialUsd,
-        minutes_in_range: minutesHeld - minutesOOR,
-        minutes_held: minutesHeld,
-        close_reason: reason || "agent decision",
-        base_mint: pool.lbPair.tokenXMint.toString(),
-        deployed_at: tracked.deployed_at,
-      });
-
       return {
         success: true,
         position: position_address,
@@ -1008,6 +1047,30 @@ export async function closePosition({
         pnl_usd: pnlUsd,
         pnl_pct: pnlPct,
         base_mint: pool.lbPair.tokenXMint.toString(),
+        // Additional fields for persistence (recordClose + recordPerformance)
+        _recordClose: true,
+        close_reason: reason || "agent decision",
+        _recordPerformance: true,
+        _perf_data: {
+          position: position_address,
+          pool: poolAddress,
+          pool_name: tracked.pool_name || poolAddress.slice(0, 8),
+          strategy: tracked.strategy,
+          bin_range: tracked.bin_range,
+          bin_step: tracked.bin_step || null,
+          volatility: tracked.volatility || null,
+          fee_tvl_ratio: tracked.fee_tvl_ratio || null,
+          organic_score: tracked.organic_score || null,
+          amount_sol: tracked.amount_sol,
+          fees_earned_usd: feesUsd,
+          final_value_usd: finalValueUsd,
+          initial_value_usd: initialUsd,
+          minutes_in_range: minutesHeld - minutesOOR,
+          minutes_held: minutesHeld,
+          close_reason: reason || "agent decision",
+          base_mint: pool.lbPair.tokenXMint.toString(),
+          deployed_at: tracked.deployed_at,
+        },
       };
     }
 
@@ -1020,6 +1083,9 @@ export async function closePosition({
       close_txs: closeTxHashes,
       txs: txHashes,
       base_mint: pool.lbPair.tokenXMint.toString(),
+      // Flag for middleware to record close even without tracked data
+      _recordClose: true,
+      close_reason: reason || "agent decision",
     };
   } catch (error: any) {
     log("close_error", error.message);
@@ -1055,3 +1121,55 @@ async function lookupPoolForPosition(
 
   throw new Error(`Position ${position_address} not found in open positions`);
 }
+
+// Tool registrations
+registerTool({
+  name: "get_active_bin",
+  handler: getActiveBin,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_position_pnl",
+  handler: getPositionPnl,
+  roles: ["MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_my_positions",
+  handler: getMyPositions,
+  roles: ["SCREENER", "MANAGER", "GENERAL"],
+});
+
+registerTool({
+  name: "get_wallet_positions",
+  handler: getWalletPositions,
+  roles: ["GENERAL"], // Research only — not for agent's own positions
+});
+
+registerTool({
+  name: "search_pools",
+  handler: searchPools,
+  roles: ["SCREENER", "GENERAL"],
+});
+
+registerTool({
+  name: "deploy_position",
+  handler: deployPosition,
+  roles: ["SCREENER", "GENERAL"],
+  isWriteTool: true,
+});
+
+registerTool({
+  name: "close_position",
+  handler: closePosition,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});
+
+registerTool({
+  name: "claim_fees",
+  handler: claimFees,
+  roles: ["MANAGER", "GENERAL"],
+  isWriteTool: true,
+});
