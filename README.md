@@ -6,14 +6,44 @@ Meridian runs continuous screening and management cycles, deploying capital into
 
 ---
 
-## What it does
+## Features
 
-- **Screens pools** — scans Meteora DLMM pools against configurable thresholds (fee/TVL ratio, organic score, holder count, mcap, bin step) and surfaces high-quality opportunities
-- **Manages positions** — monitors, claims fees, and closes LP positions autonomously; decides to STAY, CLOSE, or REDEPLOY based on live data
-- **Learns from performance** — studies top LPers in target pools, saves structured lessons, and evolves screening thresholds based on closed position history
-- **Discord signals** — optional Discord listener watches LP Army channels for Solana token calls and queues them for screening
-- **Telegram chat** — full agent chat via Telegram, plus cycle reports and OOR alerts
-- **Claude Code integration** — run AI-powered screening and management directly from your terminal using Claude Code slash commands
+### Autonomous trading
+- **Pool screening** — scans Meteora DLMM pools against configurable thresholds (fee/TVL ratio, organic score, holder count, mcap, bin step, token age) and surfaces the best candidates
+- **Position management** — monitors PnL, claims fees, and closes positions autonomously; decides STAY / CLOSE / REDEPLOY from live data every cycle
+- **Trailing take profit** — arms a trailing stop when PnL crosses a trigger, then closes the position if it drops from its peak
+- **Out-of-range handling** — grace periods, bin distance thresholds, and per-pool cooldowns after repeated OOR events
+- **Stop loss & emergency exits** — hard exits on PnL drawdown or sudden token price collapse
+- **Auto-swap on close** — base tokens are swapped back to SOL via Jupiter after closing
+
+### Intelligence & learning
+- **ReAct agent loop** — LLM reasons over live data, calls tools, iterates. Powered by OpenRouter (any compatible model works)
+- **Lessons engine** — records performance of every closed position, derives structured lessons, and injects them into future agent cycles
+- **Threshold evolution** — analyzes winners vs losers and auto-tunes screening thresholds in `user-config.json`
+- **Darwinian signal weighting** — tracks which screening signals actually predict winners and reweights them over time
+- **Top-LPer study** — analyzes on-chain behavior of the best performers in any pool (hold duration, entry/exit timing, win rate)
+- **Pool memory** — per-pool deploy history, snapshots, and outcomes
+
+### Risk & safety
+- **Multi-source risk screening** — Jupiter token audit, bundle/sniper/suspicious-tx detection via OKX OnchainOS, bot-holder detection
+- **Token blacklist + deployer blocklist** — permanently ban specific mints or ban every token from a bad deployer wallet
+- **Launchpad filtering** — skip pools launched from blocked platforms
+- **Safety guards on deploy** — duplicate pool/base-token detection, position cap enforcement, SOL reserve for gas, bin-step bounds
+- **Dry-run mode** — exercise the full pipeline with zero on-chain transactions
+
+### Interfaces
+- **Interactive REPL** — live cycle countdown, slash commands for status/candidates/learn/evolve, free-form chat
+- **Telegram bot** — full agent chat, cycle reports, deploy/close/OOR notifications, `/positions` `/close` `/set` commands
+- **Claude Code integration** — `/screen`, `/manage`, `/candidates`, `/study-pool`, `/pool-compare` and more directly in your terminal, plus `screener` and `manager` sub-agents
+- **Direct CLI** — the `meridian` binary exposes every tool as a subcommand with JSON output, ideal for scripting and debugging
+- **Daily briefing** — optional HTML summary delivered via Telegram
+
+### Operations
+- **Auto-compounding position sizing** — deploy size scales with wallet balance (`positionSizePct` of deployable)
+- **SOL mode** — display all values in SOL instead of USD
+- **Daily-rotating logs** — with a separate action audit trail
+- **Local LLMs** — point `LLM_BASE_URL` at LM Studio or any OpenAI-compatible endpoint
+- **Hive Mind (optional)** — share lessons and pool outcomes with other Meridian agents, receive consensus signals
 
 ---
 
@@ -53,7 +83,7 @@ Agents are powered via **OpenRouter** and can be swapped for any compatible mode
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/yunus-0x/meridian
+git clone https://github.com/Rizarma/meridian
 cd meridian
 pnpm install
 ```
@@ -87,6 +117,8 @@ Copy config and edit as needed:
 ```bash
 cp user-config.example.json user-config.json
 ```
+
+**Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
 
 See [Config reference](#config-reference) below.
 
@@ -192,7 +224,7 @@ Or run without installing:
 
 ```bash
 pnpm build
-node dist/cli.js <command> [flags]
+node dist/src/cli/cli.js <command> [flags]
 ```
 
 **Positions & PnL**
@@ -326,11 +358,19 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `maxMcap` | `10000000` | Maximum market cap (USD) |
 | `minBinStep` | `80` | Minimum bin step |
 | `maxBinStep` | `125` | Maximum bin step |
+| `strategy` | `bid_ask` | Deploy shape — `bid_ask`, `spot`, or `curve` |
+| `binsBelow` | `69` | Number of bins below active to deploy liquidity into |
+| `preset` | `custom` | Named preset label (informational) |
 | `timeframe` | `5m` | Candle timeframe for screening |
 | `category` | `trending` | Pool category filter |
 | `minTokenFeesSol` | `30` | Minimum all-time fees in SOL |
-| `maxBundlersPct` | `30` | Maximum bundler % in top 100 holders |
+| `maxBundlePct` | `30` | Maximum bundler % in top 100 holders |
+| `maxBotHoldersPct` | `30` | Maximum bot-holder % (Jupiter audit) |
 | `maxTop10Pct` | `60` | Maximum top-10 holder concentration |
+| `minFeePerTvl24h` | `7` | Minimum 24h fee/TVL ratio |
+| `minTokenAgeHours` | `null` | Minimum token age in hours (null = disabled) |
+| `maxTokenAgeHours` | `null` | Maximum token age in hours (null = disabled) |
+| `athFilterPct` | `null` | Skip pools whose price is within this % of ATH |
 | `blockedLaunchpads` | `[]` | Launchpad names to never deploy into |
 
 ### Management
@@ -340,10 +380,25 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `deployAmountSol` | `0.5` | Base SOL per new position |
 | `positionSizePct` | `0.35` | Fraction of deployable balance to use |
 | `maxDeployAmount` | `50` | Maximum SOL cap per position |
+| `maxPositions` | `3` | Maximum concurrent open positions |
 | `gasReserve` | `0.2` | Minimum SOL to keep for gas |
 | `minSolToOpen` | `0.55` | Minimum wallet SOL before opening |
 | `outOfRangeWaitMinutes` | `30` | Minutes OOR before acting |
-| `stopLossPct` | `-15` | Close position if price drops by this % |
+| `outOfRangeBinsToClose` | `10` | Distance (bins) past range before close is considered |
+| `oorCooldownTriggerCount` | `3` | OOR closes on a pool before cooldown kicks in |
+| `oorCooldownHours` | `12` | Hours to skip a pool after the cooldown trigger |
+| `minVolumeToRebalance` | `1000` | Minimum 24h volume required to rebalance |
+| `minAgeBeforeYieldCheck` | `60` | Minutes after open before yield checks apply |
+| `stopLossPct` | `-50` | Close position if PnL drops by this % |
+| `emergencyPriceDropPct` | `-50` | Emergency exit if token price drops this % |
+| `takeProfitFeePct` | `5` | Take profit when accrued fees hit this % of position |
+| `minClaimAmount` | `5` | Minimum USD value of fees before claiming |
+| `autoSwapAfterClaim` | `false` | Swap claimed base token to SOL automatically |
+| `trailingTakeProfit` | `true` | Enable trailing take-profit |
+| `trailingTriggerPct` | `3` | PnL % at which trailing TP arms |
+| `trailingDropPct` | `1.5` | Drop from peak that triggers a trailing close |
+| `pnlSanityMaxDiffPct` | `5` | Max allowed divergence between PnL sources |
+| `solMode` | `false` | Display values in SOL instead of USD |
 
 ### Schedule
 
@@ -351,16 +406,33 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 |---|---|---|
 | `managementIntervalMin` | `10` | Management cycle frequency (minutes) |
 | `screeningIntervalMin` | `30` | Screening cycle frequency (minutes) |
+| `healthCheckIntervalMin` | `60` | Health check frequency (minutes) |
 
 ### Models
 
 | Field | Default | Description |
 |---|---|---|
-| `managementModel` | `openai/gpt-oss-20b:free` | LLM for management cycles |
-| `screeningModel` | `openai/gpt-oss-20b:free` | LLM for screening cycles |
-| `generalModel` | `openai/gpt-oss-20b:free` | LLM for REPL / chat |
+| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
+| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
+| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `temperature` | `0.373` | Sampling temperature for agent calls |
+| `maxTokens` | `4096` | Max tokens per LLM response |
+| `maxSteps` | `20` | Max tool-call iterations per ReAct loop |
 
-> Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-5`
+> Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-6`
+
+### Darwinian signal weights
+
+| Field | Default | Description |
+|---|---|---|
+| `darwinEnabled` | `true` | Enable signal-weight evolution |
+| `darwinWindowDays` | `60` | Lookback window for performance data |
+| `darwinMinSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwinRecalcEvery` | `5` | Recalculate weights every N closed positions |
+| `darwinBoost` | `1.05` | Multiplier applied to winning signals |
+| `darwinDecay` | `0.95` | Multiplier applied to losing signals |
+| `darwinFloor` | `0.3` | Minimum allowed weight |
+| `darwinCeiling` | `2.5` | Maximum allowed weight |
 
 ---
 
@@ -383,6 +455,30 @@ meridian evolve
 ```
 
 This analyzes closed position performance (win rate, avg PnL, fee yields) and automatically adjusts screening thresholds in `user-config.json`. Changes take effect immediately.
+
+### Darwinian signal weights
+
+Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under the `darwin*` keys.
+
+---
+
+## Other features
+
+### Trailing take profit
+
+When PnL reaches `trailingTriggerPct` the position arms a trailing stop. The agent then tracks peak PnL and closes if it drops by `trailingDropPct` from that peak. Polled every 30 seconds between management cycles. Toggle with `trailingTakeProfit`.
+
+### SOL mode
+
+Set `solMode: true` to display positions, balances, and PnL in SOL terms instead of USD. Trading thresholds still use USD internally — this is display-only.
+
+### OKX OnchainOS integration
+
+If OKX API credentials are present, screening pulls advanced risk metrics per token: overall risk level, bundle %, sniper %, suspicious tx %, new-wallet %, and rugpull/wash flags. Falls back to Jupiter-only data if unavailable.
+
+### Deployer blocklist
+
+Separate from the token blacklist — bans specific deployer wallets across all of their tokens. Stored in `deployer-blacklist.json`.
 
 ---
 
@@ -432,51 +528,68 @@ Any OpenAI-compatible endpoint works.
 ## Architecture
 
 ```
-index.ts              Main entry: REPL + cron orchestration + Telegram bot polling
-agent.ts              ReAct loop: LLM → tool call → repeat
-config.ts             Runtime config from user-config.json + .env
-prompt.ts             System prompt builder (SCREENER / MANAGER / GENERAL roles)
-state.ts              Position registry (state.json)
-lessons.ts            Learning engine: records performance, derives lessons, evolves thresholds
-pool-memory.ts        Per-pool deploy history + snapshots
-strategy-library.ts   Saved LP strategies
-telegram.ts           Telegram bot: polling + notifications
-hive-mind.ts          Optional collective intelligence server sync
-smart-wallets.ts      KOL/alpha wallet tracker
-token-blacklist.ts    Permanent token blacklist
-cli.ts                Direct CLI — every tool as a subcommand with JSON output
-setup.ts              Interactive setup wizard
+src/
+  index.ts              Process entry — wires bootstrap, orchestrator, REPL
+  bootstrap.ts          Loads config, env, state, telegram, logger
+  orchestrator.ts       Cron scheduler for screening/management/health cycles
+  repl.ts               Interactive REPL with live cycle countdown
+  agent/
+    agent.ts            ReAct loop: LLM → tool call → repeat
+    prompt.ts           System prompt builder (SCREENER / MANAGER / GENERAL)
+    tool-sets.ts        Per-role tool whitelists
+    intent.ts           Intent classification for free-form chat
+  cycles/
+    screening.ts        Screening cycle: candidates → research → deploy
+    management.ts       Management cycle: PnL, OOR, claim, close
+  domain/
+    lessons.ts          Performance recording + lesson derivation
+    threshold-evolution.ts  Auto-tunes screening thresholds
+    exit-rules.ts       Stop-loss / trailing TP / OOR exit logic
+    signal-weights.ts   Darwinian signal weighting
+    signal-tracker.ts   Records signal outcomes per position
+    pool-memory.ts      Per-pool deploy history + snapshots
+    strategy-library.ts Saved LP strategies
+    smart-wallets.ts    KOL / alpha wallet tracker
+    token-blacklist.ts  Permanent token blacklist
+    dev-blocklist.ts    Deployer wallet blocklist
+  infrastructure/
+    telegram.ts             Bot polling + notifications
+    briefing.ts             Daily HTML briefing
+    logger.ts               Daily-rotating logs + audit trail
+    state.ts                Position registry (state.json)
+    confirmation-timers.ts  Peak / trailing-TP confirmation timer registry
+    hive-mind.ts            Optional collective intelligence sync
+  config/
+    config.ts           Runtime config from user-config.json + .env
+    constants.ts        Shared constants
+    paths.ts            File path resolution
+  cli/
+    cli.ts              Direct CLI — every tool as a JSON subcommand
+    setup.ts            Interactive setup wizard
+  utils/
+    cache.ts            TTL cache with periodic cleanup
+  types/                TypeScript type definitions
 
-tools/
-  definitions.ts      Tool schemas (OpenAI format)
-  executor.ts         Tool dispatch + safety checks
-  dlmm.ts             Meteora DLMM SDK wrapper
-  screening.ts        Pool discovery
-  wallet.ts           SOL/token balances + Jupiter swap
-  token.ts            Token info, holders, narrative
-  study.ts            Top LPer study via LPAgent API
-  okx.ts              OKX OnchainOS integration
-
-types/
-  *.d.ts              TypeScript type definitions
-
-discord-listener/
-  index.ts            Selfbot Discord listener
-  pre-checks.ts       Signal pre-check pipeline
+tools/                   (sibling of src/, loaded by the executor)
+  registry.ts           Tool registry
+  definitions/          Tool schemas (OpenAI format)
+  executor.ts           Tool dispatch + safety checks
+  middleware.ts         Pre/post hooks (validation, audit)
+  admin.ts              Admin tools (config, lessons, blocklists)
+  discover.ts           Tool discovery helpers
+  dlmm.ts               Meteora DLMM SDK wrapper
+  screening.ts          Pool discovery
+  wallet.ts             SOL/token balances + Jupiter swap
+  token.ts              Token info, holders, narrative
+  study.ts              Top LPer study via LPAgent API
+  okx.ts                OKX OnchainOS integration
 
 .claude/
   agents/
-    screener.md       Claude Code screener sub-agent
-    manager.md        Claude Code manager sub-agent
-  commands/
-    screen.md         /screen slash command
-    manage.md         /manage slash command
-    balance.md        /balance slash command
-    positions.md      /positions slash command
-    candidates.md   /candidates slash command
-    study-pool.md   /study-pool slash command
-    pool-ohlcv.md   /pool-ohlcv slash command
-    pool-compare.md /pool-compare slash command
+    screener.md         Claude Code screener sub-agent
+    manager.md          Claude Code manager sub-agent
+  commands/             /screen, /manage, /balance, /positions, /candidates,
+                        /study-pool, /pool-ohlcv, /pool-compare
 ```
 
 ---

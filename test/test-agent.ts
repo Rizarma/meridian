@@ -4,8 +4,8 @@
  */
 
 import "dotenv/config";
-import { agentLoop } from "../agent.js";
-import type { AgentResult } from "../types/agent.js";
+import { agentLoop } from "../src/agent/agent.js";
+import type { AgentResult } from "../src/types/agent.js";
 
 async function main(): Promise<void> {
   console.log("=== Testing Agent Loop (DRY RUN) ===\n");

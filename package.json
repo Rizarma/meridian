@@ -3,15 +3,20 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Autonomous DLMM LP agent for Meteora on Solana",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "bin": {
-    "meridian": "dist/cli.js"
+    "meridian": "dist/src/cli/cli.js"
   },
   "scripts": {
-    "setup": "pnpm run build && node dist/setup.js",
+    "setup": "pnpm run build && node dist/src/cli/setup.js",
     "build": "tsc && node build.js",
-    "start": "pnpm run build && node dist/index.js",
-    "dev": "pnpm run build && cross-env DRY_RUN=true node dist/index.js",
+    "start": "pnpm run build && node dist/src/index.js",
+    "dev": "pnpm run build && cross-env DRY_RUN=true node dist/src/index.js",
+    "test:phase0:exit": "pnpm run build && node dist/test/phase-0-exit-rules.test.js",
+    "test:phase0:trailing": "pnpm run build && node dist/test/phase-0-trailing-tp.test.js",
+    "test:phase0:config": "pnpm run build && node dist/test/phase-0-config-mutation.test.js",
+    "test:phase0:safety": "pnpm run build && node dist/test/phase-0-tool-safety.test.js",
+    "test:phase0:all": "pnpm run build && node dist/test/phase-0-exit-rules.test.js && node dist/test/phase-0-trailing-tp.test.js && node dist/test/phase-0-config-mutation.test.js && node dist/test/phase-0-tool-safety.test.js",
     "test:screen": "pnpm run build && node dist/test/test-screening.js",
     "test:agent": "pnpm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
     "prepare": "pnpm run build",
@@ -32,8 +37,11 @@
     "@solana/web3.js": "^1.95.0",
     "bn.js": "^5.2.1",
     "bs58": "^5.0.0",
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
     "dotenv": "^17.3.1",
     "jsonrepair": "^3.13.3",
+    "log-update": "^6.0.0",
     "node-cron": "^3.0.3",
     "openai": "^4.73.0"
   },
