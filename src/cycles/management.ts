@@ -164,7 +164,13 @@ export async function runManagementCycle(
       if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
         schedulePeakConfirmation(p.position);
       }
-      const exit = updatePnlAndCheckExits(p.position, p, config.management);
+      const trackedP = getTrackedPosition(p.position);
+      const exit = updatePnlAndCheckExits(
+        p.position,
+        p,
+        config.management,
+        trackedP?.strategy_config
+      );
       if (exit) {
         // Trailing TP needs confirmation before closing
         if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
