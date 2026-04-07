@@ -151,7 +151,10 @@ export async function runScreeningCycle(
       : `No active strategy — use default bid_ask, bins_above: 0, SOL only.`;
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
-    const topCandidates = await getTopCandidates({ limit: 10 }).catch(() => null);
+    const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => {
+      log("screening_warn", `Failed to fetch top candidates: ${(e as Error).message}`);
+      return null;
+    });
     const candidates = ((
       topCandidates as { candidates?: CondensedPool[]; pools?: CondensedPool[] } | null
     )?.candidates ||
