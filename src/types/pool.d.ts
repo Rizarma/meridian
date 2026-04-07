@@ -68,7 +68,7 @@ export interface PoolSnapshot {
   fee_apr: number;
 }
 
-export interface TopCandidatesResult {
+export interface PoolTopCandidatesResult {
   candidates: PoolCandidate[];
   total_eligible: number;
   total_screened: number;

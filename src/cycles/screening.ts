@@ -16,6 +16,7 @@ import type {
   CondensedPool,
   CycleOptions,
   EnrichedPosition,
+  FilteredExample,
   LiveMessageHandler,
   ReconCandidate,
 } from "../types/index.js";
@@ -151,15 +152,21 @@ export async function runScreeningCycle(
       : `No active strategy — use default bid_ask, bins_above: 0, SOL only.`;
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
-    const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => {
+    const topCandidatesResult = await getTopCandidates({
+      limit: config.screening.maxPoolsPerCycle,
+    }).catch((e) => {
       log("screening_warn", `Failed to fetch top candidates: ${(e as Error).message}`);
       return null;
     });
-    const candidates = ((
-      topCandidates as { candidates?: CondensedPool[]; pools?: CondensedPool[] } | null
-    )?.candidates ||
-      (topCandidates as { pools?: CondensedPool[] } | null)?.pools ||
-      []) as CondensedPool[];
+    const { candidates: initialCandidates, filtered_examples: earlyFilteredExamples } =
+      topCandidatesResult ?? {
+        candidates: [],
+        filtered_examples: [],
+      };
+    const candidates = initialCandidates ?? [];
+
+    // Array for late-stage filtered examples
+    const lateFilteredExamples: FilteredExample[] = [];
 
     const allCandidates: ReconCandidate[] = [];
     for (const pool of candidates) {
@@ -188,10 +195,31 @@ export async function runScreeningCycle(
         }>;
       } | null;
       const launchpad = tokenInfo?.results?.[0]?.launchpad ?? null;
-      if (launchpad && config.screening.blockedLaunchpads.includes(launchpad)) {
-        log("screening", `Skipping ${pool.name} — blocked launchpad (${launchpad})`);
+
+      // Launchpad allow filter
+      const allowlist = config.screening.allowedLaunchpads;
+      if (allowlist && allowlist.length > 0 && launchpad && !allowlist.includes(launchpad)) {
+        log("screening", `Skipping ${pool.name} — not in launchpad allowlist (${launchpad})`);
+        lateFilteredExamples.push({
+          pool_address: pool.pool,
+          name: pool.name || "Unknown",
+          filter_reason: "Not in launchpad allowlist",
+        });
         return false;
       }
+
+      // Launchpad block filter
+      if (launchpad && config.screening.blockedLaunchpads.includes(launchpad)) {
+        log("screening", `Skipping ${pool.name} — blocked launchpad (${launchpad})`);
+        lateFilteredExamples.push({
+          pool_address: pool.pool,
+          name: pool.name || "Unknown",
+          filter_reason: "In launchpad blocklist",
+        });
+        return false;
+      }
+
+      // Bot holders filter
       const botPct = tokenInfo?.results?.[0]?.audit?.bot_holders_pct;
       const maxBotHoldersPct = config.screening.maxBotHoldersPct;
       if (botPct != null && maxBotHoldersPct != null && botPct > maxBotHoldersPct) {
@@ -199,13 +227,28 @@ export async function runScreeningCycle(
           "screening",
           `Bot-holder filter: dropped ${pool.name} — bots ${botPct}% > ${maxBotHoldersPct}%`
         );
+        lateFilteredExamples.push({
+          pool_address: pool.pool,
+          name: pool.name || "Unknown",
+          filter_reason: "Bot holders check failed",
+        });
         return false;
       }
       return true;
     });
 
+    // Merge early and late filtered examples for reporting
+    const allFilteredExamples = [...earlyFilteredExamples, ...lateFilteredExamples].slice(0, 3);
+
     if (passing.length === 0) {
-      screenReport = `No candidates available (all blocked by launchpad filter).`;
+      let message = "No candidates passed screening.";
+      if (allFilteredExamples.length > 0) {
+        message += "\n\nFiltered examples:\n";
+        for (const ex of allFilteredExamples) {
+          message += `- ${ex.name} (${ex.pool_address.slice(0, 8)}...): ${ex.filter_reason}\n`;
+        }
+      }
+      screenReport = message;
       return screenReport;
     }
 
