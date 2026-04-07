@@ -20,7 +20,6 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { PROJECT_ROOT } from "../config/paths.js";
-import { clearAllConfirmationTimers } from "../cycles/management.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
 import type { SetPositionNoteArgs } from "../types/executor.js";
 import type { SignalSnapshot } from "../types/signals.js";
@@ -36,6 +35,7 @@ import type {
   TrackedPosition,
   TrailingConfirmation,
 } from "../types/state.js";
+import { clearAllConfirmationTimers } from "./confirmation-timers.js";
 import { log } from "./logger.js";
 
 const STATE_FILE = path.join(PROJECT_ROOT, "state.json");
@@ -98,11 +98,9 @@ function save(state: PositionState): void {
         const code = (err as { code?: string }).code;
         const isBusy = code === "EBUSY" || code === "EPERM" || code === "EACCES";
         if (isBusy && attempt < maxRetries) {
-          // Wait briefly before retry
-          const start = Date.now();
-          while (Date.now() - start < delayMs) {
-            // Busy-wait for 50ms
-          }
+          // Small non-blocking delay before retry using Atomics.wait
+          // This pauses the current thread briefly without consuming CPU
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
           continue;
         }
         throw err; // Final attempt or non-busy error

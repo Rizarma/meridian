@@ -10,6 +10,17 @@ import {
 import { evaluateManagementExitRules } from "../domain/exit-rules.js";
 import { addPoolNote, recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
 import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import {
+  clearAllConfirmationTimers,
+  clearPeakConfirmationTimer,
+  clearTrailingDropConfirmationTimer,
+  deletePeakConfirmTimer,
+  deleteTrailingDropConfirmTimer,
+  getPeakConfirmTimer,
+  getTrailingDropConfirmTimer,
+  setPeakConfirmTimer,
+  setTrailingDropConfirmTimer,
+} from "../infrastructure/confirmation-timers.js";
 import { log } from "../infrastructure/logger.js";
 import {
   getTrackedPosition,
@@ -33,10 +44,6 @@ import type {
   LiveMessageHandler,
 } from "../types/index.js";
 
-// Timer maps for peak and trailing drop confirmations
-const _peakConfirmTimers: Map<string, NodeJS.Timeout> = new Map();
-const _trailingDropConfirmTimers = new Map<string, NodeJS.Timeout>();
-
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
   if (!text) return "";
@@ -44,10 +51,10 @@ function stripThink(text: string | null | undefined): string {
 }
 
 export function schedulePeakConfirmation(positionAddress: string): void {
-  if (!positionAddress || _peakConfirmTimers.has(positionAddress)) return;
+  if (!positionAddress || getPeakConfirmTimer(positionAddress)) return;
 
   const timer = setTimeout(async () => {
-    _peakConfirmTimers.delete(positionAddress);
+    deletePeakConfirmTimer(positionAddress);
     try {
       const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
       const positions = result?.positions;
@@ -65,17 +72,17 @@ export function schedulePeakConfirmation(positionAddress: string): void {
     }
   }, TRAILING_PEAK_CONFIRM_DELAY_MS);
 
-  _peakConfirmTimers.set(positionAddress, timer);
+  setPeakConfirmTimer(positionAddress, timer);
 }
 
 export function scheduleTrailingDropConfirmation(
   positionAddress: string,
   onConfirmed?: () => void
 ) {
-  if (!positionAddress || _trailingDropConfirmTimers.has(positionAddress)) return;
+  if (!positionAddress || getTrailingDropConfirmTimer(positionAddress)) return;
 
   const timer = setTimeout(async () => {
-    _trailingDropConfirmTimers.delete(positionAddress);
+    deleteTrailingDropConfirmTimer(positionAddress);
     try {
       const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
       const position = result?.positions?.find((p) => p.position === positionAddress);
@@ -101,32 +108,7 @@ export function scheduleTrailingDropConfirmation(
     }
   }, TRAILING_DROP_CONFIRM_DELAY_MS);
 
-  _trailingDropConfirmTimers.set(positionAddress, timer);
-}
-
-export function clearPeakConfirmationTimer(positionAddress: string): void {
-  const timer = _peakConfirmTimers.get(positionAddress);
-  if (timer) {
-    clearTimeout(timer);
-    _peakConfirmTimers.delete(positionAddress);
-  }
-}
-
-export function clearTrailingDropConfirmationTimer(positionAddress: string): void {
-  const timer = _trailingDropConfirmTimers.get(positionAddress);
-  if (timer) {
-    clearTimeout(timer);
-    _trailingDropConfirmTimers.delete(positionAddress);
-  }
-}
-
-/**
- * Clear all confirmation timers for a position.
- * Should be called when a position is closed to prevent timer leaks.
- */
-export function clearAllConfirmationTimers(positionAddress: string): void {
-  clearPeakConfirmationTimer(positionAddress);
-  clearTrailingDropConfirmationTimer(positionAddress);
+  setTrailingDropConfirmTimer(positionAddress, timer);
 }
 
 export async function runManagementCycle(

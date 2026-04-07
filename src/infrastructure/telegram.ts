@@ -195,7 +195,8 @@ export async function sendMessage(text: string): Promise<unknown> {
     const errorMessage = String((error as { message?: string }).message || "");
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
       log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
-      return postTelegram("sendMessage", { text: escapeMarkdown(safeText) });
+      // Re-slice after escaping to ensure we don't exceed Telegram's limit
+      return postTelegram("sendMessage", { text: escapeMarkdown(safeText).slice(0, 4096) });
     }
     // Ignore "message is not modified" — content hasn't changed, no need to update
     if (errorMessage.includes("message is not modified")) {
@@ -224,7 +225,11 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
     const errorMessage = String((error as { message?: string }).message || "");
     if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
       log("telegram_warn", "Markdown parsing failed, editing as plain text");
-      return postTelegram("editMessageText", { message_id: messageId, text: escapeMarkdown(safeText) });
+      // Re-slice after escaping to ensure we don't exceed Telegram's limit
+      return postTelegram("editMessageText", {
+        message_id: messageId,
+        text: escapeMarkdown(safeText).slice(0, 4096),
+      });
     }
     // Ignore "message is not modified" — content hasn't changed, no need to update
     if (errorMessage.includes("message is not modified")) {
