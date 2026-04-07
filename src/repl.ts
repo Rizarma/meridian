@@ -1040,12 +1040,12 @@ Commands:
     });
   });
 
-  rl.on("close", () => {
+  rl.on("close", async () => {
     clearInterval(promptRefreshInterval);
     clearInterval(historySaveInterval);
     // @ts-ignore - history is private but accessible
     saveHistory(rl.history || []);
-    deps.shutdown("stdin closed");
+    await deps.shutdown("stdin closed");
   });
 }
 

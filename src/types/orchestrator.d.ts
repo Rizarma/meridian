@@ -37,10 +37,8 @@ export interface CronTask extends ScheduledTask {
   start: () => void;
 }
 
-/** Cron task array with optional interval reference attached */
-export interface CronTaskList extends Array<CronTask> {
-  _pnlPollInterval?: NodeJS.Timeout;
-}
+/** Cron task array */
+export interface CronTaskList extends Array<CronTask> {}
 
 /** Candidate with recon data */
 export interface ReconCandidate {
