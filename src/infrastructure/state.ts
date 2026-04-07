@@ -83,7 +83,9 @@ function load(): PositionState {
 function save(state: PositionState): void {
   try {
     state.lastUpdated = new Date().toISOString();
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    const tmpFile = `${STATE_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
+    fs.renameSync(tmpFile, STATE_FILE); // Atomic on POSIX
   } catch (err) {
     log("state_error", `Failed to write state.json: ${(err as Error).message}`);
   }

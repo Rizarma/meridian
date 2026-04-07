@@ -38,6 +38,52 @@ import type {
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
+// Helper function for fetch with timeout (30 seconds)
+async function fetchWithTimeout(url: string, timeoutMs = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Simple LRU cache implementation
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private maxSize: number) {}
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      // Remove oldest (first item)
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+  }
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+  delete(key: K): boolean {
+    return this.cache.delete(key);
+  }
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
 // ─── Lazy SDK loader ───────────────────────────────────────────
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
 // that break in ESM on Node 24. Dynamic import defers loading until
@@ -107,7 +153,7 @@ function getWallet(): Keypair {
 }
 
 // ─── Pool Cache ────────────────────────────────────────────────
-const poolCache = new Map<string, any>();
+const poolCache = new LRUCache<string, unknown>(100);
 let _poolCacheInterval: NodeJS.Timeout | null = null;
 
 function startPoolCacheInterval() {
@@ -124,7 +170,7 @@ async function getPool(poolAddress: string): Promise<any> {
     const pool = await DLMM.create(getConnection(), new PublicKey(poolAddress));
     poolCache.set(key, pool);
   }
-  return poolCache.get(key);
+  return poolCache.get(key) as unknown;
 }
 
 // ─── Get Active Bin ────────────────────────────────────────────
@@ -359,7 +405,7 @@ async function fetchDlmmPnlForPool(
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
   try {
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log(
@@ -481,7 +527,7 @@ export async function getMyPositions({
       // Single portfolio API call — returns all positions with full PnL data
       if (!silent) log("positions", "Fetching portfolio via Meteora portfolio API...");
       const portfolioUrl = `https://dlmm.datapi.meteora.ag/portfolio/open?user=${walletAddress}`;
-      const res = await fetch(portfolioUrl);
+      const res = await fetchWithTimeout(portfolioUrl);
       if (!res.ok)
         throw new Error(`Portfolio API ${res.status}: ${await res.text().catch(() => "")}`);
       const portfolio = (await res.json()) as { pools?: any[] };
@@ -702,7 +748,7 @@ export async function searchPools({
   limit = 10,
 }: SearchPoolsParams): Promise<SearchPoolsResult> {
   const url = `https://dlmm.datapi.meteora.ag/pools?query=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Pool search API error: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as any[] | { data?: any[] };
   const pools = (Array.isArray(data) ? data : (data as { data?: any[] }).data || []).slice(
@@ -943,7 +989,7 @@ export async function closePosition({
       let feesUsd = tracked.total_fees_claimed_usd || 0;
       try {
         const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
-        const res = await fetch(closedUrl);
+        const res = await fetchWithTimeout(closedUrl);
         if (res.ok) {
           const data = (await res.json()) as { positions?: any[] };
           const posEntry = (data.positions || []).find(

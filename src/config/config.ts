@@ -334,6 +334,20 @@ registerTool({
     const applied: Record<string, string | number | boolean> = {};
     const unknown: string[] = [];
 
+    const VALID_CONFIG_SECTIONS = [
+      "screening",
+      "management",
+      "risk",
+      "features",
+      "llm",
+      "schedule",
+    ] as const;
+    type ValidConfigSection = (typeof VALID_CONFIG_SECTIONS)[number];
+
+    function isValidConfigSection(section: string): section is ValidConfigSection {
+      return VALID_CONFIG_SECTIONS.includes(section as ValidConfigSection);
+    }
+
     // Build case-insensitive lookup
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const CONFIG_MAP_LOWER: Record<string, any> = Object.entries(CONFIG_MAP)
@@ -360,8 +374,15 @@ registerTool({
     // Apply to live config immediately
     for (const [key, val] of Object.entries(applied)) {
       const [section, field] = CONFIG_MAP[key];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const configSection = (config as any)[section];
+      if (!isValidConfigSection(section)) {
+        log("config_error", `Invalid config section: ${section}`);
+        continue;
+      }
+      const configSection = config[section] as unknown as Record<string, unknown>;
+      if (!(field in configSection)) {
+        log("config_error", `Invalid config field: ${section}.${field}`);
+        continue;
+      }
       const before = configSection[field];
       configSection[field] = val;
       log(

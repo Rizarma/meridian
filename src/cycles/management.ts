@@ -104,6 +104,22 @@ export function scheduleTrailingDropConfirmation(
   _trailingDropConfirmTimers.set(positionAddress, timer);
 }
 
+export function clearPeakConfirmationTimer(positionAddress: string): void {
+  const timer = _peakConfirmTimers.get(positionAddress);
+  if (timer) {
+    clearTimeout(timer);
+    _peakConfirmTimers.delete(positionAddress);
+  }
+}
+
+export function clearTrailingDropConfirmationTimer(positionAddress: string): void {
+  const timer = _trailingDropConfirmTimers.get(positionAddress);
+  if (timer) {
+    clearTimeout(timer);
+    _trailingDropConfirmTimers.delete(positionAddress);
+  }
+}
+
 export async function runManagementCycle(
   options: CycleOptions = {},
   deps: {
@@ -137,7 +153,11 @@ export async function runManagementCycle(
       mgmtReport = "No open positions. Triggering screening cycle.";
       // Use immediate trigger (no cooldown) when there are no positions
       const trigger = deps.triggerScreeningImmediate ?? deps.triggerScreening;
-      trigger().catch((e: Error) => log("cron_error", `Triggered screening failed: ${e.message}`));
+      try {
+        await trigger();
+      } catch (e) {
+        log("cron_error", `Triggered screening failed: ${(e as Error).message}`);
+      }
       return mgmtReport;
     }
 
