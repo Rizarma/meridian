@@ -40,7 +40,12 @@ const SKIP_FILES = [
 export async function discoverTools(): Promise<void> {
   // 1. Auto-discover tools in tools/ directory
   const toolFiles = readdirSync(__dirname).filter(
-    (f) => f.endsWith(".js") && !SKIP_FILES.includes(f)
+    (f) =>
+      f.endsWith(".js") &&
+      !SKIP_FILES.includes(f) &&
+      !f.includes("..") &&
+      !f.includes("/") &&
+      !f.includes("\\")
   );
 
   for (const file of toolFiles) {
