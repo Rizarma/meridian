@@ -240,14 +240,17 @@ export async function runScreeningCycle(
       return true;
     });
 
-    // Merge early and late filtered examples for reporting
-    const allFilteredExamples = [...earlyFilteredExamples, ...lateFilteredExamples].slice(0, 3);
+    // Prioritize late examples (more informative - survived early screening)
+    const examplesToShow = [
+      ...lateFilteredExamples.slice(0, 2),
+      ...earlyFilteredExamples.slice(0, 1),
+    ];
 
     if (passing.length === 0) {
       let message = "No candidates passed screening.";
-      if (allFilteredExamples.length > 0) {
+      if (examplesToShow.length > 0) {
         message += "\n\nFiltered examples:\n";
-        for (const ex of allFilteredExamples) {
+        for (const ex of examplesToShow) {
           message += `- ${ex.name} (${ex.pool_address.slice(0, 8)}...): ${ex.filter_reason}\n`;
         }
       }
