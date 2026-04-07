@@ -292,6 +292,13 @@ export function addStrategy({
   return { saved: true, id: slug, name, active: db.active === slug };
 }
 
+// Strategies that are documented but not fully implemented
+// See: plan/strategy-audit/ for detailed audit reports
+const NON_FUNCTIONAL_STRATEGIES = new Set([
+  "multi_layer", // addLiquidity not implemented - audit: 05-audit-multi_layer.md
+  "partial_harvest", // withdrawLiquidity not implemented - audit: 06-audit-partial_harvest.md
+]);
+
 /**
  * List all strategies with a summary.
  */
@@ -305,6 +312,10 @@ export function listStrategies(): ListStrategiesResult {
     best_for: s.best_for,
     active: db.active === s.id,
     added_at: s.added_at?.slice(0, 10),
+    // P1 fix: Mark non-functional strategies
+    warning: NON_FUNCTIONAL_STRATEGIES.has(s.id)
+      ? "Strategy exists as documentation only. Core functions not implemented. See plan/strategy-audit/"
+      : undefined,
   }));
   return { active: db.active, count: strategies.length, strategies };
 }
@@ -329,6 +340,18 @@ export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResu
   const db = load();
   if (!db.strategies[id])
     return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
+
+  // P1 fix: Warn about non-functional strategies
+  if (NON_FUNCTIONAL_STRATEGIES.has(id)) {
+    const strategy = db.strategies[id];
+    log("strategy_warn", `Activating non-functional strategy: ${strategy.name}`);
+    log("strategy_warn", `  See audit: plan/strategy-audit/ for details`);
+    log(
+      "strategy_warn",
+      `  This strategy exists as documentation only and cannot be automatically executed.`
+    );
+  }
+
   db.active = id;
   save(db);
   log("strategy", `Active strategy set to: ${db.strategies[id].name}`);
