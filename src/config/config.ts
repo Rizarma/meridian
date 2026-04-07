@@ -142,9 +142,11 @@ export const config: Config = {
     maxBotHoldersPct: u.maxBotHoldersPct ?? 30, // max bot holder addresses % (Jupiter audit)
     maxTop10Pct: u.maxTop10Pct ?? 60, // max top 10 holders concentration
     blockedLaunchpads: u.blockedLaunchpads ?? [], // e.g. ["letsbonk.fun", "pump.fun"]
+    allowedLaunchpads: u.allowedLaunchpads ?? [], // e.g. ["pump.fun"] - if set, only allow these
     minTokenAgeHours: u.minTokenAgeHours ?? null, // null = no minimum
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
+    maxCandidatesEnriched: u.maxCandidatesEnriched ?? 10, // max pools to enrich with OKX + sent to recon per cycle
   },
 
   // ─── Position Management ────────────────
@@ -225,8 +227,8 @@ export const config: Config = {
     darwinEvolution: u.features?.darwinEvolution ?? u.darwinEvolution ?? false,
     // SOL mode: migrated from management.solMode
     solMode: u.features?.solMode ?? u.solMode ?? false,
-    // OKX integration: requires OKX_API_KEY and OKX_API_SECRET env vars
-    okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_API_SECRET"),
+    // OKX integration: requires OKX_API_KEY and OKX_SECRET_KEY env vars
+    okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_SECRET_KEY"),
   },
 };
 

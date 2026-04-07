@@ -85,6 +85,17 @@ export const safetyCheckMiddleware: MiddlewareFn = async (tool, args, _role, nex
 };
 
 /**
+ * Validate that a value is a valid object result with expected shape.
+ * Returns the object if valid, or creates a safe error result.
+ */
+function validateResultObject(result: unknown): Record<string, unknown> {
+  if (typeof result !== "object" || result === null) {
+    return { success: false, error: "Invalid result: not an object" };
+  }
+  return result as Record<string, unknown>;
+}
+
+/**
  * Logging middleware.
  * Logs all tool executions to daily JSONL.
  */
@@ -92,7 +103,8 @@ export const loggingMiddleware: MiddlewareFn = async (tool, args, _role, next) =
   const startTime = Date.now();
 
   try {
-    const result = (await next()) as Record<string, unknown>;
+    const rawResult = await next();
+    const result = validateResultObject(rawResult);
     const duration = Date.now() - startTime;
     const success = result?.success !== false && !result?.error && !result?.blocked;
 
@@ -126,7 +138,8 @@ export const loggingMiddleware: MiddlewareFn = async (tool, args, _role, next) =
  * Sends Telegram alerts for write tools after successful execution.
  */
 export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, next) => {
-  const result = (await next()) as Record<string, unknown>;
+  const rawResult = await next();
+  const result = validateResultObject(rawResult);
 
   // Only notify on successful write operations
   if (result?.error || result?.blocked) {
@@ -202,7 +215,8 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
  * Decouples dlmm.ts from persistence concerns.
  */
 export const persistenceMiddleware: MiddlewareFn = async (tool, args, _role, next) => {
-  const result = (await next()) as Record<string, unknown>;
+  const rawResult = await next();
+  const result = validateResultObject(rawResult);
 
   // Only persist on successful write operations
   if (result?.error || result?.blocked || !result?.success) {

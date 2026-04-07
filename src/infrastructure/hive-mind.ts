@@ -47,9 +47,17 @@ let _lastSyncTime = 0;
 
 function readConfig(): HiveMindConfig {
   try {
-    return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+    const fileConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+    return {
+      hiveMindUrl: process.env.HIVE_MIND_URL || fileConfig.hiveMindUrl || "",
+      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || fileConfig.hiveMindApiKey || "",
+      hiveMindAgentId: fileConfig.hiveMindAgentId || "",
+    };
   } catch {
-    return {};
+    return {
+      hiveMindUrl: process.env.HIVE_MIND_URL || "",
+      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
+    };
   }
 }
 
