@@ -418,6 +418,12 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
             "self_update is only allowed from a local interactive TTY session, not from Telegram or background automation.",
         };
       }
+      // Sanitize argv to prevent command injection
+      const dangerousArgs = ["--eval", "-e", "--print", "-p", "-c", "--require"];
+      const argvStr = process.argv.slice(1).join(" ");
+      if (dangerousArgs.some((arg) => argvStr.includes(arg))) {
+        return { pass: false, reason: "self_update blocked: dangerous args detected" };
+      }
       return { pass: true };
     }
 

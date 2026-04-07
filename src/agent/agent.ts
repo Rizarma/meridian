@@ -4,6 +4,7 @@ import type {
   ChatCompletion,
   ChatCompletionMessage,
   ChatCompletionMessageParam,
+  ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import { tools } from "../../tools/definitions/index.js";
 import { getMyPositions } from "../../tools/dlmm.js";
@@ -28,6 +29,16 @@ import type {
 import { INTENTS } from "./intent.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
+
+// Interface for chat completion request parameters
+interface ChatCompletionRequest {
+  model: string;
+  messages: ChatCompletionMessageParam[];
+  tools?: ToolDefinition[];
+  tool_choice?: "auto" | "required" | "none" | { type: "function"; function: { name: string } };
+  temperature?: number;
+  max_tokens?: number;
+}
 
 // Intent routing unified in src/agent/intent.ts (INTENTS array)
 // Use detectIntent(), getToolsForIntent(), getRoleForIntent() from that module
@@ -180,7 +191,7 @@ export async function agentLoop(
 
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const requestParams: any = {
+          const requestParams: ChatCompletionRequest = {
             model: usedModel,
             messages,
             tools: getToolsForRole(agentType, goal),

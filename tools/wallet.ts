@@ -132,7 +132,10 @@ function getWallet(): Keypair {
 const JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
 const JUPITER_ULTRA_API: string = "https://api.jup.ag/ultra/v1";
 const JUPITER_QUOTE_API: string = "https://api.jup.ag/swap/v1";
-const JUPITER_API_KEY: string = "b15d42e9-e0e4-4f90-a424-ae41ceeaa382";
+const JUPITER_API_KEY: string = process.env.JUPITER_API_KEY || "";
+if (!JUPITER_API_KEY) {
+  log("warn", "JUPITER_API_KEY not set in environment, Jupiter API calls may fail");
+}
 
 /**
  * Get current wallet balances: SOL, USDC, and all SPL tokens using Helius Wallet API.

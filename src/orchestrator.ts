@@ -205,62 +205,67 @@ Summarize the current portfolio health, total fees earned, and performance of al
 
   // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
-  const pnlPollInterval = setInterval(async () => {
-    if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
-    _pnlPollBusy = true;
-    try {
-      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const positions = result?.positions;
-      if (!positions?.length) return;
-      for (const p of positions) {
-        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
-          schedulePeakConfirmation(p.position);
-        }
-        const exit = updatePnlAndCheckExits(p.position, p, config.management);
-        if (exit) {
-          // Trailing TP needs confirmation - queue it and continue polling
-          if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
-            if (
-              queueTrailingDropConfirmation(
-                p.position,
-                exit.peak_pnl_pct ?? null,
-                exit.current_pnl_pct ?? null,
-                config.management.trailingDropPct ?? null
-              )
-            ) {
-              scheduleTrailingDropConfirmation(p.position, () => {
-                runManagementCycle({ silent: true }).catch((e: Error) =>
-                  log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
-                );
-              });
+  const pnlPollInterval = setInterval(() => {
+    (async () => {
+      if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
+      _pnlPollBusy = true;
+      try {
+        const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
+        const positions = result?.positions;
+        if (!positions?.length) return;
+        for (const p of positions) {
+          if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+            schedulePeakConfirmation(p.position);
+          }
+          const exit = updatePnlAndCheckExits(p.position, p, config.management);
+          if (exit) {
+            // Trailing TP needs confirmation - queue it and continue polling
+            if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
+              if (
+                queueTrailingDropConfirmation(
+                  p.position,
+                  exit.peak_pnl_pct ?? null,
+                  exit.current_pnl_pct ?? null,
+                  config.management.trailingDropPct ?? null
+                )
+              ) {
+                scheduleTrailingDropConfirmation(p.position, () => {
+                  runManagementCycle({ silent: true }).catch((e: Error) =>
+                    log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
+                  );
+                });
+              }
+              continue;
             }
-            continue;
+            const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
+            const sinceLastTrigger = Date.now() - _pollTriggeredAt;
+            if (sinceLastTrigger >= cooldownMs) {
+              _pollTriggeredAt = Date.now();
+              log(
+                "state",
+                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
+              );
+              runManagementCycle({ silent: true }).catch((e: Error) =>
+                log("cron_error", `Poll-triggered management failed: ${e.message}`)
+              );
+            } else {
+              log(
+                "state",
+                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
+                  (cooldownMs - sinceLastTrigger) / 1000
+                )}s left)`
+              );
+            }
+            break;
           }
-          const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-          const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-          if (sinceLastTrigger >= cooldownMs) {
-            _pollTriggeredAt = Date.now();
-            log(
-              "state",
-              `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
-            );
-            runManagementCycle({ silent: true }).catch((e: Error) =>
-              log("cron_error", `Poll-triggered management failed: ${e.message}`)
-            );
-          } else {
-            log(
-              "state",
-              `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
-                (cooldownMs - sinceLastTrigger) / 1000
-              )}s left)`
-            );
-          }
-          break;
         }
+      } finally {
+        _pnlPollBusy = false;
       }
-    } finally {
+    })().catch((e) => {
+      log("cron_error", `PnL poll unhandled error: ${(e as Error).message}`);
       _pnlPollBusy = false;
-    }
+    });
   }, 30_000);
 
   _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog] as CronTaskList;
@@ -278,6 +283,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
 export async function shutdown(signal: string): Promise<void> {
   log("shutdown", `Received ${signal}. Shutting down...`);
   stopPolling();
+  stopCronJobs(); // Add this line
   const positionsResult = await getMyPositions();
   log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
   process.exit(0);
