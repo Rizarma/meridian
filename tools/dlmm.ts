@@ -433,6 +433,15 @@ export async function addLiquidity({
     return { success: false, error: "At least one amount (amount_x or amount_y) must be > 0" };
   }
 
+  // Validate single_sided_x requires amount_x > 0
+  if (single_sided_x && finalAmountX <= 0) {
+    return {
+      success: false,
+      error:
+        "single_sided_x requires amount_x > 0 — cannot do single-sided X deposit without X amount",
+    };
+  }
+
   // ─── DRY RUN ─────────────────────────────────────────────────
   if (process.env.DRY_RUN === "true") {
     return {
@@ -519,6 +528,9 @@ export async function addLiquidity({
     let finalXLamports = totalXLamports;
     let finalYLamports = totalYLamports;
     if (single_sided_x && finalAmountX > 0) {
+      if (finalAmountY > 0) {
+        log("add_liquidity", `Note: single_sided_x=true — ignoring amount_y (${finalAmountY})`);
+      }
       finalYLamports = new BN(0);
     }
 
@@ -1176,8 +1188,7 @@ export async function withdrawLiquidity({
     let fromBinId = -887272;
     let toBinId = 887272;
     let hasLiquidity = false;
-    let preBalanceX = 0;
-    let preBalanceY = 0;
+    let preBinData: any[] = [];
 
     try {
       const positionData = await pool.getPosition(positionPubKey);
@@ -1186,30 +1197,8 @@ export async function withdrawLiquidity({
         fromBinId = processed.lowerBinId ?? fromBinId;
         toBinId = processed.upperBinId ?? toBinId;
         const bins = Array.isArray(processed.positionBinData) ? processed.positionBinData : [];
+        preBinData = bins;
         hasLiquidity = bins.some((bin: any) => new BN(bin.positionLiquidity || "0").gt(new BN(0)));
-
-        // Get pre-withdrawal balances from wallet
-        const tokenXAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-          mint: pool.lbPair.tokenXMint,
-        });
-        const tokenYAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-          mint: pool.lbPair.tokenYMint,
-        });
-
-        if (tokenXAccount.value.length > 0) {
-          const accountInfo = await getConnection().getParsedAccountInfo(
-            tokenXAccount.value[0].pubkey
-          );
-          const parsed = (accountInfo.value?.data as any)?.parsed?.info;
-          preBalanceX = parsed ? Number(parsed.tokenAmount?.uiAmount ?? 0) : 0;
-        }
-        if (tokenYAccount.value.length > 0) {
-          const accountInfo = await getConnection().getParsedAccountInfo(
-            tokenYAccount.value[0].pubkey
-          );
-          const parsed = (accountInfo.value?.data as any)?.parsed?.info;
-          preBalanceY = parsed ? Number(parsed.tokenAmount?.uiAmount ?? 0) : 0;
-        }
       }
     } catch (e: any) {
       log("withdraw_warn", `Could not check liquidity state: ${e.message}`);
@@ -1219,7 +1208,26 @@ export async function withdrawLiquidity({
       return { success: false, error: "Position has no liquidity to withdraw" };
     }
 
+    // Get token decimals for amount conversion
+    let decimalsX = 9;
+    let decimalsY = 9;
+    try {
+      const mintXInfo = await getConnection().getParsedAccountInfo(
+        new PublicKey(pool.lbPair.tokenXMint)
+      );
+      decimalsX = (mintXInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+      const mintYInfo = await getConnection().getParsedAccountInfo(
+        new PublicKey(pool.lbPair.tokenYMint)
+      );
+      decimalsY = (mintYInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    } catch {
+      log("withdraw_warn", "Could not fetch token decimals, using default 9");
+    }
+
     // ─── Step 3: Remove Liquidity ───────────────────────────────
+    // Note: removeLiquidity is deterministic — removes bps/10000 of existing
+    // position liquidity from each bin. No slippage parameter needed (unlike
+    // addLiquidity which converts new capital at current prices).
     log("withdraw", `Step 2: Removing ${bps / 100}% liquidity`);
     const withdrawTxs: Transaction | Transaction[] = await pool.removeLiquidity({
       user: wallet.publicKey,
@@ -1238,39 +1246,91 @@ export async function withdrawLiquidity({
     log("withdraw", `Step 2 OK (withdraw): ${withdrawTxHashes.join(", ")}`);
 
     // ─── Step 4: Calculate Withdrawn Amounts ────────────────────
-    // Wait a moment for RPC to reflect new balances
-    await new Promise((r) => setTimeout(r, 2000));
+    // Use on-chain position data comparison (pre vs post) instead of wallet
+    // balance delta. The wallet balance approach has a race condition — other
+    // transactions (auto-swap, concurrent claims) can change balances between
+    // the pre and post snapshots, producing incorrect amounts.
+    // sendAndConfirmTransaction already waits for confirmation, so the RPC
+    // state should reflect the withdrawal immediately (no sleep needed).
+    let amountXWithdrawn = 0;
+    let amountYWithdrawn = 0;
 
-    let postBalanceX = 0;
-    let postBalanceY = 0;
     try {
-      const tokenXAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-        mint: pool.lbPair.tokenXMint,
-      });
-      const tokenYAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-        mint: pool.lbPair.tokenYMint,
-      });
+      // Re-fetch position data after confirmed withdrawal
+      const postPositionData = await pool.getPosition(positionPubKey);
+      const postProcessed = postPositionData?.positionData;
+      const postBins = Array.isArray(postProcessed?.positionBinData)
+        ? postProcessed.positionBinData
+        : [];
 
-      if (tokenXAccount.value.length > 0) {
-        const accountInfo = await getConnection().getParsedAccountInfo(
-          tokenXAccount.value[0].pubkey
-        );
-        const parsed = (accountInfo.value?.data as any)?.parsed?.info;
-        postBalanceX = parsed ? Number(parsed.tokenAmount?.uiAmount ?? 0) : 0;
+      // Sum pre-withdrawal liquidity across all bins
+      let preTotalLiquidity = new BN(0);
+      for (const bin of preBinData) {
+        preTotalLiquidity = preTotalLiquidity.add(new BN(bin.positionLiquidity || "0"));
       }
-      if (tokenYAccount.value.length > 0) {
-        const accountInfo = await getConnection().getParsedAccountInfo(
-          tokenYAccount.value[0].pubkey
-        );
-        const parsed = (accountInfo.value?.data as any)?.parsed?.info;
-        postBalanceY = parsed ? Number(parsed.tokenAmount?.uiAmount ?? 0) : 0;
+
+      // Sum post-withdrawal liquidity across all bins
+      let postTotalLiquidity = new BN(0);
+      for (const bin of postBins) {
+        postTotalLiquidity = postTotalLiquidity.add(new BN(bin.positionLiquidity || "0"));
       }
+
+      const liquidityDelta = preTotalLiquidity.sub(postTotalLiquidity);
+
+      if (liquidityDelta.gt(new BN(0)) && preTotalLiquidity.gt(new BN(0))) {
+        // We know how much liquidity was removed. Estimate token amounts
+        // from the bps ratio applied to pre-withdrawal bin composition.
+        const bpsRatio = bps / 10000;
+
+        // Use per-bin X/Y amounts if available (Meteora SDK provides these)
+        let preTotalX = new BN(0);
+        let preTotalY = new BN(0);
+        for (const bin of preBinData) {
+          preTotalX = preTotalX.add(new BN(bin.positionXAmount || bin.positionX || "0"));
+          preTotalY = preTotalY.add(new BN(bin.positionYAmount || bin.positionY || "0"));
+        }
+
+        if (preTotalX.gt(new BN(0)) || preTotalY.gt(new BN(0))) {
+          // SDK provides per-token amounts — use bps ratio directly
+          amountXWithdrawn = (preTotalX.toNumber() * bpsRatio) / Math.pow(10, decimalsX);
+          amountYWithdrawn = (preTotalY.toNumber() * bpsRatio) / Math.pow(10, decimalsY);
+        } else {
+          // Fallback: estimate from total liquidity change ratio applied to
+          // current wallet balance. NOTE: This may be inaccurate if other
+          // transactions (auto-swap, claims) modify the wallet concurrently.
+          const removedRatio = liquidityDelta.toNumber() / preTotalLiquidity.toNumber();
+          log(
+            "withdraw",
+            `Using fallback estimate (removedRatio=${removedRatio.toFixed(4)}) — amounts are approximate`
+          );
+          const tokenXAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
+            mint: pool.lbPair.tokenXMint,
+          });
+          const tokenYAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
+            mint: pool.lbPair.tokenYMint,
+          });
+          if (tokenXAccount.value.length > 0) {
+            const info = await getConnection().getParsedAccountInfo(tokenXAccount.value[0].pubkey);
+            const parsed = (info.value?.data as any)?.parsed?.info;
+            amountXWithdrawn = parsed
+              ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
+              : 0;
+          }
+          if (tokenYAccount.value.length > 0) {
+            const info = await getConnection().getParsedAccountInfo(tokenYAccount.value[0].pubkey);
+            const parsed = (info.value?.data as any)?.parsed?.info;
+            amountYWithdrawn = parsed
+              ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
+              : 0;
+          }
+        }
+      }
+
+      amountXWithdrawn = Math.max(0, amountXWithdrawn);
+      amountYWithdrawn = Math.max(0, amountYWithdrawn);
     } catch (e: any) {
-      log("withdraw_warn", `Could not fetch post-withdrawal balances: ${e.message}`);
+      log("withdraw_warn", `Could not calculate withdrawn amounts: ${e.message}`);
     }
-
-    const amountXWithdrawn = Math.max(0, postBalanceX - preBalanceX);
-    const amountYWithdrawn = Math.max(0, postBalanceY - preBalanceY);
 
     // ─── Step 5: Invalidate Cache & Return ──────────────────────
     await withPositionsCacheLock(async () => {
@@ -1280,7 +1340,7 @@ export async function withdrawLiquidity({
     const allTxs = [...claimTxHashes, ...withdrawTxHashes];
     log(
       "withdraw",
-      `SUCCESS — withdrawn ${amountXWithdrawn.toFixed(6)} X, ${amountYWithdrawn.toFixed(6)} Y (txs: ${allTxs.length})`
+      `SUCCESS — withdrawn ~${amountXWithdrawn.toFixed(6)} X, ~${amountYWithdrawn.toFixed(6)} Y (txs: ${allTxs.length})`
     );
 
     return {
