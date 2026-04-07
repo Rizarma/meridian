@@ -31,11 +31,13 @@ import {
 } from "./infrastructure/telegram.js";
 import { startNonTTY, startREPL } from "./repl.js";
 import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
+import { cache } from "./utils/cache.js";
 
 // ═══════════════════════════════════════════
 //  GLOBAL STATE
 // ═══════════════════════════════════════════
 let _cronTasks: CronTaskList = [];
+let _pnlPollInterval: NodeJS.Timeout | undefined;
 let _managementBusy = false;
 let _pollTriggeredAt = 0;
 let cronStarted = false;
@@ -104,8 +106,9 @@ export async function maybeRunMissedBriefing(): Promise<void> {
 // ═══════════════════════════════════════════
 export function stopCronJobs(): void {
   for (const task of _cronTasks) task.stop();
-  if (_cronTasks._pnlPollInterval) clearInterval(_cronTasks._pnlPollInterval);
+  if (_pnlPollInterval) clearInterval(_pnlPollInterval);
   _cronTasks = [];
+  _pnlPollInterval = undefined;
 }
 
 export async function runManagementCycle(options: CycleOptions = {}): Promise<string | null> {
@@ -205,6 +208,8 @@ Summarize the current portfolio health, total fees earned, and performance of al
 
   // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
+  let _pnlPollConsecutiveFailures = 0;
+  const MAX_PNL_POLL_FAILURES = 5;
   const pnlPollInterval = setInterval(() => {
     (async () => {
       if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
@@ -212,7 +217,10 @@ Summarize the current portfolio health, total fees earned, and performance of al
       try {
         const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
         const positions = result?.positions;
-        if (!positions?.length) return;
+        if (!positions?.length) {
+          _pnlPollConsecutiveFailures = 0; // Reset on successful empty poll
+          return;
+        }
         for (const p of positions) {
           if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
             schedulePeakConfirmation(p.position);
@@ -259,18 +267,40 @@ Summarize the current portfolio health, total fees earned, and performance of al
             break;
           }
         }
+        // Reset consecutive failures on successful poll completion
+        _pnlPollConsecutiveFailures = 0;
+      } catch (error) {
+        _pnlPollConsecutiveFailures++;
+        const errorMsg = (error as Error).message;
+        if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
+          log(
+            "error",
+            `[PnL poll] Persistent failure #${_pnlPollConsecutiveFailures}: ${errorMsg}. ` +
+              `Polling continues but state operations may be broken (disk full, permissions, etc.)`
+          );
+        } else {
+          log(
+            "cron_error",
+            `[PnL poll] Failure #${_pnlPollConsecutiveFailures}/${MAX_PNL_POLL_FAILURES}: ${errorMsg}`
+          );
+        }
       } finally {
         _pnlPollBusy = false;
       }
     })().catch((e) => {
-      log("cron_error", `PnL poll unhandled error: ${(e as Error).message}`);
+      // This catches async errors outside the try block (should be rare)
+      _pnlPollConsecutiveFailures++;
+      log(
+        "error",
+        `PnL poll unhandled error (failure #${_pnlPollConsecutiveFailures}): ${(e as Error).message}`
+      );
       _pnlPollBusy = false;
     });
   }, 30_000);
 
-  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog] as CronTaskList;
+  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
   // Store interval ref so stopCronJobs can clear it
-  _cronTasks._pnlPollInterval = pnlPollInterval;
+  _pnlPollInterval = pnlPollInterval;
   log(
     "cron",
     `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m`
@@ -283,14 +313,19 @@ Summarize the current portfolio health, total fees earned, and performance of al
 export async function shutdown(signal: string): Promise<void> {
   log("shutdown", `Received ${signal}. Shutting down...`);
   stopPolling();
-  stopCronJobs(); // Add this line
+  stopCronJobs();
+  cache.destroy();
   const positionsResult = await getMyPositions();
   log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
   process.exit(0);
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", async () => {
+  await shutdown("SIGINT");
+});
+process.on("SIGTERM", async () => {
+  await shutdown("SIGTERM");
+});
 
 // ═══════════════════════════════════════════
 //  MAIN ENTRY POINT
