@@ -346,15 +346,19 @@ async function validateStrategyCompliance(
 
   const strategy = activeStrategy;
 
+  // Normalize values before comparison to handle undefined/null/string edge cases
+  const amountY = Number(deployArgs.amount_y ?? 0);
+  const amountX = Number(deployArgs.amount_x ?? 0);
+
   // Validate 1: single_side constraint
   if (strategy.entry?.single_side) {
-    if (strategy.entry.single_side === "token" && deployArgs.amount_y !== 0) {
+    if (strategy.entry.single_side === "token" && amountY !== 0) {
       return {
         pass: false,
         reason: `Strategy '${strategy.name}' requires single_side: "token" with amount_y=0. Received amount_y=${deployArgs.amount_y}`,
       };
     }
-    if (strategy.entry.single_side === "sol" && deployArgs.amount_x !== 0) {
+    if (strategy.entry.single_side === "sol" && amountX !== 0) {
       return {
         pass: false,
         reason: `Strategy '${strategy.name}' requires single_side: "sol" with amount_x=0. Received amount_x=${deployArgs.amount_x}`,
@@ -476,6 +480,64 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 
     case "swap_token": {
       // Basic check — handled inside swapToken itself
+      return { pass: true };
+    }
+
+    case "add_liquidity": {
+      const addArgs = args as {
+        position_address?: string;
+        pool_address?: string;
+        amount_x?: number;
+        amount_y?: number;
+      };
+
+      if (!addArgs.position_address || !addArgs.pool_address) {
+        return { pass: false, reason: "position_address and pool_address are required" };
+      }
+
+      const addAmountY = addArgs.amount_y ?? 0;
+      const addAmountX = addArgs.amount_x ?? 0;
+      if (addAmountX <= 0 && addAmountY <= 0) {
+        return {
+          pass: false,
+          reason: "At least one amount (amount_x or amount_y) must be > 0",
+        };
+      }
+
+      // Check SOL balance to cover gas for the add liquidity transaction
+      if (process.env.DRY_RUN !== "true") {
+        const balance = (await getWalletBalances()) as WalletBalances;
+        const gasReserve = config.management.gasReserve ?? 0.01;
+        if (balance.sol < gasReserve) {
+          return {
+            pass: false,
+            reason: `Insufficient SOL for gas: have ${balance.sol} SOL, need at least ${gasReserve} SOL reserve`,
+          };
+        }
+      }
+
+      return { pass: true };
+    }
+
+    case "withdraw_liquidity": {
+      const withdrawArgs = args as {
+        position_address?: string;
+        pool_address?: string;
+        bps?: number;
+      };
+
+      if (!withdrawArgs.position_address || !withdrawArgs.pool_address) {
+        return { pass: false, reason: "position_address and pool_address are required" };
+      }
+
+      const bps = withdrawArgs.bps ?? 10000;
+      if (bps < 1 || bps > 10000) {
+        return {
+          pass: false,
+          reason: `Invalid bps: ${bps}. Must be between 1 and 10000`,
+        };
+      }
+
       return { pass: true };
     }
 
