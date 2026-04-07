@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import Table from "cli-table3";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
 import logUpdate from "log-update";
 import { join } from "path";
@@ -316,24 +317,42 @@ function refreshPrompt(deps: REPLDependencies): void {
 function formatCandidates(candidates: CondensedPool[]): string {
   if (!candidates.length) return "  No eligible pools found right now.";
 
-  const lines = candidates.map((p, i) => {
-    const name = (p.name || "unknown").padEnd(20);
-    const ftvl =
-      `${p.fee_active_tvl_ratio ?? (p as { fee_tvl_ratio?: number }).fee_tvl_ratio}%`.padStart(8);
-    const vol =
-      `$${((p.volume_window || (p as { volume_24h?: number }).volume_24h || 0) / 1000).toFixed(1)}k`.padStart(
-        8
-      );
-    const active = `${p.active_pct}%`.padStart(6);
-    const org = String(p.organic_score).padStart(4);
-    return `  [${i + 1}]  ${name}  fee/aTVL:${ftvl}  vol:${vol}  in-range:${active}  organic:${org}`;
+  const table = new Table({
+    head: ["#", "pool", "fee/aTVL", "vol", "in-range", "organic"],
+    colWidths: [5, 20, 12, 10, 12, 10],
+    style: {
+      head: ["cyan"],
+    },
+    chars: {
+      top: "",
+      "top-mid": "",
+      "top-left": "",
+      "top-right": "",
+      bottom: "",
+      "bottom-mid": "",
+      "bottom-left": "",
+      "bottom-right": "",
+      left: "",
+      "left-mid": "",
+      mid: "",
+      "mid-mid": "",
+      right: "",
+      "right-mid": "",
+      middle: "  ",
+    },
   });
 
-  return [
-    "  #   pool                  fee/aTVL     vol    in-range  organic",
-    "  " + "─".repeat(68),
-    ...lines,
-  ].join("\n");
+  candidates.forEach((p, i) => {
+    const idx = `${i + 1}`.padStart(2, " ");
+    const name = (p.name || "unknown").slice(0, 18);
+    const ftvl = `${(p.fee_active_tvl_ratio ?? ((p as { fee_tvl_ratio?: number }).fee_tvl_ratio || 0)).toFixed(2)}%`;
+    const vol = `$${((p.volume_window || (p as { volume_24h?: number }).volume_24h || 0) / 1000).toFixed(1)}k`;
+    const active = `${p.active_pct ?? 0}%`;
+    const org = String(p.organic_score ?? 0);
+    table.push([idx, name, ftvl, vol, active, org]);
+  });
+
+  return table.toString();
 }
 
 /** Strip reasoning blocks that some models leak into output */
@@ -599,7 +618,7 @@ const cmdCandidates: Command = {
   description: "Refresh top pool list",
   handler: async ({ rl, deps }) => {
     await runBusy(rl, deps, async () => {
-      const topCandidates = await getTopCandidates({ limit: 5 });
+      const topCandidates = await getTopCandidates({ limit: 20 });
       const candidates = (topCandidates as { candidates?: CondensedPool[] }).candidates || [];
       _startupCandidates = candidates;
       const totalEligible = (topCandidates as { total_eligible?: number }).total_eligible ?? 0;
@@ -892,7 +911,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       const [wallet, positions, topCandidates] = await Promise.all([
         getWalletBalances(),
         getMyPositions({ force: true, silent: true }),
-        getTopCandidates({ limit: 5 }),
+        getTopCandidates({ limit: 20 }),
       ]);
 
       const candidates =
