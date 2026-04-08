@@ -8,13 +8,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "**",
-      "!node_modules/**",
-      "!dist/**",
-      "!**/*.json",
-      "!**/*.md"
-    ]
+    "includes": ["**", "!node_modules", "!dist", "!**/*.json", "!**/*.md"]
   },
   "formatter": {
     "enabled": true,
@@ -27,9 +21,17 @@
     "formatWithErrors": false
   },
   "linter": {
-    "enabled": false,
+    "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUndeclaredVariables": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noConsole": "off"
+      }
     }
   },
   "assist": {

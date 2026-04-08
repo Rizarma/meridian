@@ -2,7 +2,6 @@
 // Types for index.js - cron orchestration, cycles, and REPL
 
 import type { ScheduledTask } from "node-cron";
-import type { Interface as ReadlineInterface } from "readline";
 import type { CondensedPool } from "./screening.js";
 import type { EnrichedPosition } from "./dlmm.js";
 

@@ -9,14 +9,13 @@
  * LLM prompt so the agent can prioritize the right screening criteria.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { log } from "../infrastructure/logger.js";
 import type {
   PerformanceRecord,
   SignalWeights,
   WeightChange,
   WeightConfig,
-  WeightHistoryEntry,
 } from "../types/weights.js";
 
 const WEIGHTS_FILE = "./signal-weights.json";
@@ -355,7 +354,7 @@ function extractNumeric(signal: string, entries: PerformanceRecord[]): number[] 
     const snap = entry.signal_snapshot;
     if (!snap) continue;
     const v = snap[signal];
-    if (v != null && typeof v === "number" && isFinite(v)) vals.push(v);
+    if (v != null && typeof v === "number" && Number.isFinite(v)) vals.push(v);
   }
   return vals;
 }

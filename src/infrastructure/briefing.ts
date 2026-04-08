@@ -1,5 +1,5 @@
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { PROJECT_ROOT } from "../config/paths.js";
 import { getPerformanceSummary } from "../domain/lessons.js";
 import type {

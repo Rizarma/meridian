@@ -13,7 +13,7 @@
 import { config } from "../src/config/config.js";
 import { recordPerformance } from "../src/domain/lessons.js";
 import { addPoolNote } from "../src/domain/pool-memory.js";
-import { getActiveStrategy, getStrategy } from "../src/domain/strategy-library.js";
+import { getActiveStrategy, } from "../src/domain/strategy-library.js";
 import { log, logAction } from "../src/infrastructure/logger.js";
 import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
 import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
@@ -26,7 +26,6 @@ import type {
 import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
-import type { Strategy } from "../src/types/strategy.js";
 import type { TokenBalance, WalletBalances } from "../src/types/wallet.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
@@ -186,7 +185,7 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
     }).catch(() => {});
 
     // Note low-yield closes in pool memory so screener avoids redeploying
-    if (closeArgs.reason && closeArgs.reason.toLowerCase().includes("yield")) {
+    if (closeArgs.reason?.toLowerCase().includes("yield")) {
       const poolAddr = (result.pool as string) || closeArgs.pool_address;
       if (poolAddr) {
         void addPoolNote({
@@ -586,7 +585,7 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 function summarizeResult(result: unknown): unknown {
   const str = JSON.stringify(result);
   if (str.length > 1000) {
-    return str.slice(0, 1000) + "...(truncated)";
+    return `${str.slice(0, 1000)}...(truncated)`;
   }
   return result;
 }

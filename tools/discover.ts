@@ -8,9 +8,9 @@
  * - Tools register themselves via side-effect imports
  */
 
-import { readdirSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

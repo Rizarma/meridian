@@ -1,6 +1,6 @@
-import { execSync, type ExecSyncOptions } from "child_process";
-import { existsSync } from "fs";
-import path from "path";
+import { execSync, type ExecSyncOptions } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Get list of changed files (staged + unstaged) that match given extensions

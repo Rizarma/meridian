@@ -1,6 +1,6 @@
-import { closePosition, getMyPositions } from "../../tools/dlmm.js";
+import { getMyPositions } from "../../tools/dlmm.js";
 import { agentLoop } from "../agent/agent.js";
-import { computeDeployAmount, config } from "../config/config.js";
+import { config } from "../config/config.js";
 import {
   TRAILING_DROP_CONFIRM_DELAY_MS,
   TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
@@ -8,12 +8,8 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { evaluateManagementExitRules } from "../domain/exit-rules.js";
-import { addPoolNote, recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
-import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import { recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
 import {
-  clearAllConfirmationTimers,
-  clearPeakConfirmationTimer,
-  clearTrailingDropConfirmationTimer,
   deletePeakConfirmTimer,
   deleteTrailingDropConfirmTimer,
   getPeakConfirmTimer,
@@ -33,7 +29,6 @@ import {
 import {
   createLiveMessage,
   notifyOutOfRange,
-  sendHTML,
   sendMessage,
   isEnabled as telegramEnabled,
 } from "../infrastructure/telegram.js";
@@ -139,7 +134,7 @@ export async function runManagementCycle(
   let mgmtReport: string | null = null;
   let positions: EnrichedPosition[] = [];
   let liveMessage: LiveMessageHandler | null = null;
-  const screeningCooldownMs = 5 * 60 * 1000;
+  const _screeningCooldownMs = 5 * 60 * 1000;
 
   try {
     if (!silent && telegramEnabled()) {

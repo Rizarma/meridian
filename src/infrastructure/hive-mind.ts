@@ -20,7 +20,7 @@
  * Zero dependencies — uses only Node.js stdlib + native fetch().
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { config } from "../config/config.js";
 import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
@@ -376,16 +376,16 @@ export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Pro
     );
 
     const lines: string[] = [];
-    let poolsWithData = 0;
+    let _poolsWithData = 0;
 
     for (const { addr, data } of results) {
       if (data && data.unique_agents >= MIN_AGENTS_FOR_CONSENSUS) {
-        poolsWithData++;
+        _poolsWithData++;
         const name = data.pool_name || addr.slice(0, 8);
         const winPct = data.weighted_win_rate ?? 0;
         const avgPnl =
           data.weighted_avg_pnl != null
-            ? (data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1) + "%"
+            ? `${(data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1)}%`
             : "N/A";
         lines.push(
           `[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`
@@ -399,7 +399,7 @@ export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Pro
     let output = [header, ...lines].join("\n");
 
     if (output.length > MAX_CONSENSUS_CHARS) {
-      output = output.slice(0, MAX_CONSENSUS_CHARS - 3) + "...";
+      output = `${output.slice(0, MAX_CONSENSUS_CHARS - 3)}...`;
     }
 
     return output;

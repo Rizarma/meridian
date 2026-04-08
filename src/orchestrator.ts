@@ -1,4 +1,4 @@
-import type { ScheduledTask } from "node-cron";
+
 import cron from "node-cron";
 import { getMyPositions, stopPoolCache } from "../tools/dlmm.js";
 import { agentLoop } from "./agent/agent.js";
@@ -25,7 +25,6 @@ import {
   updatePnlAndCheckExits,
 } from "./infrastructure/state.js";
 import {
-  createLiveMessage,
   sendHTML,
   stopPolling,
   isEnabled as telegramEnabled,

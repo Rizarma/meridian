@@ -1,4 +1,4 @@
-import fs from "fs";
+import fs from "node:fs";
 import { USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   LiveMessageAPI,
@@ -67,7 +67,7 @@ function loadChatId(): void {
   }
 }
 
-function saveChatId(id: string): void {
+function _saveChatId(id: string): void {
   try {
     const raw: { telegramChatId?: string } & Record<string, unknown> = fs.existsSync(
       USER_CONFIG_PATH
@@ -495,7 +495,7 @@ export async function notifyDeploy({
     : "";
   const poolStr =
     binStep || baseFee
-      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
+      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? `${baseFee}%` : "?"}\n`
       : "";
   await sendHTML(
     `✅ <b>Deployed</b> ${pair}\n` +

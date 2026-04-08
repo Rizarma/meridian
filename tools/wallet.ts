@@ -1,7 +1,6 @@
 import {
   Connection,
   Keypair,
-  LAMPORTS_PER_SOL,
   PublicKey,
   VersionedTransaction,
 } from "@solana/web3.js";
@@ -129,7 +128,7 @@ function getWallet(): Keypair {
   return _wallet;
 }
 
-const JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
+const _JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
 const JUPITER_ULTRA_API: string = "https://api.jup.ag/ultra/v1";
 const JUPITER_QUOTE_API: string = "https://api.jup.ag/swap/v1";
 const JUPITER_API_KEY: string = process.env.JUPITER_API_KEY || "";
@@ -229,7 +228,7 @@ export async function getWalletBalances(): Promise<WalletBalances> {
 /**
  * Swap tokens via Jupiter Ultra API (order → sign → execute).
  */
-const SOL_MINT: string = "So11111111111111111111111111111111111111112";
+const _SOL_MINT: string = "So11111111111111111111111111111111111111112";
 
 // Normalize any SOL-like address to the correct wrapped SOL mint
 export function normalizeMint(mint: string): string {
@@ -279,7 +278,7 @@ export async function swapToken({
         (mintInfo.value?.data as { parsed?: { info?: { decimals?: number } } })?.parsed?.info
           ?.decimals ?? 9;
     }
-    const amountStr = Math.floor(amount * Math.pow(10, decimals)).toString();
+    const amountStr = Math.floor(amount * 10 ** decimals).toString();
 
     // ─── Get Ultra order (unsigned tx + requestId) ─────────────
     const orderUrl =

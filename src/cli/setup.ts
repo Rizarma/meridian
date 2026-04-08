@@ -4,8 +4,8 @@
  * Run: pnpm run setup
  */
 
-import fs from "fs";
-import readline from "readline";
+import fs from "node:fs";
+import readline from "node:readline";
 import { ENV_PATH, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   AskBoolFn,
@@ -20,9 +20,9 @@ import type {
   Presets,
   UserConfig,
 } from "../types/setup.d.ts";
-import { colors, error, header, info, success, warning } from "./colors.js";
+import { colors, error, header, } from "./colors.js";
 
-const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
+const _DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -58,7 +58,7 @@ const askNum: AskNumFn = (
     while (true) {
       const raw = await ask(question, String(defaultVal));
       const n = parseFloat(raw);
-      if (isNaN(n)) {
+      if (Number.isNaN(n)) {
         console.log(error(`  Please enter a number.`));
         continue;
       }
@@ -120,7 +120,7 @@ const askChoice: AskChoiceFn = <T extends string>(
       console.log(`\n${question}`);
       console.log(labels);
       const raw = await ask("Enter number", "");
-      const idx = parseInt(raw) - 1;
+      const idx = parseInt(raw, 10) - 1;
       if (idx >= 0 && idx < choices.length) {
         resolve(choices[idx]);
         break;
@@ -151,9 +151,9 @@ function parseEnv(content: string): EnvMap {
  */
 function buildEnv(map: EnvMap): string {
   return (
-    Object.entries(map)
+    `${Object.entries(map)
       .map(([k, v]) => `${k}=${v}`)
-      .join("\n") + "\n"
+      .join("\n")}\n`
   );
 }
 

@@ -5,7 +5,7 @@
  * Screening filters blacklisted tokens before passing pools to the LLM.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { log } from "../infrastructure/logger.js";
 import type { BlacklistDB, BlacklistEntry } from "../types/blocklist.js";

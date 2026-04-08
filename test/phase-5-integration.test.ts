@@ -21,9 +21,6 @@ import type { PerformanceRecord as WeightsPerformanceRecord } from "../src/types
 import type { MiddlewareFn } from "../tools/middleware.js";
 import {
   applyMiddleware,
-  loggingMiddleware,
-  notificationMiddleware,
-  safetyCheckMiddleware,
 } from "../tools/middleware.js";
 import {
   clearRegistry,
@@ -183,7 +180,7 @@ describeAsync("Tool Registry Role Enforcement", async () => {
 
     const tool = getTool("discover_pools" as ToolName);
     expect(tool !== undefined).toBe(true);
-    const result = (await tool!.handler({})) as { success: boolean; data: string };
+    const result = (await tool?.handler({})) as { success: boolean; data: string };
     expect(result.success).toBe(true);
   });
 
@@ -202,8 +199,8 @@ describeAsync("Tool Registry Role Enforcement", async () => {
 
     const tool = getTool("close_position" as ToolName);
     expect(tool !== undefined).toBe(true);
-    expect(tool!.roles.includes("SCREENER")).toBe(false);
-    expect(tool!.roles.includes("MANAGER")).toBe(true);
+    expect(tool?.roles.includes("SCREENER")).toBe(false);
+    expect(tool?.roles.includes("MANAGER")).toBe(true);
   });
 
   testAsync("GENERAL role can call cross-role tools", async () => {
@@ -235,21 +232,21 @@ describeAsync("Middleware Chain Ordering", async () => {
     clearRegistry();
     const executionOrder: string[] = [];
 
-    const trackingSafety: MiddlewareFn = async (tool, args, role, next) => {
+    const trackingSafety: MiddlewareFn = async (_tool, _args, _role, next) => {
       executionOrder.push("safety:before");
       const result = await next();
       executionOrder.push("safety:after");
       return result;
     };
 
-    const trackingLogging: MiddlewareFn = async (tool, args, role, next) => {
+    const trackingLogging: MiddlewareFn = async (_tool, _args, _role, next) => {
       executionOrder.push("logging:before");
       const result = await next();
       executionOrder.push("logging:after");
       return result;
     };
 
-    const trackingNotification: MiddlewareFn = async (tool, args, role, next) => {
+    const trackingNotification: MiddlewareFn = async (_tool, _args, _role, next) => {
       executionOrder.push("notification:before");
       const result = await next();
       executionOrder.push("notification:after");
