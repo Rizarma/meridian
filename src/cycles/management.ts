@@ -39,6 +39,7 @@ import type {
   LiveMessageHandler,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
+import { isArray } from "../utils/validation.js";
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -141,7 +142,8 @@ export async function runManagementCycle(
       liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
     }
     const livePositions = await getMyPositions({ force: true }).catch((): null => null);
-    positions = livePositions?.positions || [];
+    const rawPositions = livePositions?.positions;
+    positions = isArray(rawPositions) ? rawPositions : [];
 
     if (positions.length === 0) {
       log("cron", "No open positions — triggering screening cycle");
@@ -157,10 +159,14 @@ export async function runManagementCycle(
     }
 
     // Snapshot + load pool memory
-    const positionData = positions.map((p) => {
+    // Validate positions array before mapping
+    if (!isArray(positions)) {
+      throw new Error("Invalid positions data: not an array");
+    }
+    const positionData: Array<EnrichedPosition & { recall: string | null }> = positions.map((p) => {
       recordPositionSnapshot(p.pool, p);
       return { ...p, recall: recallForPool(p.pool) };
-    }) as Array<EnrichedPosition & { recall: string | null }>;
+    });
 
     // JS trailing TP check
     const exitMap = new Map<string, string>();

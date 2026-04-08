@@ -19,6 +19,38 @@ import type {
 } from "../types/state.js";
 import type { Strategy } from "../types/strategy.js";
 
+// ── Floating-point comparison utilities ─────────────────────────
+const EPSILON = 0.0001; // 0.01% tolerance
+
+/**
+ * Compare floating point numbers with epsilon tolerance.
+ * Returns true if a <= b (accounting for floating point precision)
+ */
+function lessThanOrEqual(a: number, b: number, epsilon = EPSILON): boolean {
+  return a <= b + epsilon;
+}
+
+/**
+ * Returns true if a >= b (accounting for floating point precision)
+ */
+function greaterThanOrEqual(a: number, b: number, epsilon = EPSILON): boolean {
+  return a >= b - epsilon;
+}
+
+/**
+ * Returns true if a < b (accounting for floating point precision)
+ */
+function lessThan(a: number, b: number, epsilon = EPSILON): boolean {
+  return a < b - epsilon;
+}
+
+/**
+ * Returns true if a is effectively equal to b within epsilon
+ */
+function _effectivelyEqual(a: number, b: number, epsilon = EPSILON): boolean {
+  return Math.abs(a - b) <= epsilon;
+}
+
 /**
  * Evaluate all exit conditions for a position and return an exit action if triggered.
  * This is the main entry point used by state.ts updatePnlAndCheckExits().
@@ -88,7 +120,7 @@ export function evaluateManagementExitRules(
 ): ActionDecision | null {
   // Rule 1: stop loss
   const stopLossPct = mgmtConfig.stopLossPct ?? -0.05; // Default 5% loss
-  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct <= stopLossPct) {
+  if (!pnlSuspect && position.pnl_pct != null && lessThanOrEqual(position.pnl_pct, stopLossPct)) {
     return { action: "CLOSE", rule: 1, reason: "stop loss" };
   }
 
@@ -97,7 +129,11 @@ export function evaluateManagementExitRules(
   const takeProfitPct =
     strategyConfig?.exit?.take_profit_pct ?? mgmtConfig.takeProfitFeePct ?? 0.02; // Default 2% profit
 
-  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct >= takeProfitPct) {
+  if (
+    !pnlSuspect &&
+    position.pnl_pct != null &&
+    greaterThanOrEqual(position.pnl_pct, takeProfitPct)
+  ) {
     return { action: "CLOSE", rule: 2, reason: "take profit" };
   }
 
@@ -123,14 +159,14 @@ export function evaluateManagementExitRules(
   // Rule 5: fee yield too low
   if (
     position.fee_per_tvl_24h != null &&
-    position.fee_per_tvl_24h < (mgmtConfig.minFeePerTvl24h ?? 7) &&
-    (position.age_minutes ?? 0) >= (mgmtConfig.minAgeBeforeYieldCheck ?? 60)
+    lessThan(position.fee_per_tvl_24h, mgmtConfig.minFeePerTvl24h ?? 7) &&
+    greaterThanOrEqual(position.age_minutes ?? 0, mgmtConfig.minAgeBeforeYieldCheck ?? 60)
   ) {
     return { action: "CLOSE", rule: 5, reason: "low yield" };
   }
 
   // Claim rule
-  if ((position.unclaimed_fees_usd ?? 0) >= (mgmtConfig.minClaimAmount ?? 5)) {
+  if (greaterThanOrEqual(position.unclaimed_fees_usd ?? 0, mgmtConfig.minClaimAmount ?? 5)) {
     return { action: "CLAIM" };
   }
 
@@ -148,7 +184,7 @@ export function shouldStopLoss(
   if (pnlSuspicious) return false;
   if (pnlPct == null) return false;
   if (config.stopLossPct == null) return false;
-  return pnlPct <= config.stopLossPct;
+  return lessThanOrEqual(pnlPct, config.stopLossPct);
 }
 
 /**
@@ -162,7 +198,7 @@ export function shouldTakeProfit(
   if (pnlSuspicious) return false;
   if (pnlPct == null) return false;
   if (config.takeProfitFeePct == null) return false;
-  return pnlPct >= config.takeProfitFeePct;
+  return greaterThanOrEqual(pnlPct, config.takeProfitFeePct);
 }
 
 /**
@@ -171,7 +207,7 @@ export function shouldTakeProfit(
 export function shouldCloseOOR(position: TrackedPosition, config: ManagementConfig): boolean {
   if (!position.out_of_range_since) return false;
   const minutesOOR = calculateMinutesOOR(position);
-  return minutesOOR >= (config.outOfRangeWaitMinutes ?? 30);
+  return greaterThanOrEqual(minutesOOR, config.outOfRangeWaitMinutes ?? 30);
 }
 
 /**
@@ -184,7 +220,7 @@ export function shouldCloseLowYield(
 ): boolean {
   if (feePerTvl24h == null) return false;
   if (config.minFeePerTvl24h == null) return false;
-  if (feePerTvl24h >= config.minFeePerTvl24h) return false;
+  if (greaterThanOrEqual(feePerTvl24h, config.minFeePerTvl24h)) return false;
 
   const minAge = config.minAgeBeforeYieldCheck ?? 60;
   if (ageMinutes == null || ageMinutes < minAge) return false;
@@ -212,7 +248,7 @@ export function evaluateTrailingTP(
   const dropFromPeak = (position.peak_pnl_pct ?? 0) - currentPnlPct;
   const trailingDropPct = mgmtConfig.trailingDropPct ?? 1.5;
 
-  if (dropFromPeak >= trailingDropPct) {
+  if (greaterThanOrEqual(dropFromPeak, trailingDropPct)) {
     return {
       action: "TRAILING_TP",
       reason: `Trailing TP: peak ${position.peak_pnl_pct?.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${trailingDropPct}%)`,
@@ -237,7 +273,7 @@ export function shouldActivateTrailingTP(
   if (position.trailing_active) return false;
 
   const triggerPct = mgmtConfig.trailingTriggerPct ?? 3;
-  return (position.peak_pnl_pct ?? 0) >= triggerPct;
+  return greaterThanOrEqual(position.peak_pnl_pct ?? 0, triggerPct);
 }
 
 /**

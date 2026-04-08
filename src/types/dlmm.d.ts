@@ -4,13 +4,49 @@
 import type BN from "bn.js";
 import type { PublicKey } from "@solana/web3.js";
 
-// ─── SDK Types (external - use any with JSDoc) ─────────────────
+// ─── SDK Types (external - properly typed) ─────────────────
 
-/** Meteora DLMM SDK pool object - external SDK type */
-export type DLMMPool = any;
+import type { Transaction } from "@solana/web3.js";
 
-/** Meteora DLMM SDK StrategyType enum - external SDK type */
-export type StrategyType = any;
+/** Token information within a DLMM pool */
+export interface PoolToken {
+  mint: PublicKey;
+  decimal: number;
+}
+
+/** Meteora DLMM SDK pool object */
+export interface DLMMPool {
+  lbPair: LbPair;
+  tokenX: PoolToken;
+  tokenY: PoolToken;
+  addLiquidityByStrategyChunkable: (params: unknown) => Promise<Transaction | Transaction[]>;
+  initializePositionAndAddLiquidityByStrategy: (params: unknown) => Promise<Transaction>;
+  addLiquidityByStrategy: (params: unknown) => Promise<Transaction>;
+  getActiveBin: () => Promise<{ binId: number; price: BN }>;
+  getPosition: (pubkey: PublicKey) => Promise<unknown>;
+  createExtendedEmptyPosition: (
+    minBinId: number,
+    maxBinId: number,
+    positionPubKey: PublicKey,
+    userPubKey: PublicKey
+  ) => Promise<Transaction | Transaction[]>;
+  removeLiquidity: (params: unknown) => Promise<Transaction | Transaction[]>;
+  claimSwapFee: (params: { owner: PublicKey; position: unknown }) => Promise<Transaction[]>;
+  closePosition: (params: {
+    owner: PublicKey;
+    position: { publicKey: PublicKey };
+  }) => Promise<Transaction>;
+  fromPricePerLamport: (price: number) => number;
+}
+
+/** Meteora DLMM SDK StrategyType enum values */
+export type StrategyType =
+  | "Spot"
+  | "Curve"
+  | "BidAsk"
+  | "SpotImBalanced"
+  | "CurveImBalanced"
+  | "BidAskImBalanced";
 
 /** Meteora LB pair parameters */
 export interface LbPair {

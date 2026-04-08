@@ -13,6 +13,7 @@ import { USER_CONFIG_PATH } from "./paths.js";
 /**
  * Sanitize parsed JSON to prevent prototype pollution.
  * Removes __proto__, constructor, and prototype keys from objects.
+ * Uses Object.create(null) to avoid prototype chain and recursively sanitizes nested objects.
  */
 function sanitizeJson<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") {
@@ -20,17 +21,28 @@ function sanitizeJson<T>(obj: T): T {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(sanitizeJson) as unknown as T;
+    return obj.map((item) => sanitizeJson(item)) as unknown as T;
   }
 
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    // Block prototype pollution keys
+  // Use Object.create(null) to avoid prototype chain
+  const sanitized = Object.create(null) as Record<string, unknown>;
+
+  for (const key of Object.keys(obj)) {
+    // Block dangerous keys at all levels
     if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      log("security", `Blocked dangerous key: ${key}`);
       continue;
     }
-    sanitized[key] = sanitizeJson(value);
+
+    // Recursively sanitize nested objects
+    const value = (obj as Record<string, unknown>)[key];
+    if (typeof value === "object" && value !== null) {
+      sanitized[key] = sanitizeJson(value);
+    } else {
+      sanitized[key] = value;
+    }
   }
+
   return sanitized as T;
 }
 

@@ -30,17 +30,20 @@ import type {
   CloseResult,
   DeployParams,
   DeployResult,
+  DLMMPool,
   EnrichedPosition,
   PositionPnL,
   PositionsResult,
   RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
+  StrategyType,
   WalletPositionsParams,
   WalletPositionsResult,
   WithdrawLiquidityParams,
   WithdrawLiquidityResult,
 } from "../src/types/dlmm.js";
+import { isArray, isObject } from "../src/utils/validation.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
@@ -99,14 +102,15 @@ class LRUCache<K, V> {
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
 // that break in ESM on Node 24. Dynamic import defers loading until
 // an actual on-chain call is needed (never triggered in dry-run).
-let _DLMM: any = null;
-let _StrategyType: any = null;
+// These are external SDK types - using unknown for type safety
+let _DLMM: unknown = null;
+let _StrategyType: Record<string, string> | null = null;
 
 async function getDLMM() {
   if (!_DLMM) {
     const mod = await import("@meteora-ag/dlmm");
     _DLMM = mod.default;
-    _StrategyType = mod.StrategyType;
+    _StrategyType = mod.StrategyType as unknown as Record<string, string>;
   }
   return { DLMM: _DLMM, StrategyType: _StrategyType };
 }
@@ -177,7 +181,8 @@ async function getPool(poolAddress: string): Promise<any> {
   if (!poolCache.has(key)) {
     startPoolCacheInterval(); // lazy start - only when actually needed
     const { DLMM } = await getDLMM();
-    const pool = await DLMM.create(getSharedConnection(), new PublicKey(poolAddress));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pool = await (DLMM as any).create(getSharedConnection(), new PublicKey(poolAddress));
     poolCache.set(key, pool);
   }
   return poolCache.get(key) as unknown;
@@ -265,7 +270,10 @@ export async function deployPosition({
   const minBinId = activeBin.binId - activeBinsBelow;
   const maxBinId = activeBin.binId + activeBinsAbove;
 
-  const strategyMap: Record<string, any> = {
+  if (!StrategyType) {
+    throw new Error("StrategyType not initialized");
+  }
+  const strategyMap: Record<string, string> = {
     spot: StrategyType.Spot,
     curve: StrategyType.Curve,
     bid_ask: StrategyType.BidAsk,
@@ -289,7 +297,10 @@ export async function deployPosition({
     const mintInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenXMint)
     );
-    const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    const parsedData = mintInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimals = parsedData?.parsed?.info?.decimals ?? 9;
     totalXLamports = new BN((finalAmountX * 10 ** decimals).toFixed(0), 10);
   }
 
@@ -512,6 +523,10 @@ export async function addLiquidity({
     }
 
     // Get bin range from position data
+    // Validate positionData has expected shape before accessing
+    if (!isObject(positionData)) {
+      return { success: false, error: "Invalid position data from SDK" };
+    }
     const processed = (
       positionData as { positionData?: { lowerBinId?: number; upperBinId?: number } }
     )?.positionData;
@@ -530,7 +545,10 @@ export async function addLiquidity({
 
     // ─── Strategy ──────────────────────────────────────────────
     const activeStrategy = strategy || config.strategy.strategy;
-    const strategyMap: Record<string, any> = {
+    if (!StrategyType) {
+      throw new Error("StrategyType not initialized");
+    }
+    const strategyMap: Record<string, string> = {
       spot: StrategyType.Spot,
       curve: StrategyType.Curve,
       bid_ask: StrategyType.BidAsk,
@@ -545,12 +563,18 @@ export async function addLiquidity({
     const mintXInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenXMint)
     );
-    const decimalsX = (mintXInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    const parsedDataX = mintXInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimalsX = parsedDataX?.parsed?.info?.decimals ?? 9;
 
     const mintYInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenYMint)
     );
-    const decimalsY = (mintYInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    const parsedDataY = mintYInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimalsY = parsedDataY?.parsed?.info?.decimals ?? 9;
 
     // Convert to lamports
     const totalXLamports =
@@ -688,8 +712,18 @@ async function fetchDlmmPnlForPool(
       );
       return {};
     }
-    const data = (await res.json()) as { positions?: RawPnLData[]; data?: RawPnLData[] };
-    const positions = data.positions || data.data || [];
+    const rawData = await res.json();
+    if (!isObject(rawData)) {
+      log("pnl_api", `Invalid response for pool ${poolAddress.slice(0, 8)}: not an object`);
+      return {};
+    }
+    const data = rawData as { positions?: RawPnLData[]; data?: RawPnLData[] };
+    const rawPositions = data.positions || data.data || [];
+    if (!isArray(rawPositions)) {
+      log("pnl_api", `Invalid positions array for pool ${poolAddress.slice(0, 8)}`);
+      return {};
+    }
+    const positions = rawPositions;
     if (positions.length === 0) {
       log(
         "pnl_api",
@@ -748,7 +782,7 @@ export async function getPositionPnl({
 }
 
 function safeNum(value: unknown): number {
-  const n = parseFloat((value as any) ?? 0);
+  const n = parseFloat(String(value ?? 0));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -1031,16 +1065,34 @@ export async function searchPools({
   const url = `https://dlmm.datapi.meteora.ag/pools?query=${encodeURIComponent(query)}`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Pool search API error: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as any[] | { data?: any[] };
-  const pools = (Array.isArray(data) ? data : (data as { data?: any[] }).data || []).slice(
-    0,
-    limit
-  );
+  interface PoolSearchResult {
+    address?: string;
+    pool_address?: string;
+    name: string;
+    bin_step?: number;
+    dlmm_params?: { bin_step?: number };
+    base_fee_percentage?: number;
+    fee_pct?: number;
+    liquidity?: number;
+    trade_volume_24h?: number;
+    mint_x_symbol?: string;
+    mint_x?: string;
+    mint_y_symbol?: string;
+    mint_y?: string;
+    token_x?: { symbol?: string; address?: string };
+    token_y?: { symbol?: string; address?: string };
+  }
+  const rawSearchData = await res.json();
+  if (!isObject(rawSearchData) && !isArray(rawSearchData)) {
+    throw new Error("Invalid pool search response: not an object or array");
+  }
+  const data = rawSearchData as PoolSearchResult[] | { data?: PoolSearchResult[] };
+  const pools = (Array.isArray(data) ? data : data.data || []).slice(0, limit);
   return {
     query,
     total: pools.length,
-    pools: pools.map((p: any) => ({
-      pool: p.address || p.pool_address,
+    pools: pools.map((p) => ({
+      pool: p.address || p.pool_address || "",
       name: p.name,
       bin_step: p.bin_step ?? p.dlmm_params?.bin_step,
       fee_pct: p.base_fee_percentage ?? p.fee_pct,
@@ -1265,11 +1317,17 @@ export async function withdrawLiquidity({
       const mintXInfo = await getSharedConnection().getParsedAccountInfo(
         new PublicKey(pool.lbPair.tokenXMint)
       );
-      decimalsX = (mintXInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+      const parsedDataX = mintXInfo.value?.data as
+        | { parsed?: { info?: { decimals?: number } } }
+        | undefined;
+      decimalsX = parsedDataX?.parsed?.info?.decimals ?? 9;
       const mintYInfo = await getSharedConnection().getParsedAccountInfo(
         new PublicKey(pool.lbPair.tokenYMint)
       );
-      decimalsY = (mintYInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+      const parsedDataY = mintYInfo.value?.data as
+        | { parsed?: { info?: { decimals?: number } } }
+        | undefined;
+      decimalsY = parsedDataY?.parsed?.info?.decimals ?? 9;
     } catch {
       log("withdraw_warn", "Could not fetch token decimals, using default 9");
     }
@@ -1376,7 +1434,10 @@ export async function withdrawLiquidity({
             const info = await getSharedConnection().getParsedAccountInfo(
               tokenXAccount.value[0].pubkey
             );
-            const parsed = (info.value?.data as any)?.parsed?.info;
+            const parsedData = info.value?.data as
+              | { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } }
+              | undefined;
+            const parsed = parsedData?.parsed?.info;
             amountXWithdrawn = parsed
               ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
               : 0;
@@ -1385,7 +1446,10 @@ export async function withdrawLiquidity({
             const info = await getSharedConnection().getParsedAccountInfo(
               tokenYAccount.value[0].pubkey
             );
-            const parsed = (info.value?.data as any)?.parsed?.info;
+            const parsedData = info.value?.data as
+              | { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } }
+              | undefined;
+            const parsed = parsedData?.parsed?.info;
             amountYWithdrawn = parsed
               ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
               : 0;
@@ -1607,25 +1671,30 @@ export async function closePosition({
         const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
         const res = await fetchWithTimeout(closedUrl);
         if (res.ok) {
-          const data = (await res.json()) as { positions?: any[] };
-          const posEntry = (data.positions || []).find(
-            (p: any) => p.positionAddress === position_address
-          );
-          if (posEntry) {
-            pnlUsd = Number(posEntry.pnlUsd ?? 0);
-            pnlPct = Number(posEntry.pnlPctChange ?? 0);
-            finalValueUsd = Number(posEntry.allTimeWithdrawals?.total?.usd ?? 0);
-            initialUsd = Number(posEntry.allTimeDeposits?.total?.usd ?? 0);
-            feesUsd = Number(posEntry.allTimeFees?.total?.usd ?? 0) || feesUsd;
-            log(
-              "close",
-              `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)}`
-            );
+          const rawClosedData = await res.json();
+          if (!isObject(rawClosedData)) {
+            log("close_warn", "Invalid closed positions response: not an object");
           } else {
-            log(
-              "close_warn",
-              `Position not found in status=closed response — may still be settling`
+            const data = rawClosedData as { positions?: any[] };
+            const posEntry = (data.positions || []).find(
+              (p: any) => p.positionAddress === position_address
             );
+            if (posEntry) {
+              pnlUsd = Number(posEntry.pnlUsd ?? 0);
+              pnlPct = Number(posEntry.pnlPctChange ?? 0);
+              finalValueUsd = Number(posEntry.allTimeWithdrawals?.total?.usd ?? 0);
+              initialUsd = Number(posEntry.allTimeDeposits?.total?.usd ?? 0);
+              feesUsd = Number(posEntry.allTimeFees?.total?.usd ?? 0) || feesUsd;
+              log(
+                "close",
+                `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)}`
+              );
+            } else {
+              log(
+                "close_warn",
+                `Position not found in status=closed response — may still be settling`
+              );
+            }
           }
         }
       } catch (e: any) {
@@ -1724,13 +1793,18 @@ async function lookupPoolForPosition(
 
   // SDK scan (last resort)
   const { DLMM } = await getDLMM();
-  const allPositions = await DLMM.getAllLbPairPositionsByUser(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allPositions = await (DLMM as any).getAllLbPairPositionsByUser(
     getSharedConnection(),
     new PublicKey(walletAddress)
   );
 
   for (const [lbPairKey, positionData] of Object.entries(allPositions)) {
-    for (const pos of (positionData as any).lbPairPositionsData || []) {
+    // Validate positionData before casting
+    const positions = isObject(positionData)
+      ? (positionData as { lbPairPositionsData?: Array<{ publicKey: PublicKey }> })
+      : undefined;
+    for (const pos of positions?.lbPairPositionsData || []) {
       if (pos.publicKey.toString() === position_address) return lbPairKey;
     }
   }
