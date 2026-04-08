@@ -126,9 +126,12 @@ function mutateConfig(
   const unknown: string[] = [];
 
   // Build case-insensitive lookup (lines 275-279)
-  const CONFIG_MAP_LOWER: Record<string, [string, [string, string]]> = Object.entries(CONFIG_MAP)
-    .map(([k, v]) => [k.toLowerCase(), [k, v] as [string, [string, string]]])
-    .reduce((acc, [k, v]) => ({ ...acc, [k as string]: v }), {});
+  const CONFIG_MAP_LOWER: Record<string, [string, [string, string]]> = Object.fromEntries(
+    Object.entries(CONFIG_MAP).map(([k, v]) => [
+      k.toLowerCase(),
+      [k, v] as [string, [string, string]],
+    ])
+  );
 
   // Process changes (lines 281-288)
   for (const [key, val] of Object.entries(changes)) {

@@ -91,7 +91,7 @@ function getMockPosition(position_address: string): MockPositionState {
       out_of_range_since: null,
     });
   }
-  return mockStateStore.get(position_address)!;
+  return mockStateStore.get(position_address) as MockPositionState;
 }
 
 function saveMockPosition(position: MockPositionState): void {
@@ -1007,7 +1007,7 @@ describe("Confirmed Trailing Exit Cooldown", () => {
     const afterResolve = Date.now();
 
     const updatedPos = getMockPosition(posId);
-    const cooldownUntil = new Date(updatedPos.confirmed_trailing_exit_until!).getTime();
+    const cooldownUntil = new Date(updatedPos.confirmed_trailing_exit_until as string).getTime();
 
     // Cooldown should be approximately 5 minutes (300 seconds) from resolution
     expect(cooldownUntil).toBeGreaterThan(beforeResolve + 5 * 60 * 1000 - 2000); // Allow 2s tolerance

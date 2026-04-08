@@ -87,13 +87,15 @@ export function evaluateManagementExitRules(
   strategyConfig?: Strategy | null
 ): ActionDecision | null {
   // Rule 1: stop loss
-  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct <= mgmtConfig.stopLossPct!) {
+  const stopLossPct = mgmtConfig.stopLossPct ?? -0.05; // Default 5% loss
+  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct <= stopLossPct) {
     return { action: "CLOSE", rule: 1, reason: "stop loss" };
   }
 
   // Rule 2: take profit
   // Use strategy-specific take_profit_pct if available, otherwise fall back to global config
-  const takeProfitPct = strategyConfig?.exit?.take_profit_pct ?? mgmtConfig.takeProfitFeePct!;
+  const takeProfitPct =
+    strategyConfig?.exit?.take_profit_pct ?? mgmtConfig.takeProfitFeePct ?? 0.02; // Default 2% profit
 
   if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct >= takeProfitPct) {
     return { action: "CLOSE", rule: 2, reason: "take profit" };
