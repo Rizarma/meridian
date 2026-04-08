@@ -9,9 +9,9 @@
  * Fix 2: Directly rewrite the bare import in DLMM's index.mjs to use the explicit path.
  */
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -72,7 +72,7 @@ if (fs.existsSync(dlmmMjs)) {
 
   // Add exactly one canonical BN import at the top if BN is used anywhere
   if (src.includes('BN')) {
-    src = 'import BN from "bn.js";\n' + src;
+    src = `import BN from "bn.js";\n${src}`;
   }
 
   // Helper: remove BN or BN as alias from an import specifier list and clean up commas
@@ -88,7 +88,7 @@ if (fs.existsSync(dlmmMjs)) {
   src = src.replace(
     /import \{([^}]*)\bBN as (\w+)\b([^}]*)\} from "@coral-xyz\/anchor";/g,
     (_, before, alias, after) => {
-      const remaining = removeBNFromSpecifiers(before + "," + after);
+      const remaining = removeBNFromSpecifiers(`${before},${after}`);
       const anchorImport = remaining ? `import { ${remaining} } from "@coral-xyz/anchor";` : "";
       return `${anchorImport}\nconst ${alias} = BN;`;
     }
@@ -98,7 +98,7 @@ if (fs.existsSync(dlmmMjs)) {
   src = src.replace(
     /import \{([^}]*)\bBN\b(?!\s*as\b)([^}]*)\} from "@coral-xyz\/anchor";/g,
     (_, before, after) => {
-      const remaining = removeBNFromSpecifiers(before + "," + after);
+      const remaining = removeBNFromSpecifiers(`${before},${after}`);
       return remaining ? `import { ${remaining} } from "@coral-xyz/anchor";` : "";
     }
   );

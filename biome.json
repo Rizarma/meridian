@@ -8,13 +8,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "**",
-      "!node_modules/**",
-      "!dist/**",
-      "!**/*.json",
-      "!**/*.md"
-    ]
+    "includes": ["**", "!node_modules", "!dist", "!**/*.json", "!**/*.md"]
   },
   "formatter": {
     "enabled": true,
@@ -27,11 +21,67 @@
     "formatWithErrors": false
   },
   "linter": {
-    "enabled": false,
+    "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUndeclaredVariables": "error",
+        "noUnresolvedImports": "error",
+        "noUnusedImports": "error",
+        "noUnusedPrivateClassMembers": "error",
+        "noUndeclaredDependencies": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noConsole": "off"
+      },
+      "performance": {
+        "noAwaitInLoops": "warn",
+        "noDelete": "warn"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "warn",
+          "options": { "maxAllowedComplexity": 25 }
+        },
+        "noExcessiveLinesPerFunction": {
+          "level": "warn",
+          "options": { "maxLines": 120, "skipBlankLines": true }
+        },
+        "useMaxParams": {
+          "level": "warn",
+          "options": { "max": 5 }
+        }
+      }
     }
   },
+  "overrides": [
+    {
+      "includes": ["test/**/*.ts"],
+      "linter": {
+        "rules": {
+          "performance": { "noDelete": "off" },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off",
+            "noExcessiveLinesPerFunction": { "options": { "maxLines": 200 } }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/agent/agent.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off",
+            "noExcessiveLinesPerFunction": "off",
+            "useMaxParams": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

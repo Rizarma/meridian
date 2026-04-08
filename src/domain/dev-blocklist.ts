@@ -6,7 +6,7 @@
  * before the pool list reaches the LLM.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { log } from "../infrastructure/logger.js";
 import type { BlockedDev, DevBlocklistDB } from "../types/blocklist.js";

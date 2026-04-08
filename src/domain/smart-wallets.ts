@@ -1,4 +1,4 @@
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { SMART_WALLETS_FILE } from "../config/paths.js";
 import { log } from "../infrastructure/logger.js";

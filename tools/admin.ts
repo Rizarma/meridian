@@ -4,7 +4,7 @@
  * System-level administrative tools for agent management.
  */
 
-import { execSync, spawn } from "child_process";
+import { execSync, spawn } from "node:child_process";
 import { registerTool } from "./registry.js";
 
 // ═══════════════════════════════════════════════════════════════════════════

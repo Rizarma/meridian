@@ -1,7 +1,6 @@
 // types/screening.d.ts
 // Pool screening and discovery types
 
-import type { PoolMemoryEntry } from "./pool-memory.js";
 
 // Pool Discovery
 export interface DiscoverPoolsInput {

@@ -35,7 +35,7 @@ const mockHandler = async (args: unknown) => ({ success: true, args });
 const TEST_TOOL_1: ToolName = "discover_pools";
 const TEST_TOOL_2: ToolName = "get_top_candidates";
 const TEST_TOOL_3: ToolName = "get_pool_detail";
-const TEST_TOOL_4: ToolName = "deploy_position";
+const _TEST_TOOL_4: ToolName = "deploy_position";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INTEGRATION TEST FIRST: Must run before any clearRegistry() calls

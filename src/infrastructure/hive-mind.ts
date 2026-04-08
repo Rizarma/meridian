@@ -20,7 +20,7 @@
  * Zero dependencies — uses only Node.js stdlib + native fetch().
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { config } from "../config/config.js";
 import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
 import type {
@@ -34,6 +34,7 @@ import type {
   SyncResult,
   ThresholdConsensus,
 } from "../types/hive-mind.js";
+import { getErrorMessage } from "../utils/errors.js";
 
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 const GET_TIMEOUT_MS = 5_000;
@@ -218,8 +219,8 @@ export async function syncToHive(): Promise<void> {
     try {
       const { getPerformanceSummary } = await import("../domain/lessons.js");
       agentStats = getPerformanceSummary();
-    } catch (e: any) {
-      console.log("[hive]", `Could not load agent stats: ${e.message}`);
+    } catch (e) {
+      console.log("[hive]", `Could not load agent stats: ${getErrorMessage(e)}`);
     }
 
     // ── POST to /api/sync ───────────────────────────
@@ -252,8 +253,8 @@ export async function syncToHive(): Promise<void> {
       "[hive]",
       `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`
     );
-  } catch (e: any) {
-    console.log("[hive]", `Sync error: ${e.message}`);
+  } catch (e) {
+    console.log("[hive]", `Sync error: ${getErrorMessage(e)}`);
   }
 }
 
@@ -376,16 +377,16 @@ export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Pro
     );
 
     const lines: string[] = [];
-    let poolsWithData = 0;
+    let _poolsWithData = 0;
 
     for (const { addr, data } of results) {
       if (data && data.unique_agents >= MIN_AGENTS_FOR_CONSENSUS) {
-        poolsWithData++;
+        _poolsWithData++;
         const name = data.pool_name || addr.slice(0, 8);
         const winPct = data.weighted_win_rate ?? 0;
         const avgPnl =
           data.weighted_avg_pnl != null
-            ? (data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1) + "%"
+            ? `${(data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1)}%`
             : "N/A";
         lines.push(
           `[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`
@@ -399,12 +400,12 @@ export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Pro
     let output = [header, ...lines].join("\n");
 
     if (output.length > MAX_CONSENSUS_CHARS) {
-      output = output.slice(0, MAX_CONSENSUS_CHARS - 3) + "...";
+      output = `${output.slice(0, MAX_CONSENSUS_CHARS - 3)}...`;
     }
 
     return output;
-  } catch (e: any) {
-    console.log("[hive]", `formatPoolConsensusForPrompt error: ${e.message}`);
+  } catch (e) {
+    console.log("[hive]", `formatPoolConsensusForPrompt error: ${getErrorMessage(e)}`);
     return "";
   }
 }

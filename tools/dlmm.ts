@@ -5,10 +5,12 @@ import {
   sendAndConfirmTransaction,
   type Transaction,
 } from "@solana/web3.js";
+import { Mutex } from "async-mutex";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { config, getRpcUrl } from "../src/config/config.js";
+import { config } from "../src/config/config.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
 import {
   getTrackedPosition,
@@ -28,31 +30,28 @@ import type {
   CloseResult,
   DeployParams,
   DeployResult,
+  DLMMPool,
   EnrichedPosition,
   PositionPnL,
   PositionsResult,
   RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
+  StrategyType,
   WalletPositionsParams,
   WalletPositionsResult,
   WithdrawLiquidityParams,
   WithdrawLiquidityResult,
 } from "../src/types/dlmm.js";
+import { getErrorMessage } from "../src/utils/errors.js";
+import { recordActivity } from "../src/utils/health-check.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
+import { isArray, isObject } from "../src/utils/validation.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
-// Helper function for fetch with timeout (30 seconds)
-async function fetchWithTimeout(url: string, timeoutMs = 30000): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+// Default slippage in basis points (1000 bps = 10%)
+const DEFAULT_SLIPPAGE_BPS = 1000;
 
 // Simple LRU cache implementation
 class LRUCache<K, V> {
@@ -73,7 +72,9 @@ class LRUCache<K, V> {
     } else if (this.cache.size >= this.maxSize) {
       // Remove oldest (first item)
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
     }
     this.cache.set(key, value);
   }
@@ -92,30 +93,23 @@ class LRUCache<K, V> {
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
 // that break in ESM on Node 24. Dynamic import defers loading until
 // an actual on-chain call is needed (never triggered in dry-run).
-let _DLMM: any = null;
-let _StrategyType: any = null;
+// These are external SDK types - using unknown for type safety
+let _DLMM: unknown = null;
+let _StrategyType: Record<string, string> | null = null;
 
 async function getDLMM() {
   if (!_DLMM) {
     const mod = await import("@meteora-ag/dlmm");
     _DLMM = mod.default;
-    _StrategyType = mod.StrategyType;
+    _StrategyType = mod.StrategyType as unknown as Record<string, string>;
   }
   return { DLMM: _DLMM, StrategyType: _StrategyType };
 }
 
-// ─── Lazy wallet/connection init ──────────────────────────────
+// ─── Lazy wallet init ─────────────────────────────────────────
 // Avoids crashing on import when WALLET_PRIVATE_KEY is not yet set
 // (e.g. during screening-only tests).
-let _connection: Connection | null = null;
 let _wallet: Keypair | null = null;
-
-function getConnection(): Connection {
-  if (!_connection) {
-    _connection = new Connection(getRpcUrl(), "confirmed");
-  }
-  return _connection;
-}
 
 // Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -139,7 +133,7 @@ function validateWalletKey(key: string | undefined): string {
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
-    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${getErrorMessage(e)}`);
   }
   return trimmed;
 }
@@ -178,7 +172,8 @@ async function getPool(poolAddress: string): Promise<any> {
   if (!poolCache.has(key)) {
     startPoolCacheInterval(); // lazy start - only when actually needed
     const { DLMM } = await getDLMM();
-    const pool = await DLMM.create(getConnection(), new PublicKey(poolAddress));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pool = await (DLMM as any).create(getSharedConnection(), new PublicKey(poolAddress));
     poolCache.set(key, pool);
   }
   return poolCache.get(key) as unknown;
@@ -266,7 +261,10 @@ export async function deployPosition({
   const minBinId = activeBin.binId - activeBinsBelow;
   const maxBinId = activeBin.binId + activeBinsAbove;
 
-  const strategyMap: Record<string, any> = {
+  if (!StrategyType) {
+    throw new Error("StrategyType not initialized");
+  }
+  const strategyMap: Record<string, string> = {
     spot: StrategyType.Spot,
     curve: StrategyType.Curve,
     bid_ask: StrategyType.BidAsk,
@@ -282,16 +280,19 @@ export async function deployPosition({
   const finalAmountY = amount_y ?? amount_sol ?? 0;
   const finalAmountX = amount_x ?? 0;
 
-  const totalYLamports = new BN(Math.floor(finalAmountY * 1e9));
+  const totalYLamports = new BN((finalAmountY * 1e9).toFixed(0), 10);
   // For X, we assume it's also 9 decimals for now, or we'd need to fetch mint decimals.
   // Most Meteora pools base tokens are 6 or 9. To be safe, we should fetch.
   let totalXLamports = new BN(0);
   if (finalAmountX > 0) {
-    const mintInfo = await getConnection().getParsedAccountInfo(
+    const mintInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenXMint)
     );
-    const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
-    totalXLamports = new BN(Math.floor(finalAmountX * Math.pow(10, decimals)));
+    const parsedData = mintInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimals = parsedData?.parsed?.info?.decimals ?? 9;
+    totalXLamports = new BN((finalAmountX * 10 ** decimals).toFixed(0), 10);
   }
 
   const totalBins = activeBinsBelow + activeBinsAbove;
@@ -326,7 +327,21 @@ export async function deployPosition({
       const createTxArray = Array.isArray(createTxs) ? createTxs : [createTxs];
       for (let i = 0; i < createTxArray.length; i++) {
         const signers = i === 0 ? [wallet, newPosition] : [wallet];
-        const txHash = await sendAndConfirmTransaction(getConnection(), createTxArray[i], signers);
+        // Simulate first to catch errors before spending gas
+        const simulation = await getSharedConnection().simulateTransaction(
+          createTxArray[i],
+          signers
+        );
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("deploy", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
+        const txHash = await sendAndConfirmTransaction(
+          getSharedConnection(),
+          createTxArray[i],
+          signers
+        );
         txHashes.push(txHash);
         log("deploy", `Create tx ${i + 1}/${createTxArray.length}: ${txHash}`);
       }
@@ -338,11 +353,20 @@ export async function deployPosition({
         totalXAmount: totalXLamports,
         totalYAmount: totalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
-        const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet]);
+        // Simulate first to catch errors before spending gas
+        const simulation = await getSharedConnection().simulateTransaction(addTxArray[i], [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("deploy", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
+        const txHash = await sendAndConfirmTransaction(getSharedConnection(), addTxArray[i], [
+          wallet,
+        ]);
         txHashes.push(txHash);
         log("deploy", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
       }
@@ -354,13 +378,24 @@ export async function deployPosition({
         totalXAmount: totalXLamports,
         totalYAmount: totalYLamports,
         strategy: { maxBinId, minBinId, strategyType },
-        slippage: 1000, // 10% in bps
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet, newPosition]);
+      // Simulate first to catch errors before spending gas
+      const simulation = await getSharedConnection().simulateTransaction(tx, [wallet, newPosition]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("deploy", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
+      const txHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [
+        wallet,
+        newPosition,
+      ]);
       txHashes.push(txHash);
     }
 
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
+    recordActivity();
 
     await withPositionsCacheLock(async () => {
       _positionsCacheAt = 0;
@@ -368,8 +403,8 @@ export async function deployPosition({
 
     const actualBinStep = pool.lbPair.binStep;
     const activePrice = parseFloat(activeBin.price);
-    const minPrice = activePrice * Math.pow(1 + actualBinStep / 10000, minBinId - activeBin.binId);
-    const maxPrice = activePrice * Math.pow(1 + actualBinStep / 10000, maxBinId - activeBin.binId);
+    const minPrice = activePrice * (1 + actualBinStep / 10000) ** (minBinId - activeBin.binId);
+    const maxPrice = activePrice * (1 + actualBinStep / 10000) ** (maxBinId - activeBin.binId);
 
     // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
     const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
@@ -466,7 +501,7 @@ export async function addLiquidity({
 
     // Get position data to determine bin range
     const positionPubKey = new PublicKey(position_address);
-    let positionData;
+    let positionData: unknown;
     try {
       positionData = await pool.getPosition(positionPubKey);
     } catch (e: any) {
@@ -480,7 +515,13 @@ export async function addLiquidity({
     }
 
     // Get bin range from position data
-    const processed = positionData?.positionData;
+    // Validate positionData has expected shape before accessing
+    if (!isObject(positionData)) {
+      return { success: false, error: "Invalid position data from SDK" };
+    }
+    const processed = (
+      positionData as { positionData?: { lowerBinId?: number; upperBinId?: number } }
+    )?.positionData;
     const minBinId = processed?.lowerBinId ?? -887272;
     const maxBinId = processed?.upperBinId ?? 887272;
 
@@ -496,7 +537,10 @@ export async function addLiquidity({
 
     // ─── Strategy ──────────────────────────────────────────────
     const activeStrategy = strategy || config.strategy.strategy;
-    const strategyMap: Record<string, any> = {
+    if (!StrategyType) {
+      throw new Error("StrategyType not initialized");
+    }
+    const strategyMap: Record<string, string> = {
       spot: StrategyType.Spot,
       curve: StrategyType.Curve,
       bid_ask: StrategyType.BidAsk,
@@ -508,24 +552,30 @@ export async function addLiquidity({
 
     // ─── Convert Amounts to Lamports ─────────────────────────────
     // Get token decimals
-    const mintXInfo = await getConnection().getParsedAccountInfo(
+    const mintXInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenXMint)
     );
-    const decimalsX = (mintXInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    const parsedDataX = mintXInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimalsX = parsedDataX?.parsed?.info?.decimals ?? 9;
 
-    const mintYInfo = await getConnection().getParsedAccountInfo(
+    const mintYInfo = await getSharedConnection().getParsedAccountInfo(
       new PublicKey(pool.lbPair.tokenYMint)
     );
-    const decimalsY = (mintYInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+    const parsedDataY = mintYInfo.value?.data as
+      | { parsed?: { info?: { decimals?: number } } }
+      | undefined;
+    const decimalsY = parsedDataY?.parsed?.info?.decimals ?? 9;
 
     // Convert to lamports
     const totalXLamports =
-      finalAmountX > 0 ? new BN(Math.floor(finalAmountX * Math.pow(10, decimalsX))) : new BN(0);
+      finalAmountX > 0 ? new BN((finalAmountX * 10 ** decimalsX).toFixed(0), 10) : new BN(0);
     const totalYLamports =
-      finalAmountY > 0 ? new BN(Math.floor(finalAmountY * Math.pow(10, decimalsY))) : new BN(0);
+      finalAmountY > 0 ? new BN((finalAmountY * 10 ** decimalsY).toFixed(0), 10) : new BN(0);
 
     // Handle single-sided liquidity
-    let finalXLamports = totalXLamports;
+    const finalXLamports = totalXLamports;
     let finalYLamports = totalYLamports;
     if (single_sided_x && finalAmountX > 0) {
       if (finalAmountY > 0) {
@@ -552,11 +602,20 @@ export async function addLiquidity({
         totalXAmount: finalXLamports,
         totalYAmount: finalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
-        const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet]);
+        // Simulate first to catch errors before spending gas
+        const simulation = await getSharedConnection().simulateTransaction(addTxArray[i], [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("add_liquidity", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
+        const txHash = await sendAndConfirmTransaction(getSharedConnection(), addTxArray[i], [
+          wallet,
+        ]);
         txHashes.push(txHash);
         log("add_liquidity", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
       }
@@ -568,14 +627,22 @@ export async function addLiquidity({
         totalXAmount: finalXLamports,
         totalYAmount: finalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
-      const txHash = await sendAndConfirmTransaction(getConnection(), addTx, [wallet]);
+      // Simulate first to catch errors before spending gas
+      const simulation = await getSharedConnection().simulateTransaction(addTx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("add_liquidity", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
+      const txHash = await sendAndConfirmTransaction(getSharedConnection(), addTx, [wallet]);
       txHashes.push(txHash);
       log("add_liquidity", `Add liquidity tx: ${txHash}`);
     }
 
     log("add_liquidity", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
+    recordActivity();
 
     // Invalidate positions cache
     await withPositionsCacheLock(async () => {
@@ -615,32 +682,11 @@ let _positionsCacheAt = 0;
 let _positionsInflight: Promise<PositionsResult> | null = null;
 
 // ─── Position Cache Lock ───────────────────────────────────────
-// Simple async mutex to prevent race conditions on cache state
-let _positionsCacheLock: Promise<void> = Promise.resolve();
-let _positionsCacheLockResolve: (() => void) | null = null;
-
-async function acquirePositionsCacheLock(): Promise<void> {
-  // Wait for current lock to release, then create new lock
-  await _positionsCacheLock;
-  _positionsCacheLock = new Promise((resolve) => {
-    _positionsCacheLockResolve = resolve;
-  });
-}
-
-function releasePositionsCacheLock(): void {
-  if (_positionsCacheLockResolve) {
-    _positionsCacheLockResolve();
-    _positionsCacheLockResolve = null;
-  }
-}
+// Async mutex to prevent race conditions on cache state
+const positionsCacheMutex = new Mutex();
 
 async function withPositionsCacheLock<T>(fn: () => Promise<T>): Promise<T> {
-  await acquirePositionsCacheLock();
-  try {
-    return await fn();
-  } finally {
-    releasePositionsCacheLock();
-  }
+  return positionsCacheMutex.runExclusive(fn);
 }
 
 // ─── Fetch DLMM PnL API for all positions in a pool ────────────
@@ -650,7 +696,7 @@ async function fetchDlmmPnlForPool(
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
   try {
-    const res = await fetchWithTimeout(url);
+    const res = await fetchWithRetry(url);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log(
@@ -659,8 +705,18 @@ async function fetchDlmmPnlForPool(
       );
       return {};
     }
-    const data = (await res.json()) as { positions?: RawPnLData[]; data?: RawPnLData[] };
-    const positions = data.positions || data.data || [];
+    const rawData = await res.json();
+    if (!isObject(rawData)) {
+      log("pnl_api", `Invalid response for pool ${poolAddress.slice(0, 8)}: not an object`);
+      return {};
+    }
+    const data = rawData as { positions?: RawPnLData[]; data?: RawPnLData[] };
+    const rawPositions = data.positions || data.data || [];
+    if (!isArray(rawPositions)) {
+      log("pnl_api", `Invalid positions array for pool ${poolAddress.slice(0, 8)}`);
+      return {};
+    }
+    const positions = rawPositions;
     if (positions.length === 0) {
       log(
         "pnl_api",
@@ -719,7 +775,7 @@ export async function getPositionPnl({
 }
 
 function safeNum(value: unknown): number {
-  const n = parseFloat((value as any) ?? 0);
+  const n = parseFloat(String(value ?? 0));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -772,7 +828,7 @@ export async function getMyPositions({
       // Single portfolio API call — returns all positions with full PnL data
       if (!silent) log("positions", "Fetching portfolio via Meteora portfolio API...");
       const portfolioUrl = `https://dlmm.datapi.meteora.ag/portfolio/open?user=${walletAddress}`;
-      const res = await fetchWithTimeout(portfolioUrl);
+      const res = await fetchWithRetry(portfolioUrl);
       if (!res.ok)
         throw new Error(`Portfolio API ${res.status}: ${await res.text().catch(() => "")}`);
       const portfolio = (await res.json()) as { pools?: any[] };
@@ -918,8 +974,13 @@ export async function getMyPositions({
       });
       return result;
     } catch (error: any) {
-      log("positions_error", `Portfolio fetch failed: ${error.stack || error.message}`);
-      return { wallet: walletAddress, total_positions: 0, positions: [], error: error.message };
+      log("positions_error", `Portfolio fetch failed: ${error.stack || getErrorMessage(error)}`);
+      return {
+        wallet: walletAddress,
+        total_positions: 0,
+        positions: [] as EnrichedPosition[],
+        error: getErrorMessage(error),
+      };
     } finally {
       _positionsInflight = null;
     }
@@ -934,7 +995,7 @@ export async function getWalletPositions({
   try {
     const DLMM_PROGRAM = new PublicKey("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
 
-    const accounts = await getConnection().getProgramAccounts(DLMM_PROGRAM, {
+    const accounts = await getSharedConnection().getProgramAccounts(DLMM_PROGRAM, {
       filters: [{ memcmp: { offset: 40, bytes: new PublicKey(wallet_address).toBase58() } }],
     });
 
@@ -995,18 +1056,36 @@ export async function searchPools({
   limit = 10,
 }: SearchPoolsParams): Promise<SearchPoolsResult> {
   const url = `https://dlmm.datapi.meteora.ag/pools?query=${encodeURIComponent(query)}`;
-  const res = await fetchWithTimeout(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`Pool search API error: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as any[] | { data?: any[] };
-  const pools = (Array.isArray(data) ? data : (data as { data?: any[] }).data || []).slice(
-    0,
-    limit
-  );
+  interface PoolSearchResult {
+    address?: string;
+    pool_address?: string;
+    name: string;
+    bin_step?: number;
+    dlmm_params?: { bin_step?: number };
+    base_fee_percentage?: number;
+    fee_pct?: number;
+    liquidity?: number;
+    trade_volume_24h?: number;
+    mint_x_symbol?: string;
+    mint_x?: string;
+    mint_y_symbol?: string;
+    mint_y?: string;
+    token_x?: { symbol?: string; address?: string };
+    token_y?: { symbol?: string; address?: string };
+  }
+  const rawSearchData = await res.json();
+  if (!isObject(rawSearchData) && !isArray(rawSearchData)) {
+    throw new Error("Invalid pool search response: not an object or array");
+  }
+  const data = rawSearchData as PoolSearchResult[] | { data?: PoolSearchResult[] };
+  const pools = (Array.isArray(data) ? data : data.data || []).slice(0, limit);
   return {
     query,
     total: pools.length,
-    pools: pools.map((p: any) => ({
-      pool: p.address || p.pool_address,
+    pools: pools.map((p) => ({
+      pool: p.address || p.pool_address || "",
       name: p.name,
       bin_step: p.bin_step ?? p.dlmm_params?.bin_step,
       fee_pct: p.base_fee_percentage ?? p.fee_pct,
@@ -1060,10 +1139,18 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
 
     const txHashes: string[] = [];
     for (const tx of txs) {
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
+      // Simulate first to catch errors before spending gas
+      const simulation = await getSharedConnection().simulateTransaction(tx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("claim", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
+      const txHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [wallet]);
       txHashes.push(txHash);
     }
     log("claim", `SUCCESS txs: ${txHashes.join(", ")}`);
+    recordActivity();
     await withPositionsCacheLock(async () => {
       _positionsCacheAt = 0; // invalidate cache after claim
     });
@@ -1164,7 +1251,16 @@ export async function withdrawLiquidity({
           });
           if (claimTxs && claimTxs.length > 0) {
             for (const tx of claimTxs) {
-              const claimHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
+              // Simulate first to catch errors before spending gas
+              const simulation = await getSharedConnection().simulateTransaction(tx, [wallet]);
+              if (simulation.value.err) {
+                const errorMessage = JSON.stringify(simulation.value.err);
+                log("withdraw", `Transaction simulation failed: ${errorMessage}`);
+                throw new Error(`Simulation failed: ${errorMessage}`);
+              }
+              const claimHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [
+                wallet,
+              ]);
               claimTxHashes.push(claimHash);
             }
             log("withdraw", `Step 1 OK (claim): ${claimTxHashes.join(", ")}`);
@@ -1212,14 +1308,20 @@ export async function withdrawLiquidity({
     let decimalsX = 9;
     let decimalsY = 9;
     try {
-      const mintXInfo = await getConnection().getParsedAccountInfo(
+      const mintXInfo = await getSharedConnection().getParsedAccountInfo(
         new PublicKey(pool.lbPair.tokenXMint)
       );
-      decimalsX = (mintXInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
-      const mintYInfo = await getConnection().getParsedAccountInfo(
+      const parsedDataX = mintXInfo.value?.data as
+        | { parsed?: { info?: { decimals?: number } } }
+        | undefined;
+      decimalsX = parsedDataX?.parsed?.info?.decimals ?? 9;
+      const mintYInfo = await getSharedConnection().getParsedAccountInfo(
         new PublicKey(pool.lbPair.tokenYMint)
       );
-      decimalsY = (mintYInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
+      const parsedDataY = mintYInfo.value?.data as
+        | { parsed?: { info?: { decimals?: number } } }
+        | undefined;
+      decimalsY = parsedDataY?.parsed?.info?.decimals ?? 9;
     } catch {
       log("withdraw_warn", "Could not fetch token decimals, using default 9");
     }
@@ -1240,7 +1342,14 @@ export async function withdrawLiquidity({
 
     const withdrawTxHashes: string[] = [];
     for (const tx of Array.isArray(withdrawTxs) ? withdrawTxs : [withdrawTxs]) {
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
+      // Simulate first to catch errors before spending gas
+      const simulation = await getSharedConnection().simulateTransaction(tx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("withdraw", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
+      const txHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [wallet]);
       withdrawTxHashes.push(txHash);
     }
     log("withdraw", `Step 2 OK (withdraw): ${withdrawTxHashes.join(", ")}`);
@@ -1292,8 +1401,8 @@ export async function withdrawLiquidity({
 
         if (preTotalX.gt(new BN(0)) || preTotalY.gt(new BN(0))) {
           // SDK provides per-token amounts — use bps ratio directly
-          amountXWithdrawn = (preTotalX.toNumber() * bpsRatio) / Math.pow(10, decimalsX);
-          amountYWithdrawn = (preTotalY.toNumber() * bpsRatio) / Math.pow(10, decimalsY);
+          amountXWithdrawn = (preTotalX.toNumber() * bpsRatio) / 10 ** decimalsX;
+          amountYWithdrawn = (preTotalY.toNumber() * bpsRatio) / 10 ** decimalsY;
         } else {
           // Fallback: estimate from total liquidity change ratio applied to
           // current wallet balance. NOTE: This may be inaccurate if other
@@ -1303,22 +1412,38 @@ export async function withdrawLiquidity({
             "withdraw",
             `Using fallback estimate (removedRatio=${removedRatio.toFixed(4)}) — amounts are approximate`
           );
-          const tokenXAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-            mint: pool.lbPair.tokenXMint,
-          });
-          const tokenYAccount = await getConnection().getTokenAccountsByOwner(wallet.publicKey, {
-            mint: pool.lbPair.tokenYMint,
-          });
+          const tokenXAccount = await getSharedConnection().getTokenAccountsByOwner(
+            wallet.publicKey,
+            {
+              mint: pool.lbPair.tokenXMint,
+            }
+          );
+          const tokenYAccount = await getSharedConnection().getTokenAccountsByOwner(
+            wallet.publicKey,
+            {
+              mint: pool.lbPair.tokenYMint,
+            }
+          );
           if (tokenXAccount.value.length > 0) {
-            const info = await getConnection().getParsedAccountInfo(tokenXAccount.value[0].pubkey);
-            const parsed = (info.value?.data as any)?.parsed?.info;
+            const info = await getSharedConnection().getParsedAccountInfo(
+              tokenXAccount.value[0].pubkey
+            );
+            const parsedData = info.value?.data as
+              | { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } }
+              | undefined;
+            const parsed = parsedData?.parsed?.info;
             amountXWithdrawn = parsed
               ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
               : 0;
           }
           if (tokenYAccount.value.length > 0) {
-            const info = await getConnection().getParsedAccountInfo(tokenYAccount.value[0].pubkey);
-            const parsed = (info.value?.data as any)?.parsed?.info;
+            const info = await getSharedConnection().getParsedAccountInfo(
+              tokenYAccount.value[0].pubkey
+            );
+            const parsedData = info.value?.data as
+              | { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } }
+              | undefined;
+            const parsed = parsedData?.parsed?.info;
             amountYWithdrawn = parsed
               ? Number(parsed.tokenAmount?.uiAmount ?? 0) * removedRatio
               : 0;
@@ -1405,7 +1530,14 @@ export async function closePosition({
         });
         if (claimTxs && claimTxs.length > 0) {
           for (const tx of claimTxs) {
-            const claimHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
+            // Simulate first to catch errors before spending gas
+            const simulation = await getSharedConnection().simulateTransaction(tx, [wallet]);
+            if (simulation.value.err) {
+              const errorMessage = JSON.stringify(simulation.value.err);
+              log("close", `Transaction simulation failed: ${errorMessage}`);
+              throw new Error(`Simulation failed: ${errorMessage}`);
+            }
+            const claimHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [wallet]);
             claimTxHashes.push(claimHash);
           }
           log("close", `Step 1 OK (claim only): ${claimTxHashes.join(", ")}`);
@@ -1444,7 +1576,14 @@ export async function closePosition({
       });
 
       for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
-        const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
+        // Simulate first to catch errors before spending gas
+        const simulation = await getSharedConnection().simulateTransaction(tx, [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("close", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
+        const txHash = await sendAndConfirmTransaction(getSharedConnection(), tx, [wallet]);
         closeTxHashes.push(txHash);
       }
     } else {
@@ -1453,12 +1592,20 @@ export async function closePosition({
         owner: wallet.publicKey,
         position: { publicKey: positionPubKey },
       });
-      const txHash = await sendAndConfirmTransaction(getConnection(), closeTx, [wallet]);
+      // Simulate first to catch errors before spending gas
+      const simulation = await getSharedConnection().simulateTransaction(closeTx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("close", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
+      const txHash = await sendAndConfirmTransaction(getSharedConnection(), closeTx, [wallet]);
       closeTxHashes.push(txHash);
     }
     const txHashes = [...claimTxHashes, ...closeTxHashes];
     log("close", `Step 2 OK (close only): ${closeTxHashes.join(", ") || "none"}`);
     log("close", `SUCCESS txs: ${txHashes.join(", ")}`);
+    recordActivity();
     // Wait for RPC to reflect withdrawn balances before returning — prevents
     // agent from seeing zero balance when attempting post-close swap
     await new Promise((r) => setTimeout(r, 5000));
@@ -1517,27 +1664,32 @@ export async function closePosition({
       let feesUsd = tracked.total_fees_claimed_usd || 0;
       try {
         const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
-        const res = await fetchWithTimeout(closedUrl);
+        const res = await fetchWithRetry(closedUrl);
         if (res.ok) {
-          const data = (await res.json()) as { positions?: any[] };
-          const posEntry = (data.positions || []).find(
-            (p: any) => p.positionAddress === position_address
-          );
-          if (posEntry) {
-            pnlUsd = Number(posEntry.pnlUsd ?? 0);
-            pnlPct = Number(posEntry.pnlPctChange ?? 0);
-            finalValueUsd = Number(posEntry.allTimeWithdrawals?.total?.usd ?? 0);
-            initialUsd = Number(posEntry.allTimeDeposits?.total?.usd ?? 0);
-            feesUsd = Number(posEntry.allTimeFees?.total?.usd ?? 0) || feesUsd;
-            log(
-              "close",
-              `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)}`
-            );
+          const rawClosedData = await res.json();
+          if (!isObject(rawClosedData)) {
+            log("close_warn", "Invalid closed positions response: not an object");
           } else {
-            log(
-              "close_warn",
-              `Position not found in status=closed response — may still be settling`
+            const data = rawClosedData as { positions?: any[] };
+            const posEntry = (data.positions || []).find(
+              (p: any) => p.positionAddress === position_address
             );
+            if (posEntry) {
+              pnlUsd = Number(posEntry.pnlUsd ?? 0);
+              pnlPct = Number(posEntry.pnlPctChange ?? 0);
+              finalValueUsd = Number(posEntry.allTimeWithdrawals?.total?.usd ?? 0);
+              initialUsd = Number(posEntry.allTimeDeposits?.total?.usd ?? 0);
+              feesUsd = Number(posEntry.allTimeFees?.total?.usd ?? 0) || feesUsd;
+              log(
+                "close",
+                `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)}`
+              );
+            } else {
+              log(
+                "close_warn",
+                `Position not found in status=closed response — may still be settling`
+              );
+            }
           }
         }
       } catch (e: any) {
@@ -1636,13 +1788,18 @@ async function lookupPoolForPosition(
 
   // SDK scan (last resort)
   const { DLMM } = await getDLMM();
-  const allPositions = await DLMM.getAllLbPairPositionsByUser(
-    getConnection(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allPositions = await (DLMM as any).getAllLbPairPositionsByUser(
+    getSharedConnection(),
     new PublicKey(walletAddress)
   );
 
   for (const [lbPairKey, positionData] of Object.entries(allPositions)) {
-    for (const pos of (positionData as any).lbPairPositionsData || []) {
+    // Validate positionData before casting
+    const positions = isObject(positionData)
+      ? (positionData as { lbPairPositionsData?: Array<{ publicKey: PublicKey }> })
+      : undefined;
+    for (const pos of positions?.lbPairPositionsData || []) {
       if (pos.publicKey.toString() === position_address) return lbPairKey;
     }
   }

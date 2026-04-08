@@ -1,5 +1,4 @@
-import type { ScheduledTask } from "node-cron";
-import cron from "node-cron";
+import * as cron from "node-cron";
 import { getMyPositions, stopPoolCache } from "../tools/dlmm.js";
 import { agentLoop } from "./agent/agent.js";
 import { config, registerCronRestarter } from "./config/config.js";
@@ -15,7 +14,7 @@ import {
   setScreeningLastTriggered,
 } from "./cycles/screening.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
-import { log } from "./infrastructure/logger.js";
+import { closeLogStreams, log } from "./infrastructure/logger.js";
 import {
   getLastBriefingDate,
   getTrackedPosition,
@@ -24,15 +23,13 @@ import {
   setLastBriefingDate,
   updatePnlAndCheckExits,
 } from "./infrastructure/state.js";
-import {
-  createLiveMessage,
-  sendHTML,
-  stopPolling,
-  isEnabled as telegramEnabled,
-} from "./infrastructure/telegram.js";
+import { sendHTML, stopPolling, isEnabled as telegramEnabled } from "./infrastructure/telegram.js";
 import { startNonTTY, startREPL } from "./repl.js";
 import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
 import { cache } from "./utils/cache.js";
+import { getErrorMessage } from "./utils/errors.js";
+import { recordActivity } from "./utils/health-check.js";
+import { isArray } from "./utils/validation.js";
 
 // ═══════════════════════════════════════════
 //  GLOBAL STATE
@@ -79,7 +76,7 @@ async function runBriefing(): Promise<void> {
     }
     setLastBriefingDate();
   } catch (error) {
-    log("cron_error", `Morning briefing failed: ${(error as Error).message}`);
+    log("cron_error", `Morning briefing failed: ${getErrorMessage(error)}`);
   }
 }
 
@@ -114,16 +111,16 @@ export function stopCronJobs(): void {
 
 export async function runManagementCycle(options: CycleOptions = {}): Promise<string | null> {
   const screeningCooldownMs = 5 * 60 * 1000;
-  return runManagementCycleImpl(options, {
+  const result = await runManagementCycleImpl(options, {
     timers,
     setManagementBusy: (busy: boolean) => {
       _managementBusy = busy;
     },
     isManagementBusy: () => _managementBusy,
-    triggerScreening: async (positionCount?: number) => {
+    triggerScreening: async (positionCount?: number): Promise<void> => {
       const afterCount =
         positionCount ??
-        (await getMyPositions({ force: true }).catch(() => null))?.positions?.length ??
+        (await getMyPositions({ force: true }).catch((): null => null))?.positions?.length ??
         0;
       if (
         afterCount < config.risk.maxPositions &&
@@ -139,6 +136,8 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
       await runManagementCycle({ silent: true });
     },
   });
+  recordActivity();
+  return result;
 }
 
 export async function runScreeningCycle(options: CycleOptions = {}): Promise<string | null> {
@@ -164,7 +163,9 @@ export function startCronJobs(): void {
 
   const screenTask = cron.schedule(
     `*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`,
-    runScreeningCycle
+    (): void => {
+      void runScreeningCycle();
+    }
   );
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
@@ -183,7 +184,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
         "MANAGER"
       );
     } catch (error) {
-      log("cron_error", `Health check failed: ${(error as Error).message}`);
+      log("cron_error", `Health check failed: ${getErrorMessage(error)}`);
     } finally {
       _managementBusy = false;
     }
@@ -216,95 +217,102 @@ Summarize the current portfolio health, total fees earned, and performance of al
       if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
       _pnlPollBusy = true;
       try {
-        const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-        const positions = result?.positions;
-        if (!positions?.length) {
+        const result = await getMyPositions({ force: true, silent: true }).catch((err): null => {
+          log("poll_error", `getMyPositions failed: ${getErrorMessage(err)}`);
+          _pnlPollConsecutiveFailures++;
+          if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
+            log("poll_error", "PnL poll failing consistently - backing off");
+            // Could disable polling here if needed
+          }
+          return null;
+        });
+
+        if (!result) return; // Early exit on failure
+
+        // Validate positions array before processing
+        const rawPositions = result?.positions;
+        if (!isArray(rawPositions)) {
+          log("poll_error", "Invalid positions response: positions is not an array");
+          return;
+        }
+        if (rawPositions.length === 0) {
           _pnlPollConsecutiveFailures = 0; // Reset on successful empty poll
           return;
         }
-        for (const p of positions) {
-          if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
-            schedulePeakConfirmation(p.position);
-          }
-          const trackedP = getTrackedPosition(p.position);
-          const exit = updatePnlAndCheckExits(
-            p.position,
-            p,
-            config.management,
-            trackedP?.strategy_config
-          );
-          if (exit) {
-            // Trailing TP needs confirmation - queue it and continue polling
-            if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
-              if (
-                queueTrailingDropConfirmation(
-                  p.position,
-                  exit.peak_pnl_pct ?? null,
-                  exit.current_pnl_pct ?? null,
-                  config.management.trailingDropPct ?? null
-                )
-              ) {
-                scheduleTrailingDropConfirmation(p.position, () => {
-                  runManagementCycle({ silent: true }).catch((e: Error) =>
-                    log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
-                  );
-                });
+
+        // Process each position with individual error handling
+        for (const p of rawPositions) {
+          try {
+            if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+              schedulePeakConfirmation(p.position);
+            }
+            const trackedP = getTrackedPosition(p.position);
+            const exit = updatePnlAndCheckExits(
+              p.position,
+              p,
+              config.management,
+              trackedP?.strategy_config
+            );
+            if (exit) {
+              // Trailing TP needs confirmation - queue it and continue polling
+              if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
+                if (
+                  queueTrailingDropConfirmation(
+                    p.position,
+                    exit.peak_pnl_pct ?? null,
+                    exit.current_pnl_pct ?? null,
+                    config.management.trailingDropPct ?? null
+                  )
+                ) {
+                  scheduleTrailingDropConfirmation(p.position, () => {
+                    runManagementCycle({ silent: true }).catch((e: Error) =>
+                      log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
+                    );
+                  });
+                }
+                continue;
               }
-              continue;
+              const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
+              const sinceLastTrigger = Date.now() - _pollTriggeredAt;
+              if (sinceLastTrigger >= cooldownMs) {
+                _pollTriggeredAt = Date.now();
+                log(
+                  "state",
+                  `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
+                );
+                runManagementCycle({ silent: true }).catch((e: Error) =>
+                  log("cron_error", `Poll-triggered management failed: ${e.message}`)
+                );
+              } else {
+                log(
+                  "state",
+                  `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
+                    (cooldownMs - sinceLastTrigger) / 1000
+                  )}s left)`
+                );
+              }
+              break;
             }
-            const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-            const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-            if (sinceLastTrigger >= cooldownMs) {
-              _pollTriggeredAt = Date.now();
-              log(
-                "state",
-                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
-              );
-              runManagementCycle({ silent: true }).catch((e: Error) =>
-                log("cron_error", `Poll-triggered management failed: ${e.message}`)
-              );
-            } else {
-              log(
-                "state",
-                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
-                  (cooldownMs - sinceLastTrigger) / 1000
-                )}s left)`
-              );
-            }
-            break;
+          } catch (positionError) {
+            log(
+              "poll_error",
+              `Error processing position ${p.position}: ${getErrorMessage(positionError)}`
+            );
+            // Continue to next position
           }
         }
         // Reset consecutive failures on successful poll completion
         _pnlPollConsecutiveFailures = 0;
+        recordActivity();
       } catch (error) {
+        log("poll_error", `PnL poll error: ${getErrorMessage(error)}`);
         _pnlPollConsecutiveFailures++;
-        const errorMsg = (error as Error).message;
-        if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
-          log(
-            "error",
-            `[PnL poll] Persistent failure #${_pnlPollConsecutiveFailures}: ${errorMsg}. ` +
-              `Polling continues but state operations may be broken (disk full, permissions, etc.)`
-          );
-        } else {
-          log(
-            "cron_error",
-            `[PnL poll] Failure #${_pnlPollConsecutiveFailures}/${MAX_PNL_POLL_FAILURES}: ${errorMsg}`
-          );
-        }
       } finally {
         _pnlPollBusy = false;
       }
     })().catch((e) => {
-      // This catches async errors outside the try block (should be rare)
-      try {
-        _pnlPollConsecutiveFailures++;
-        log(
-          "error",
-          `PnL poll unhandled error (failure #${_pnlPollConsecutiveFailures}): ${(e as Error).message}`
-        );
-      } finally {
-        _pnlPollBusy = false;
-      }
+      log("poll_error", `Unhandled PnL poll error: ${getErrorMessage(e)}`);
+      _pnlPollBusy = false;
     });
   }, 30_000);
 
@@ -320,15 +328,44 @@ Summarize the current portfolio health, total fees earned, and performance of al
 // ═══════════════════════════════════════════
 //  GRACEFUL SHUTDOWN
 // ═══════════════════════════════════════════
+const SHUTDOWN_TIMEOUT_MS = 5000;
+
 export async function shutdown(signal: string): Promise<void> {
-  log("shutdown", `Received ${signal}. Shutting down...`);
-  stopPolling();
-  stopCronJobs();
-  stopPoolCache();
-  cache.destroy();
-  const positionsResult = await getMyPositions();
-  log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
-  process.exit(0);
+  log("shutdown", `Received ${signal}. Shutting down gracefully...`);
+
+  // Create a timeout promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("Shutdown timeout")), SHUTDOWN_TIMEOUT_MS);
+  });
+
+  try {
+    // Race cleanup against timeout
+    await Promise.race([
+      (async () => {
+        stopPolling();
+        stopCronJobs();
+        stopPoolCache();
+        cache.destroy();
+
+        // Get final positions state
+        const positionsResult = await getMyPositions();
+        log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
+
+        // Close log streams properly
+        closeLogStreams();
+
+        // Small delay to let final logs flush
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      })(),
+      timeoutPromise,
+    ]);
+
+    log("shutdown", "Graceful shutdown completed");
+  } catch (error) {
+    log("shutdown", `Shutdown error or timeout: ${getErrorMessage(error)}`);
+  } finally {
+    process.exit(0);
+  }
 }
 
 process.on("SIGINT", async () => {

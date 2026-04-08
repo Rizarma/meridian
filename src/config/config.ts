@@ -1,4 +1,4 @@
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { log } from "../infrastructure/logger.js";
 import type {
@@ -8,11 +8,13 @@ import type {
   UpdateConfigResult,
   UserConfigPartial,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
 /**
  * Sanitize parsed JSON to prevent prototype pollution.
  * Removes __proto__, constructor, and prototype keys from objects.
+ * Uses Object.create(null) to avoid prototype chain and recursively sanitizes nested objects.
  */
 function sanitizeJson<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") {
@@ -20,17 +22,28 @@ function sanitizeJson<T>(obj: T): T {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(sanitizeJson) as unknown as T;
+    return obj.map((item) => sanitizeJson(item)) as unknown as T;
   }
 
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    // Block prototype pollution keys
+  // Use Object.create(null) to avoid prototype chain
+  const sanitized = Object.create(null) as Record<string, unknown>;
+
+  for (const key of Object.keys(obj)) {
+    // Block dangerous keys at all levels
     if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      log("security", `Blocked dangerous key: ${key}`);
       continue;
     }
-    sanitized[key] = sanitizeJson(value);
+
+    // Recursively sanitize nested objects
+    const value = (obj as Record<string, unknown>)[key];
+    if (typeof value === "object" && value !== null) {
+      sanitized[key] = sanitizeJson(value);
+    } else {
+      sanitized[key] = value;
+    }
   }
+
   return sanitized as T;
 }
 
@@ -42,7 +55,7 @@ if (fs.existsSync(USER_CONFIG_PATH)) {
   } catch (e) {
     log(
       "config_warn",
-      `Failed to parse user-config.json: ${(e as Error).message}. Using empty config.`
+      `Failed to parse user-config.json: ${getErrorMessage(e)}. Using empty config.`
     );
     u = {};
   }
@@ -95,7 +108,7 @@ export function getRpcUrl(): string {
 }
 
 // Helper: Get value with precedence env > user-config > default
-const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
+const _getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
   const envValue = process.env[envKey];
   if (hasEnvValue(envValue)) {
     // Try to parse as the same type as default
@@ -381,9 +394,9 @@ registerTool({
 
     // Build case-insensitive lookup
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const CONFIG_MAP_LOWER: Record<string, any> = Object.entries(CONFIG_MAP)
-      .map(([k, v]) => [k.toLowerCase(), [k, v]])
-      .reduce((acc, [k, v]) => ({ ...acc, [k as string]: v }), {});
+    const CONFIG_MAP_LOWER: Record<string, any> = Object.fromEntries(
+      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]])
+    );
 
     for (const [key, val] of Object.entries(changes)) {
       const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
@@ -419,7 +432,7 @@ registerTool({
     try {
       fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
     } catch (e) {
-      log("config_error", `Failed to write user-config.json: ${(e as Error).message}`);
+      log("config_error", `Failed to write user-config.json: ${getErrorMessage(e)}`);
       return { success: false, unknown, reason, applied: {} } as UpdateConfigResult;
     }
 

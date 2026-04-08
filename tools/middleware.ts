@@ -13,7 +13,7 @@
 import { config } from "../src/config/config.js";
 import { recordPerformance } from "../src/domain/lessons.js";
 import { addPoolNote } from "../src/domain/pool-memory.js";
-import { getActiveStrategy, getStrategy } from "../src/domain/strategy-library.js";
+import { getActiveStrategy } from "../src/domain/strategy-library.js";
 import { log, logAction } from "../src/infrastructure/logger.js";
 import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
 import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
@@ -26,11 +26,14 @@ import type {
 import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
-import type { Strategy } from "../src/types/strategy.js";
-import type { TokenBalance, WalletBalances } from "../src/types/wallet.js";
+import type { TokenBalance } from "../src/types/wallet.js";
+import { isWalletBalances } from "../src/utils/validation.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
+
+/** In-flight swap tracking to prevent double-spend on rapid successive calls */
+const _inFlightSwaps: Set<string> = new Set();
 
 /** Middleware function type */
 export type MiddlewareFn = (
@@ -186,7 +189,7 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
     }).catch(() => {});
 
     // Note low-yield closes in pool memory so screener avoids redeploying
-    if (closeArgs.reason && closeArgs.reason.toLowerCase().includes("yield")) {
+    if (closeArgs.reason?.toLowerCase().includes("yield")) {
       const poolAddr = (result.pool as string) || closeArgs.pool_address;
       if (poolAddr) {
         void addPoolNote({
@@ -280,30 +283,54 @@ async function handleAutoSwapAfterClose(
   baseMint: string,
   result: Record<string, unknown>
 ): Promise<void> {
-  try {
-    const balances = (await getWalletBalances()) as WalletBalances;
-    const token = balances.tokens?.find((t: TokenBalance) => t.mint === baseMint);
-    if (token && (token.usd || 0) >= 0.1) {
-      log(
-        "executor",
-        `Auto-swapping ${token.symbol || baseMint.slice(0, 8)} ($${(token.usd || 0).toFixed(2)}) back to SOL`
-      );
-      const swapResult = (await swapToken({
-        input_mint: baseMint,
-        output_mint: "SOL",
-        amount: token.balance || 0,
-      })) as { amount_out?: string | number };
+  // Idempotency check - prevent double-swap of same mint
+  if (_inFlightSwaps.has(baseMint)) {
+    log("executor", `Auto-swap for ${baseMint.slice(0, 8)} already in progress - skipping`);
+    return;
+  }
 
-      // Tell the model the swap already happened so it doesn't call swap_token again
-      result.auto_swapped = true;
-      result.auto_swap_note = `Base token already auto-swapped back to SOL (${token.symbol || baseMint.slice(0, 8)} → SOL). Do NOT call swap_token again.`;
-      if (swapResult?.amount_out) {
-        result.sol_received = swapResult.amount_out;
-      }
+  try {
+    const balances = await getWalletBalances();
+    if (!isWalletBalances(balances)) {
+      log("executor_warn", "Invalid wallet balances response in auto-swap after close");
+      return;
+    }
+    const token = balances.tokens?.find((t: TokenBalance) => t.mint === baseMint);
+
+    // Re-check balance after acquiring lock
+    if (!token || (token.usd || 0) < 0.1) {
+      return;
+    }
+
+    // Mark as in-flight BEFORE swap
+    _inFlightSwaps.add(baseMint);
+
+    log(
+      "executor",
+      `Auto-swapping ${token.symbol || baseMint.slice(0, 8)} ($${(token.usd || 0).toFixed(2)}) back to SOL`
+    );
+    const swapResult = await swapToken({
+      input_mint: baseMint,
+      output_mint: "SOL",
+      amount: token.balance || 0,
+    });
+    if (!swapResult || typeof swapResult !== "object") {
+      throw new Error("Invalid swap result");
+    }
+
+    // Tell the model the swap already happened so it doesn't call swap_token again
+    result.auto_swapped = true;
+    result.auto_swap_note = `Base token already auto-swapped back to SOL (${token.symbol || baseMint.slice(0, 8)} → SOL). Do NOT call swap_token again.`;
+    const amountOut = (swapResult as { amount_out?: string | number }).amount_out;
+    if (amountOut) {
+      result.sol_received = amountOut;
     }
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
     log("executor_warn", `Auto-swap after close failed: ${errorMsg}`);
+  } finally {
+    // Always remove from in-flight, even on error
+    _inFlightSwaps.delete(baseMint);
   }
 }
 
@@ -311,23 +338,43 @@ async function handleAutoSwapAfterClose(
  * Handle auto-swap after fee claim.
  */
 async function handleAutoSwapAfterClaim(baseMint: string): Promise<void> {
+  // Idempotency check - prevent double-swap of same mint
+  if (_inFlightSwaps.has(baseMint)) {
+    log("executor", `Auto-swap for ${baseMint.slice(0, 8)} already in progress - skipping`);
+    return;
+  }
+
   try {
-    const balances = (await getWalletBalances()) as WalletBalances;
-    const token = balances.tokens?.find((t: TokenBalance) => t.mint === baseMint);
-    if (token && (token.usd || 0) >= 0.1) {
-      log(
-        "executor",
-        `Auto-swapping claimed ${token.symbol || baseMint.slice(0, 8)} ($${(token.usd || 0).toFixed(2)}) back to SOL`
-      );
-      await swapToken({
-        input_mint: baseMint,
-        output_mint: "SOL",
-        amount: token.balance || 0,
-      });
+    const balances = await getWalletBalances();
+    if (!isWalletBalances(balances)) {
+      log("executor_warn", "Invalid wallet balances response in auto-swap after claim");
+      return;
     }
+    const token = balances.tokens?.find((t: TokenBalance) => t.mint === baseMint);
+
+    // Re-check balance after acquiring lock
+    if (!token || (token.usd || 0) < 0.1) {
+      return;
+    }
+
+    // Mark as in-flight BEFORE swap
+    _inFlightSwaps.add(baseMint);
+
+    log(
+      "executor",
+      `Auto-swapping claimed ${token.symbol || baseMint.slice(0, 8)} ($${(token.usd || 0).toFixed(2)}) back to SOL`
+    );
+    await swapToken({
+      input_mint: baseMint,
+      output_mint: "SOL",
+      amount: token.balance || 0,
+    });
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
     log("executor_warn", `Auto-swap after claim failed: ${errorMsg}`);
+  } finally {
+    // Always remove from in-flight, even on error
+    _inFlightSwaps.delete(baseMint);
   }
 }
 
@@ -407,7 +454,14 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
       }
 
       // Check position count limit + duplicate pool guard
-      const positions = (await getMyPositions({ force: true })) as MyPositionsResult;
+      const positionsResult = await getMyPositions({ force: true });
+      if (!positionsResult || typeof positionsResult !== "object") {
+        return {
+          pass: false,
+          reason: "Failed to fetch positions for safety check",
+        };
+      }
+      const positions = positionsResult as MyPositionsResult;
       if (positions.total_positions >= config.risk.maxPositions) {
         return {
           pass: false,
@@ -468,13 +522,19 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 
       // Check SOL balance
       if (process.env.DRY_RUN !== "true") {
-        const balance = (await getWalletBalances()) as WalletBalances;
-        const gasReserve = config.management.gasReserve;
-        const minRequired = amountY + gasReserve;
-        if (balance.sol < minRequired) {
+        const balanceResult = await getWalletBalances();
+        if (!isWalletBalances(balanceResult)) {
           return {
             pass: false,
-            reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
+            reason: "Failed to fetch wallet balances for safety check",
+          };
+        }
+        const gasReserve = config.management.gasReserve;
+        const minRequired = amountY + gasReserve;
+        if (balanceResult.sol < minRequired) {
+          return {
+            pass: false,
+            reason: `Insufficient SOL: have ${balanceResult.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
           };
         }
       }
@@ -516,12 +576,18 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 
       // Check SOL balance to cover gas for the add liquidity transaction
       if (process.env.DRY_RUN !== "true") {
-        const balance = (await getWalletBalances()) as WalletBalances;
-        const gasReserve = config.management.gasReserve ?? 0.01;
-        if (balance.sol < gasReserve) {
+        const balanceResult = await getWalletBalances();
+        if (!isWalletBalances(balanceResult)) {
           return {
             pass: false,
-            reason: `Insufficient SOL for gas: have ${balance.sol} SOL, need at least ${gasReserve} SOL reserve`,
+            reason: "Failed to fetch wallet balances for gas check",
+          };
+        }
+        const gasReserve = config.management.gasReserve ?? 0.01;
+        if (balanceResult.sol < gasReserve) {
+          return {
+            pass: false,
+            reason: `Insufficient SOL for gas: have ${balanceResult.sol} SOL, need at least ${gasReserve} SOL reserve`,
           };
         }
       }
@@ -586,7 +652,7 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 function summarizeResult(result: unknown): unknown {
   const str = JSON.stringify(result);
   if (str.length > 1000) {
-    return str.slice(0, 1000) + "...(truncated)";
+    return `${str.slice(0, 1000)}...(truncated)`;
   }
   return result;
 }
