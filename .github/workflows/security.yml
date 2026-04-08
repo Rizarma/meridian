@@ -27,8 +27,6 @@ jobs:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Allow failure if default setup is enabled (conflicts with advanced config)
-    continue-on-error: true
 
     strategy:
       fail-fast: false
@@ -43,9 +41,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
-          # Use latest CodeQL packs for better coverage
-          packs: codeql/javascript-queries
+          # Use default queries to avoid conflict with repository's default setup
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
