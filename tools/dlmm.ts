@@ -1,13 +1,6 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  sendAndConfirmTransaction,
-  type Transaction,
-} from "@solana/web3.js";
+import { Keypair, PublicKey, sendAndConfirmTransaction, type Transaction } from "@solana/web3.js";
 import { Mutex } from "async-mutex";
 import BN from "bn.js";
-import bs58 from "bs58";
 import { config } from "../src/config/config.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
 import { getSharedConnection } from "../src/infrastructure/connection.js";
@@ -30,14 +23,12 @@ import type {
   CloseResult,
   DeployParams,
   DeployResult,
-  DLMMPool,
   EnrichedPosition,
   PositionPnL,
   PositionsResult,
   RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
-  StrategyType,
   WalletPositionsParams,
   WalletPositionsResult,
   WithdrawLiquidityParams,
@@ -47,6 +38,7 @@ import { getErrorMessage } from "../src/utils/errors.js";
 import { recordActivity } from "../src/utils/health-check.js";
 import { fetchWithRetry } from "../src/utils/retry.js";
 import { isArray, isObject } from "../src/utils/validation.js";
+import { getWallet } from "../src/utils/wallet.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
@@ -104,50 +96,6 @@ async function getDLMM() {
     _StrategyType = mod.StrategyType as unknown as Record<string, string>;
   }
   return { DLMM: _DLMM, StrategyType: _StrategyType };
-}
-
-// ─── Lazy wallet init ─────────────────────────────────────────
-// Avoids crashing on import when WALLET_PRIVATE_KEY is not yet set
-// (e.g. during screening-only tests).
-let _wallet: Keypair | null = null;
-
-// Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
-const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
-const MIN_SECRET_KEY_LENGTH = 64; // 64 bytes = 88 base58 chars typically
-
-function validateWalletKey(key: string | undefined): string {
-  if (!key || key.trim() === "") {
-    throw new Error("WALLET_PRIVATE_KEY not set (env var is missing or empty)");
-  }
-  const trimmed = key.trim();
-  if (!BASE58_REGEX.test(trimmed)) {
-    throw new Error("WALLET_PRIVATE_KEY contains invalid characters (not valid base58)");
-  }
-  // Try decoding to validate length
-  try {
-    const decoded = bs58.decode(trimmed);
-    if (decoded.length < MIN_SECRET_KEY_LENGTH) {
-      throw new Error(
-        `WALLET_PRIVATE_KEY decoded to ${decoded.length} bytes, expected at least ${MIN_SECRET_KEY_LENGTH}`
-      );
-    }
-  } catch (e) {
-    if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
-    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${getErrorMessage(e)}`);
-  }
-  return trimmed;
-}
-
-function getWallet(): Keypair {
-  if (!_wallet) {
-    const validKey = validateWalletKey(process.env.WALLET_PRIVATE_KEY);
-    _wallet = Keypair.fromSecretKey(bs58.decode(validKey));
-    // Only log in non-TTY mode to avoid disrupting REPL formatted output
-    if (!process.stdin.isTTY) {
-      log("init", `Wallet: ${_wallet.publicKey.toString()}`);
-    }
-  }
-  return _wallet;
 }
 
 // ─── Pool Cache ────────────────────────────────────────────────

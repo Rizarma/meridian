@@ -451,8 +451,8 @@ const userConfig: UserConfig = {
 };
 
 // Remove legacy key if present
-delete (userConfig as Partial<UserConfig> & { emergencyPriceDropPct?: unknown })
-  .emergencyPriceDropPct;
+(userConfig as Partial<UserConfig> & { emergencyPriceDropPct?: unknown }).emergencyPriceDropPct =
+  undefined;
 
 fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 

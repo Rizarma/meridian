@@ -1,7 +1,6 @@
 // types/cli.d.ts
 // CLI types for meridian command-line interface
 
-
 /** CLI flag definitions from parseArgs */
 export interface CLIFlags {
   pool?: string;

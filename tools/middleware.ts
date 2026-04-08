@@ -27,6 +27,7 @@ import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
 import type { TokenBalance } from "../src/types/wallet.js";
+import { getErrorMessage } from "../src/utils/errors.js";
 import { isWalletBalances } from "../src/utils/validation.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
@@ -164,7 +165,7 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
       amountIn: result.amount_in ? parseFloat(String(result.amount_in)) : undefined,
       amountOut: result.amount_out ? parseFloat(String(result.amount_out)) : undefined,
       tx: (result.tx as string) || undefined,
-    }).catch(() => {});
+    }).catch((e) => log("notify_error", getErrorMessage(e)));
   } else if (tool.name === "deploy_position") {
     const deployArgs = args as DeployPositionArgs & { pool_name?: string };
     notifyDeploy({
@@ -179,14 +180,14 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
       priceRange: (result.price_range as { min: number; max: number }) || undefined,
       binStep: (result.bin_step as number) || undefined,
       baseFee: (result.base_fee as number) || undefined,
-    }).catch(() => {});
+    }).catch((e) => log("notify_error", getErrorMessage(e)));
   } else if (tool.name === "close_position") {
     const closeArgs = args as ClosePositionArgs;
     notifyClose({
       pair: (result.pool_name as string) || closeArgs.position_address?.slice(0, 8) || "unknown",
       pnlUsd: (result.pnl_usd as number) ?? 0,
       pnlPct: (result.pnl_pct as number) ?? 0,
-    }).catch(() => {});
+    }).catch((e) => log("notify_error", getErrorMessage(e)));
 
     // Note low-yield closes in pool memory so screener avoids redeploying
     if (closeArgs.reason?.toLowerCase().includes("yield")) {

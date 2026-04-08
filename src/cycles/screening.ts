@@ -435,8 +435,14 @@ IMPORTANT:
       setBusy(false);
       if (!silent && telegramEnabled()) {
         if (screenReport) {
-          if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
-          else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => {});
+          if (liveMessage)
+            await liveMessage
+              .finalize(stripThink(screenReport))
+              .catch((e) => log("telegram_error", getErrorMessage(e)));
+          else
+            sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch((e) =>
+              log("telegram_error", getErrorMessage(e))
+            );
         }
       }
     }

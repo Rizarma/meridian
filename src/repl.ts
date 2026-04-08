@@ -378,10 +378,12 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
       sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(
-        () => {}
+        (e) => log("telegram_error", getErrorMessage(e))
       );
     } else {
-      sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch(() => {});
+      sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch((e) =>
+        log("telegram_error", getErrorMessage(e))
+      );
     }
     return;
   }
@@ -391,7 +393,9 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       const health = await runHealthCheck();
       await sendMessage(formatHealthStatus(health));
     } catch (e) {
-      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch((err) =>
+        log("telegram_error", getErrorMessage(err))
+      );
     }
     return;
   }
@@ -401,7 +405,9 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       const briefing = await generateBriefing();
       await sendHTML(briefing);
     } catch (e) {
-      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch((err) =>
+        log("telegram_error", getErrorMessage(err))
+      );
     }
     return;
   }
@@ -427,7 +433,9 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         `📊 Open Positions (${totalPositions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`
       );
     } catch (e) {
-      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch((err) =>
+        log("telegram_error", getErrorMessage(err))
+      );
     }
     return;
   }
@@ -457,7 +465,9 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
       }
     } catch (e) {
-      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch((err) =>
+        log("telegram_error", getErrorMessage(err))
+      );
     }
     return;
   }
@@ -532,12 +542,18 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       else await sendMessage(stripThink(content));
     }
   } catch (e) {
-    if (liveMessage) await liveMessage.fail(getErrorMessage(e)).catch(() => {});
-    else await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+    if (liveMessage)
+      await liveMessage
+        .fail(getErrorMessage(e))
+        .catch((err) => log("telegram_error", getErrorMessage(err)));
+    else
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch((err) =>
+        log("telegram_error", getErrorMessage(err))
+      );
   } finally {
     busy = false;
     refreshPrompt(deps);
-    drainTelegramQueue(deps).catch(() => {});
+    drainTelegramQueue(deps).catch((e) => log("telegram_error", getErrorMessage(e)));
   }
 }
 
@@ -999,7 +1015,7 @@ Commands:
 
       // Start background services (logs autonomous message)
       launchCron();
-      deps.maybeRunMissedBriefing().catch(() => {});
+      deps.maybeRunMissedBriefing().catch((e) => log("telegram_error", getErrorMessage(e)));
       const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
       startPolling(boundTelegramHandler);
 
@@ -1081,7 +1097,7 @@ export async function startNonTTY(deps: REPLDependencies): Promise<void> {
   deps.startCronJobs();
 
   // Run missed briefing check
-  deps.maybeRunMissedBriefing().catch(() => {});
+  deps.maybeRunMissedBriefing().catch((e) => log("telegram_error", getErrorMessage(e)));
 
   // Create telegram handler bound to deps
   const boundTelegramHandler = (msg: TelegramMessage) => telegramHandler(msg, deps);
