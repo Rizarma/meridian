@@ -1,6 +1,6 @@
-import { closePosition, getMyPositions } from "../../tools/dlmm.js";
+import { getMyPositions } from "../../tools/dlmm.js";
 import { agentLoop } from "../agent/agent.js";
-import { computeDeployAmount, config } from "../config/config.js";
+import { config } from "../config/config.js";
 import {
   TRAILING_DROP_CONFIRM_DELAY_MS,
   TRAILING_DROP_CONFIRM_TOLERANCE_PCT,
@@ -8,12 +8,8 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { evaluateManagementExitRules } from "../domain/exit-rules.js";
-import { addPoolNote, recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
-import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import { recallForPool, recordPositionSnapshot } from "../domain/pool-memory.js";
 import {
-  clearAllConfirmationTimers,
-  clearPeakConfirmationTimer,
-  clearTrailingDropConfirmationTimer,
   deletePeakConfirmTimer,
   deleteTrailingDropConfirmTimer,
   getPeakConfirmTimer,
@@ -33,7 +29,6 @@ import {
 import {
   createLiveMessage,
   notifyOutOfRange,
-  sendHTML,
   sendMessage,
   isEnabled as telegramEnabled,
 } from "../infrastructure/telegram.js";
@@ -43,6 +38,8 @@ import type {
   EnrichedPosition,
   LiveMessageHandler,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
+import { isArray } from "../utils/validation.js";
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -53,23 +50,27 @@ function stripThink(text: string | null | undefined): string {
 export function schedulePeakConfirmation(positionAddress: string): void {
   if (!positionAddress || getPeakConfirmTimer(positionAddress)) return;
 
-  const timer = setTimeout(async () => {
-    deletePeakConfirmTimer(positionAddress);
-    try {
-      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const positions = result?.positions;
-      const position = positions?.find((p) => p.position === positionAddress);
-      resolvePendingPeak(
-        positionAddress,
-        position?.pnl_pct ?? null,
-        TRAILING_PEAK_CONFIRM_TOLERANCE
-      );
-    } catch (error) {
-      log(
-        "state_warn",
-        `Peak confirmation failed for ${positionAddress}: ${(error as Error).message}`
-      );
-    }
+  const timer = setTimeout((): void => {
+    void (async (): Promise<void> => {
+      deletePeakConfirmTimer(positionAddress);
+      try {
+        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
+        const positions = result?.positions;
+        const position = positions?.find(
+          (p: { position: string }) => p.position === positionAddress
+        );
+        resolvePendingPeak(
+          positionAddress,
+          position?.pnl_pct ?? null,
+          TRAILING_PEAK_CONFIRM_TOLERANCE
+        );
+      } catch (error) {
+        log(
+          "state_warn",
+          `Peak confirmation failed for ${positionAddress}: ${getErrorMessage(error)}`
+        );
+      }
+    })();
   }, TRAILING_PEAK_CONFIRM_DELAY_MS);
 
   setPeakConfirmTimer(positionAddress, timer);
@@ -81,31 +82,35 @@ export function scheduleTrailingDropConfirmation(
 ) {
   if (!positionAddress || getTrailingDropConfirmTimer(positionAddress)) return;
 
-  const timer = setTimeout(async () => {
-    deleteTrailingDropConfirmTimer(positionAddress);
-    try {
-      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const position = result?.positions?.find((p) => p.position === positionAddress);
-      const resolved = resolvePendingTrailingDrop(
-        positionAddress,
-        position?.pnl_pct ?? null,
-        config.management.trailingDropPct,
-        TRAILING_DROP_CONFIRM_TOLERANCE_PCT
-      );
-      if (resolved?.confirmed) {
-        log(
-          "state",
-          `[Trailing recheck] Confirmed trailing exit for ${positionAddress} — triggering management`
+  const timer = setTimeout((): void => {
+    void (async (): Promise<void> => {
+      deleteTrailingDropConfirmTimer(positionAddress);
+      try {
+        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
+        const position = result?.positions?.find(
+          (p: { position: string }) => p.position === positionAddress
         );
-        // Trigger management cycle to close the position
-        onConfirmed?.();
+        const resolved = resolvePendingTrailingDrop(
+          positionAddress,
+          position?.pnl_pct ?? null,
+          config.management.trailingDropPct,
+          TRAILING_DROP_CONFIRM_TOLERANCE_PCT
+        );
+        if (resolved?.confirmed) {
+          log(
+            "state",
+            `[Trailing recheck] Confirmed trailing exit for ${positionAddress} — triggering management`
+          );
+          // Trigger management cycle to close the position
+          onConfirmed?.();
+        }
+      } catch (error: unknown) {
+        log(
+          "state_warn",
+          `Trailing drop confirmation failed for ${positionAddress}: ${getErrorMessage(error)}`
+        );
       }
-    } catch (error: any) {
-      log(
-        "state_warn",
-        `Trailing drop confirmation failed for ${positionAddress}: ${error.message}`
-      );
-    }
+    })();
   }, TRAILING_DROP_CONFIRM_DELAY_MS);
 
   setTrailingDropConfirmTimer(positionAddress, timer);
@@ -130,14 +135,15 @@ export async function runManagementCycle(
   let mgmtReport: string | null = null;
   let positions: EnrichedPosition[] = [];
   let liveMessage: LiveMessageHandler | null = null;
-  const screeningCooldownMs = 5 * 60 * 1000;
+  const _screeningCooldownMs = 5 * 60 * 1000;
 
   try {
     if (!silent && telegramEnabled()) {
       liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
     }
-    const livePositions = await getMyPositions({ force: true }).catch(() => null);
-    positions = livePositions?.positions || [];
+    const livePositions = await getMyPositions({ force: true }).catch((): null => null);
+    const rawPositions = livePositions?.positions;
+    positions = isArray(rawPositions) ? rawPositions : [];
 
     if (positions.length === 0) {
       log("cron", "No open positions — triggering screening cycle");
@@ -147,16 +153,20 @@ export async function runManagementCycle(
       try {
         await trigger();
       } catch (e) {
-        log("cron_error", `Triggered screening failed: ${(e as Error).message}`);
+        log("cron_error", `Triggered screening failed: ${getErrorMessage(e)}`);
       }
       return mgmtReport;
     }
 
     // Snapshot + load pool memory
-    const positionData = positions.map((p) => {
+    // Validate positions array before mapping
+    if (!isArray(positions)) {
+      throw new Error("Invalid positions data: not an array");
+    }
+    const positionData: Array<EnrichedPosition & { recall: string | null }> = positions.map((p) => {
       recordPositionSnapshot(p.pool, p);
       return { ...p, recall: recallForPool(p.pool) };
-    }) as Array<EnrichedPosition & { recall: string | null }>;
+    });
 
     // JS trailing TP check
     const exitMap = new Map<string, string>();
@@ -364,7 +374,7 @@ After executing, write a brief one-line result per position.
     }
 
     // Trigger screening after management
-    const afterPositions = await getMyPositions({ force: true }).catch(() => null);
+    const afterPositions = await getMyPositions({ force: true }).catch((): null => null);
     const afterCount = afterPositions?.positions?.length ?? 0;
     // Note: screeningCooldown check is handled by the orchestrator via _screeningLastTriggered
     if (afterCount < config.risk.maxPositions) {
@@ -377,8 +387,8 @@ After executing, write a brief one-line result per position.
         .catch((e: Error) => log("cron_error", `Triggered screening failed: ${e.message}`));
     }
   } catch (error) {
-    log("cron_error", `Management cycle failed: ${(error as Error).message}`);
-    mgmtReport = `Management cycle failed: ${(error as Error).message}`;
+    log("cron_error", `Management cycle failed: ${getErrorMessage(error)}`);
+    mgmtReport = `Management cycle failed: ${getErrorMessage(error)}`;
   } finally {
     deps.setManagementBusy(false);
     if (!silent && telegramEnabled()) {

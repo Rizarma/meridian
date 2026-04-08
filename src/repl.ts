@@ -1,22 +1,17 @@
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Interface as ReadlineInterface } from "node:readline";
+import readline from "node:readline";
 import chalk from "chalk";
 import Table from "cli-table3";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
 import logUpdate from "log-update";
-import { join } from "path";
-import type { Interface as ReadlineInterface } from "readline";
-import readline from "readline";
 import { closePosition, getMyPositions } from "../tools/dlmm.js";
 import { getTopCandidates } from "../tools/screening.js";
 import { getWalletBalances } from "../tools/wallet.js";
 import { agentLoop } from "./agent/agent.js";
 import { colors } from "./cli/colors.js";
 import { config } from "./config/config.js";
-import {
-  getScreeningLastTriggered,
-  isScreeningBusy,
-  sanitizeUntrustedPromptText,
-  setScreeningLastTriggered,
-} from "./cycles/screening.js";
+import { isScreeningBusy, sanitizeUntrustedPromptText } from "./cycles/screening.js";
 import { getPerformanceSummary } from "./domain/lessons.js";
 import { evolveThresholds } from "./domain/threshold-evolution.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
@@ -26,11 +21,11 @@ import {
   sendHTML,
   sendMessage,
   startPolling,
-  stopPolling,
-  isEnabled as telegramEnabled,
 } from "./infrastructure/telegram.js";
 import type { CondensedPool, EnrichedPosition } from "./types/index.js";
 import type { TelegramMessage } from "./types/telegram.js";
+import { getErrorMessage } from "./utils/errors.js";
+import { formatHealthStatus, runHealthCheck } from "./utils/health-check.js";
 
 // DEPLOY constant from config
 const DEPLOY: number = config.management.deployAmountSol;
@@ -116,7 +111,7 @@ function getCommand(input: string): Command | undefined {
   }
   // Check for commands with arguments (e.g., "/learn <addr>")
   for (const [name, cmd] of commandRegistry) {
-    if (trimmed.startsWith(name + " ") || trimmed === name) {
+    if (trimmed.startsWith(`${name} `) || trimmed === name) {
       return cmd;
     }
   }
@@ -181,7 +176,7 @@ function loadHistory(): string[] {
       const content = readFileSync(HISTORY_FILE, "utf8");
       return content.split("\n").filter((line) => line.trim());
     }
-  } catch (e) {
+  } catch (_e) {
     // Ignore errors, start with empty history
   }
   return [];
@@ -191,16 +186,16 @@ function saveHistory(history: string[]): void {
   try {
     // Keep only last MAX_HISTORY_LINES
     const linesToSave = history.slice(-MAX_HISTORY_LINES);
-    writeFileSync(HISTORY_FILE, linesToSave.join("\n") + "\n");
-  } catch (e) {
+    writeFileSync(HISTORY_FILE, `${linesToSave.join("\n")}\n`);
+  } catch (_e) {
     // Ignore save errors
   }
 }
 
 function appendHistoryEntry(entry: string): void {
   try {
-    appendFileSync(HISTORY_FILE, entry + "\n");
-  } catch (e) {
+    appendFileSync(HISTORY_FILE, `${entry}\n`);
+  } catch (_e) {
     // Ignore append errors
   }
 }
@@ -224,7 +219,7 @@ function setupSignalHandlers(deps: REPLDependencies): void {
       await deps.shutdown(signal);
       process.exit(0);
     } catch (e) {
-      console.error(colors.red(`Shutdown error: ${(e as Error).message}`));
+      console.error(colors.red(`Shutdown error: ${getErrorMessage(e)}`));
       process.exit(1);
     }
   };
@@ -285,8 +280,7 @@ function buildStatusBar(deps: REPLDependencies): string {
 function drawStatusBar(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
 
-  // @ts-ignore - line is a private property
-  const currentLine = _ttyInterface.line;
+  const currentLine = (_ttyInterface as unknown as { line: string }).line;
 
   // Don't draw status bar if user is typing (has input on current line)
   if (currentLine && currentLine.length > 0) return;
@@ -305,8 +299,7 @@ function clearStatusBar(): void {
 function refreshPrompt(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
 
-  // @ts-ignore - line is a private property
-  const currentLine = _ttyInterface.line;
+  const currentLine = (_ttyInterface as unknown as { line: string }).line;
 
   // Skip if user is typing
   if (currentLine && currentLine.length > 0) return;
@@ -393,12 +386,22 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
     return;
   }
 
+  if (text === "/health") {
+    try {
+      const health = await runHealthCheck();
+      await sendMessage(formatHealthStatus(health));
+    } catch (e) {
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
+    }
+    return;
+  }
+
   if (text === "/briefing") {
     try {
       const briefing = await generateBriefing();
       await sendHTML(briefing);
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -424,7 +427,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         `📊 Open Positions (${totalPositions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`
       );
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -432,7 +435,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
   const closeMatch = text.match(/^\/close\s+(\d+)$/i);
   if (closeMatch) {
     try {
-      const idx = parseInt(closeMatch[1]) - 1;
+      const idx = parseInt(closeMatch[1], 10) - 1;
       const result = await getMyPositions({ force: true });
       const positions = result.positions || [];
       if (idx < 0 || idx >= positions.length) {
@@ -454,7 +457,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
       }
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -462,7 +465,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
   const setMatch = text.match(/^\/set\s+(\d+)\s+(.+)$/i);
   if (setMatch) {
     try {
-      const idx = parseInt(setMatch[1]) - 1;
+      const idx = parseInt(setMatch[1], 10) - 1;
       const note = setMatch[2].trim();
       const result = await getMyPositions({ force: true });
       const positions = result.positions || [];
@@ -476,7 +479,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       setPositionInstruction(pos.position, note);
       await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -493,6 +496,10 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
     const sanitizedText = sanitizeUntrustedPromptText(text);
+    if (!sanitizedText) {
+      await liveMessage?.fail("Empty or invalid input");
+      return;
+    }
     const { content } = await agentLoop(
       sanitizedText,
       config.llm.maxSteps,
@@ -525,8 +532,8 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       else await sendMessage(stripThink(content));
     }
   } catch (e) {
-    if (liveMessage) await liveMessage.fail((e as Error).message).catch(() => {});
-    else await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    if (liveMessage) await liveMessage.fail(getErrorMessage(e)).catch(() => {});
+    else await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
   } finally {
     busy = false;
     refreshPrompt(deps);
@@ -549,7 +556,7 @@ async function runBusy(
   try {
     await fn();
   } catch (e) {
-    console.error(colors.red(`Error: ${(e as Error).message}`));
+    console.error(colors.red(`Error: ${getErrorMessage(e)}`));
   } finally {
     busy = false;
     rl.setPrompt(buildPrompt(deps));
@@ -636,6 +643,17 @@ const cmdCandidates: Command = {
   },
 };
 
+const cmdHealth: Command = {
+  name: "/health",
+  description: "Show system health status",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const health = await runHealthCheck();
+      console.log(colors.dim(`\n${formatHealthStatus(health)}\n`));
+    });
+  },
+};
+
 const cmdBriefing: Command = {
   name: "/briefing",
   description: "Show morning briefing (last 24h)",
@@ -681,7 +699,7 @@ const cmdThresholds: Command = {
 const cmdLearn: Command = {
   name: "/learn",
   description: "Study top LPers from pools and save lessons",
-  handler: async ({ rl, deps, args, rawInput }) => {
+  handler: async ({ rl, deps, args, rawInput: _rawInput }) => {
     await runBusy(rl, deps, async () => {
       const poolArg = args[0] || null;
 
@@ -741,7 +759,7 @@ const cmdEvolve: Command = {
         );
         return;
       }
-      const fs = await import("fs");
+      const fs = await import("node:fs");
       const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
       const result = evolveThresholds(lessonsData.performance, config);
       if (!result || Object.keys(result.changes).length === 0) {
@@ -755,7 +773,7 @@ const cmdEvolve: Command = {
         const { reloadScreeningThresholds } = await import("./config/config.js");
         reloadScreeningThresholds();
         console.log(colors.green("\nThresholds evolved:"));
-        for (const [key, val] of Object.entries(result.changes)) {
+        for (const [key, _val] of Object.entries(result.changes)) {
           console.log(
             `  ${colors.cyan(key)}: ${(result.rationale as Record<string, string>)[key]}`
           );
@@ -825,6 +843,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   registerCommand(cmdStop);
   registerCommand(cmdStatus);
   registerCommand(cmdCandidates);
+  registerCommand(cmdHealth);
   registerCommand(cmdBriefing);
   registerCommand(cmdThresholds);
   registerCommand(cmdLearn);
@@ -875,7 +894,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
 
   // Save history periodically and on exit
   const historySaveInterval = setInterval(() => {
-    // @ts-ignore - history is private but accessible
+    // @ts-expect-error - history is private but accessible
     saveHistory(rl.history || []);
   }, HISTORY_SAVE_INTERVAL);
 
@@ -936,7 +955,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
           colors.white(`${(positions as { total_positions?: number }).total_positions ?? 0} open\n`)
       );
 
-      if ((positions as { total_positions?: number }).total_positions ?? 0 > 0) {
+      if (((positions as { total_positions?: number }).total_positions ?? 0) > 0) {
         console.log(colors.bold("Open positions:"));
         for (const p of (positions as { positions?: EnrichedPosition[] }).positions || []) {
           const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
@@ -956,7 +975,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       );
       console.log(formatCandidates(candidates));
     } catch (e) {
-      console.error(colors.red(`Startup fetch failed: ${(e as Error).message}`));
+      console.error(colors.red(`Startup fetch failed: ${getErrorMessage(e)}`));
     } finally {
       busy = false;
 
@@ -1000,8 +1019,8 @@ Commands:
     appendHistoryEntry(input);
 
     // ── Number pick: deploy into pool N ─────
-    const pick = parseInt(input);
-    if (!isNaN(pick) && pick >= 1 && pick <= _startupCandidates.length) {
+    const pick = parseInt(input, 10);
+    if (!Number.isNaN(pick) && pick >= 1 && pick <= _startupCandidates.length) {
       await runBusy(rl, deps, async () => {
         const pool = _startupCandidates[pick - 1];
         console.log(colors.cyan(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`));
@@ -1045,7 +1064,7 @@ Commands:
   rl.on("close", async () => {
     clearInterval(promptRefreshInterval);
     clearInterval(historySaveInterval);
-    // @ts-ignore - history is private but accessible
+    // @ts-expect-error - history is private but accessible
     saveHistory(rl.history || []);
     await deps.shutdown("stdin closed");
   });
@@ -1084,7 +1103,7 @@ STARTUP CHECK
         "SCREENER"
       );
     } catch (e) {
-      log("startup_error", (e as Error).message);
+      log("startup_error", getErrorMessage(e));
     }
   })();
 }

@@ -1,7 +1,6 @@
 // types/executor.d.ts
 // Tool executor types for the central dispatcher
 
-import type { Config } from "./config.js";
 
 // Tool names
 export type ToolName =

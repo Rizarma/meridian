@@ -67,8 +67,6 @@ export function describeAsync(name: string, fn: () => Promise<void>): void {
         pendingTests.length = 0;
       }
       suites.push(suite);
-    } catch (e) {
-      throw e;
     } finally {
       suiteStack.pop(); // Pop this suite from stack
       // Clear any remaining pending tests
@@ -228,9 +226,9 @@ export function expect(value: unknown): Expectation {
  * Print test results summary
  */
 function printResults(): void {
-  console.log("\n" + "=".repeat(60));
+  console.log(`\n${"=".repeat(60)}`);
   console.log("PHASE 0 CHARACTERIZATION TESTS");
-  console.log("=".repeat(60) + "\n");
+  console.log(`${"=".repeat(60)}\n`);
 
   let totalTests = 0;
   let passedTests = 0;
@@ -256,7 +254,7 @@ function printResults(): void {
     }
   }
 
-  console.log("\n" + "=".repeat(60));
+  console.log(`\n${"=".repeat(60)}`);
   console.log("SUMMARY");
   console.log("=".repeat(60));
   console.log(`Total:  ${totalTests}`);

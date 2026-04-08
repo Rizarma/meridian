@@ -1,6 +1,6 @@
-import { execSync, type ExecSyncOptions } from "child_process";
-import { existsSync } from "fs";
-import path from "path";
+import { type ExecSyncOptions, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Get list of changed files (staged + unstaged) that match given extensions
@@ -51,7 +51,7 @@ function runBiome(files: string[], command: string = "format"): number {
   }
 
   console.log(`Running biome ${command} on ${files.length} changed file(s):`);
-  files.forEach((f) => console.log(`  - ${f}`));
+  for (const f of files) console.log(`  - ${f}`);
 
   try {
     const fileList = files.join(" ");
@@ -61,9 +61,8 @@ function runBiome(files: string[], command: string = "format"): number {
     execSync(`pnpm biome ${command} --write ${fileList}`, options);
     return 0;
   } catch (error: unknown) {
-    const exitCode = error && typeof error === "object" && "status" in error 
-      ? (error.status as number) 
-      : 1;
+    const exitCode =
+      error && typeof error === "object" && "status" in error ? (error.status as number) : 1;
     return exitCode || 1;
   }
 }

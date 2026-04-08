@@ -1,6 +1,5 @@
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
-import { config } from "../src/config/config.js";
 import { log } from "../src/infrastructure/logger.js";
 import type {
   OKXAdvancedResult,
@@ -22,6 +21,9 @@ import type {
 import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
 import type { TokenInfoResult } from "../src/types/token.js";
 import { cache } from "../src/utils/cache.js";
+import { getErrorMessage } from "../src/utils/errors.js";
+import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
 import { isEnabled as isOKXEnabled } from "./okx.js";
 import { registerTool } from "./registry.js";
 
@@ -135,7 +137,9 @@ export async function getTokenNarrative({ mint }: TokenNarrativeInput): Promise<
     return cached;
   }
 
-  const res = await fetch(`${DATAPI_BASE}/chaininsight/narrative/${mint}`);
+  const res = await withRateLimit(rateLimiters.datapi, () =>
+    fetchWithRetry(`${DATAPI_BASE}/chaininsight/narrative/${mint}`)
+  );
   if (!res.ok) throw new Error(`Narrative API error: ${res.status}`);
   const data = (await res.json()) as JupiterNarrativeResponse;
   const result: TokenNarrative = {
@@ -161,7 +165,7 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
   }
 
   const url = `${DATAPI_BASE}/assets/search?query=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`Token search API error: ${res.status}`);
   const data = (await res.json()) as JupiterTokenData | JupiterTokenData[];
   const tokens = Array.isArray(data) ? data : [data];
@@ -215,12 +219,12 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
   if (isOKXEnabled() && results[0]?.mint) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
-      getAdvancedInfo(results[0].mint).catch((err) => {
-        log("token", `OKX advanced info failed: ${err.message}`);
+      getAdvancedInfo(results[0].mint).catch((err: unknown): null => {
+        log("token", `OKX advanced info failed: ${getErrorMessage(err)}`);
         return null;
       }),
-      getClusterList(results[0].mint).catch((err) => {
-        log("token", `OKX cluster list failed: ${err.message}`);
+      getClusterList(results[0].mint).catch((err: unknown): TokenCluster[] => {
+        log("token", `OKX cluster list failed: ${getErrorMessage(err)}`);
         return [];
       }),
     ]);
@@ -262,8 +266,8 @@ export async function getTokenHolders({
 
   // Fetch holders and total supply in parallel
   const [holdersRes, tokenRes] = await Promise.all([
-    fetch(`${DATAPI_BASE}/holders/${mint}?limit=100`),
-    fetch(`${DATAPI_BASE}/assets/search?query=${mint}`),
+    fetchWithRetry(`${DATAPI_BASE}/holders/${mint}?limit=100`),
+    fetchWithRetry(`${DATAPI_BASE}/assets/search?query=${mint}`),
   ]);
   if (!holdersRes.ok) throw new Error(`Holders API error: ${holdersRes.status}`);
   const data = (await holdersRes.json()) as
@@ -308,21 +312,21 @@ export async function getTokenHolders({
 
   // ─── Bundle / Cluster Analysis (OKX) ─────────────────────────
   let advancedData: OKXAdvancedResult | null = null;
-  let clusterList: OKXClusterResult[] = [];
+  let _clusterList: OKXClusterResult[] = [];
   if (isOKXEnabled()) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
-      getAdvancedInfo(mint).catch((err) => {
-        log("token", `OKX advanced info failed: ${err.message}`);
+      getAdvancedInfo(mint).catch((err: unknown): null => {
+        log("token", `OKX advanced info failed: ${getErrorMessage(err)}`);
         return null;
       }),
-      getClusterList(mint).catch((err) => {
-        log("token", `OKX cluster list failed: ${err.message}`);
+      getClusterList(mint).catch((err: unknown): OKXClusterResult[] => {
+        log("token", `OKX cluster list failed: ${getErrorMessage(err)}`);
         return [];
       }),
     ]);
     advancedData = adv;
-    clusterList = clusters;
+    _clusterList = clusters;
   }
 
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────
@@ -333,9 +337,9 @@ export async function getTokenHolders({
 
   if (smartWallets.length > 0) {
     const addresses = smartWallets.map((w) => w.address).join(",");
-    const kwRes = await fetch(`${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`).catch(
-      () => null
-    );
+    const kwRes = await fetchWithRetry(
+      `${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`
+    ).catch((): null => null);
     const kwData = kwRes?.ok
       ? ((await kwRes.json()) as
           | JupiterHolder[]
@@ -352,14 +356,15 @@ export async function getTokenHolders({
 
     await Promise.all(
       matchedHolders.map(async (h) => {
-        const wallet = smartWalletMap.get(h.addr)!;
+        const wallet = smartWalletMap.get(h.addr);
+        if (!wallet) return;
         const pct = totalSupply
           ? parseFloat(((Number(h.amount) / totalSupply) * 100).toFixed(4))
           : null;
 
         let pnl: SmartWalletHoldingPnl | null = null;
         try {
-          const pnlRes = await fetch(
+          const pnlRes = await fetchWithRetry(
             `${DATAPI_BASE}/pnl-positions?address=${h.addr}&assetId=${mint}`
           );
           if (pnlRes.ok) {

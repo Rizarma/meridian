@@ -8,8 +8,8 @@
  * - Actions taken (claims, rebalances)
  */
 
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { registerTool } from "../../tools/registry.js";
 import {
   MAX_INSTRUCTION_LENGTH,
@@ -37,6 +37,7 @@ import type {
   TrailingConfirmation,
 } from "../types/state.js";
 import type { Strategy } from "../types/strategy.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
 import { log } from "./logger.js";
 
@@ -79,7 +80,7 @@ function load(): PositionState {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as PositionState;
   } catch (err) {
-    log("state_error", `Failed to read state.json: ${(err as Error).message}`);
+    log("state_error", `Failed to read state.json: ${getErrorMessage(err)}`);
     return { positions: {}, recentEvents: [], lastUpdated: null };
   }
 }
@@ -88,7 +89,15 @@ function save(state: PositionState): void {
   try {
     state.lastUpdated = new Date().toISOString();
     const tmpFile = `${STATE_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
+    const data = JSON.stringify(state, null, 2);
+
+    // Write to temp file
+    fs.writeFileSync(tmpFile, data);
+
+    // Ensure data is synced to disk before renaming (crash safety)
+    const fd = fs.openSync(tmpFile, "r+");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
 
     // Retry rename for Windows compatibility (EBUSY errors)
     const maxRetries = 3;
@@ -101,16 +110,14 @@ function save(state: PositionState): void {
         const code = (err as { code?: string }).code;
         const isBusy = code === "EBUSY" || code === "EPERM" || code === "EACCES";
         if (isBusy && attempt < maxRetries) {
-          // Small non-blocking delay before retry using Atomics.wait
-          // This pauses the current thread briefly without consuming CPU
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
           continue;
         }
-        throw err; // Final attempt or non-busy error
+        throw err;
       }
     }
   } catch (err) {
-    log("state_error", `Failed to write state.json: ${(err as Error).message}`);
+    log("state_error", `Failed to write state.json: ${getErrorMessage(err)}`);
   }
 }
 
@@ -238,7 +245,7 @@ export function markInRange(position_address: string): void {
 export function minutesOutOfRange(position_address: string): number {
   const state = load();
   const pos = state.positions[position_address];
-  if (!pos || !pos.out_of_range_since) return 0;
+  if (!pos?.out_of_range_since) return 0;
   const ms = Date.now() - new Date(pos.out_of_range_since).getTime();
   return Math.floor(ms / 60000);
 }

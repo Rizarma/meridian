@@ -5,7 +5,7 @@
  * (via recordPerformance in lessons.js). Agent can query before deploying.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { config } from "../config/config.js";
 import { log } from "../infrastructure/logger.js";
@@ -29,7 +29,7 @@ function sanitizeStoredNote(
   const cleaned = String(text)
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/[<>\`]/g, "")
+    .replace(/[<>`]/g, "")
     .trim()
     .slice(0, maxLen);
   return cleaned || null;
@@ -282,7 +282,7 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
 
   if (!db[poolAddress].snapshots) db[poolAddress].snapshots = [];
 
-  db[poolAddress].snapshots!.push({
+  db[poolAddress].snapshots?.push({
     ts: new Date().toISOString(),
     position: snapshot.position,
     pnl_pct: snapshot.pnl_pct ?? null,
@@ -294,8 +294,8 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
   });
 
   // Keep last 48 snapshots (~4h at 5min intervals)
-  if (db[poolAddress].snapshots!.length > 48) {
-    db[poolAddress].snapshots = db[poolAddress].snapshots!.slice(-48);
+  if (db[poolAddress].snapshots?.length > 48) {
+    db[poolAddress].snapshots = db[poolAddress].snapshots?.slice(-48);
   }
 
   save(db);
@@ -343,7 +343,7 @@ export function recallForPool(poolAddress: string): string | null {
         : null;
     const oorCount = snaps.filter((s) => s.in_range === false).length;
     lines.push(
-      `RECENT TREND: PnL drift ${pnlTrend !== null ? (parseFloat(pnlTrend) >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`
+      `RECENT TREND: PnL drift ${pnlTrend !== null ? `${(parseFloat(pnlTrend) >= 0 ? "+" : "") + pnlTrend}%` : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`
     );
   }
 

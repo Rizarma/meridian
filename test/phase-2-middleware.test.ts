@@ -41,14 +41,14 @@ describeAsync("applyMiddleware Chain Composition", async () => {
   testAsync("middleware chain executes in order", async () => {
     const order: string[] = [];
 
-    const mw1: MiddlewareFn = async (tool, args, role, next) => {
+    const mw1: MiddlewareFn = async (_tool, _args, _role, next) => {
       order.push("mw1-before");
       const result = await next();
       order.push("mw1-after");
       return result;
     };
 
-    const mw2: MiddlewareFn = async (tool, args, role, next) => {
+    const mw2: MiddlewareFn = async (_tool, _args, _role, next) => {
       order.push("mw2-before");
       const result = await next();
       order.push("mw2-after");
@@ -68,13 +68,13 @@ describeAsync("applyMiddleware Chain Composition", async () => {
   testAsync("middleware can short-circuit chain", async () => {
     const order: string[] = [];
 
-    const blockingMw: MiddlewareFn = async (tool, args, role, next) => {
+    const blockingMw: MiddlewareFn = async (_tool, _args, _role, _next) => {
       order.push("blocking");
       return { blocked: true, reason: "Test block" };
       // Note: not calling next()
     };
 
-    const afterMw: MiddlewareFn = async (tool, args, role, next) => {
+    const afterMw: MiddlewareFn = async (_tool, _args, _role, next) => {
       order.push("after");
       return await next();
     };
@@ -136,9 +136,9 @@ describeAsync("Safety Check Middleware", async () => {
     // because config and dependencies aren't set up in test environment
     // That's expected - we just verify it doesn't crash
 
-    let nextCalled = false;
+    let _nextCalled = false;
     const mockNext = async () => {
-      nextCalled = true;
+      _nextCalled = true;
       return { success: true };
     };
 

@@ -9,7 +9,7 @@
  * and config — all one-directional, no circular risk.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { config, reloadScreeningThresholds } from "../config/config.js";
 import { USER_CONFIG_PATH } from "../config/paths.js";
 import { syncToHive } from "../infrastructure/hive-mind.js";
@@ -228,7 +228,7 @@ export function evolveThresholds(
 // ─── Helpers ───────────────────────────────────────────────────
 
 function isFiniteNum(n: unknown): n is number {
-  return typeof n === "number" && isFinite(n);
+  return typeof n === "number" && Number.isFinite(n);
 }
 
 function avg(arr: number[]): number {

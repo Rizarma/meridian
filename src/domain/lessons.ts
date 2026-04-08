@@ -6,7 +6,7 @@
  * agent avoids repeating mistakes and doubles down on what works.
  */
 
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { LESSONS_FILE } from "../config/paths.js";
 import { log } from "../infrastructure/logger.js";
@@ -428,7 +428,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
     .sort(byPriority)
     .slice(0, ROLE_CAP);
 
-  roleMatched.forEach((l) => usedIds.add(l.id));
+  for (const l of roleMatched) usedIds.add(l.id);
 
   // ── Tier 3: Recent fill ─────────────────────────────────────────
   const remainingBudget = RECENT_CAP - pinned.length - roleMatched.length;
@@ -444,10 +444,10 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
   if (selected.length === 0) return null;
 
   const sections: string[] = [];
-  if (pinned.length) sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
+  if (pinned.length) sections.push(`── PINNED (${pinned.length}) ──\n${fmt(pinned)}`);
   if (roleMatched.length)
-    sections.push(`── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched));
-  if (recent.length) sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
+    sections.push(`── ${agentType} (${roleMatched.length}) ──\n${fmt(roleMatched)}`);
+  if (recent.length) sections.push(`── RECENT (${recent.length}) ──\n${fmt(recent)}`);
 
   return sections.join("\n\n");
 }

@@ -1,13 +1,11 @@
-import {
-  Connection,
-  Keypair,
-  LAMPORTS_PER_SOL,
-  PublicKey,
-  VersionedTransaction,
-} from "@solana/web3.js";
+import { type Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { config, getRpcUrl } from "../src/config/config.js";
+import { config } from "../src/config/config.js";
+import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
+import { getErrorMessage } from "../src/utils/errors.js";
+import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
 import { registerTool } from "./registry.js";
 
 // Type imports from types/wallet.d.ts
@@ -86,17 +84,30 @@ interface SwapViaQuoteParams {
   amountStr: string;
 }
 
-let _connection: Connection | null = null;
 let _wallet: Keypair | null = null;
-
-function getConnection(): Connection {
-  if (!_connection) _connection = new Connection(getRpcUrl(), "confirmed");
-  return _connection;
-}
 
 // Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
 const MIN_SECRET_KEY_LENGTH = 64; // 64 bytes = 88 base58 chars typically
+
+// Validation helpers for public keys and amounts
+function validatePublicKey(key: string, fieldName: string): void {
+  if (!key || typeof key !== "string") {
+    throw new Error(`Invalid ${fieldName}: must be a non-empty string`);
+  }
+  if (!BASE58_REGEX.test(key) || key.length < 32 || key.length > 44) {
+    throw new Error(`Invalid ${fieldName} format: ${key.slice(0, 8)}...`);
+  }
+}
+
+function validateAmount(amount: number, fieldName: string, max = 1_000_000_000): void {
+  if (typeof amount !== "number" || Number.isNaN(amount) || amount <= 0) {
+    throw new Error(`Invalid ${fieldName}: ${amount}. Must be a positive number.`);
+  }
+  if (amount > max) {
+    throw new Error(`${fieldName} ${amount} exceeds maximum allowed (${max})`);
+  }
+}
 
 function validateWalletKey(key: string | undefined): string {
   if (!key || key.trim() === "") {
@@ -116,12 +127,12 @@ function validateWalletKey(key: string | undefined): string {
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
-    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${getErrorMessage(e)}`);
   }
   return trimmed;
 }
 
-function getWallet(): Keypair {
+export function getWallet(): Keypair {
   if (!_wallet) {
     const validKey = validateWalletKey(process.env.WALLET_PRIVATE_KEY);
     _wallet = Keypair.fromSecretKey(bs58.decode(validKey));
@@ -129,7 +140,7 @@ function getWallet(): Keypair {
   return _wallet;
 }
 
-const JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
+const _JUPITER_PRICE_API: string = "https://api.jup.ag/price/v3";
 const JUPITER_ULTRA_API: string = "https://api.jup.ag/ultra/v1";
 const JUPITER_QUOTE_API: string = "https://api.jup.ag/swap/v1";
 const JUPITER_API_KEY: string = process.env.JUPITER_API_KEY || "";
@@ -175,7 +186,7 @@ export async function getWalletBalances(): Promise<WalletBalances> {
 
   try {
     const url = `https://api.helius.xyz/v1/wallet/${walletAddress}/balances?api-key=${HELIUS_KEY}`;
-    const res = await fetch(url);
+    const res = await withRateLimit(rateLimiters.helius, () => fetchWithRetry(url));
 
     if (!res.ok) {
       throw new Error(`Helius API error: ${res.status} ${res.statusText}`);
@@ -229,7 +240,7 @@ export async function getWalletBalances(): Promise<WalletBalances> {
 /**
  * Swap tokens via Jupiter Ultra API (order → sign → execute).
  */
-const SOL_MINT: string = "So11111111111111111111111111111111111111112";
+const _SOL_MINT: string = "So11111111111111111111111111111111111111112";
 
 // Normalize any SOL-like address to the correct wrapped SOL mint
 export function normalizeMint(mint: string): string {
@@ -255,8 +266,24 @@ export async function swapToken({
   output_mint: string;
   amount: number;
 }): Promise<SwapResult> {
+  // Validate inputs before normalization
+  if (!input_mint || typeof input_mint !== "string") {
+    throw new Error("Invalid input_mint: must be a non-empty string");
+  }
+  if (!output_mint || typeof output_mint !== "string") {
+    throw new Error("Invalid output_mint: must be a non-empty string");
+  }
+  validateAmount(amount, "amount");
+
   input_mint = normalizeMint(input_mint);
   output_mint = normalizeMint(output_mint);
+
+  // Validate normalized mints are different and valid base58
+  if (input_mint === output_mint) {
+    throw new Error("Input and output mints must be different");
+  }
+  validatePublicKey(input_mint, "input_mint");
+  validatePublicKey(output_mint, "output_mint");
 
   if (process.env.DRY_RUN === "true") {
     return {
@@ -269,7 +296,7 @@ export async function swapToken({
   try {
     log("swap", `${amount} of ${input_mint} → ${output_mint}`);
     const wallet = getWallet();
-    const connection = getConnection();
+    const connection = getSharedConnection();
 
     // ─── Convert to smallest unit ──────────────────────────────
     let decimals = 9; // SOL default
@@ -279,7 +306,7 @@ export async function swapToken({
         (mintInfo.value?.data as { parsed?: { info?: { decimals?: number } } })?.parsed?.info
           ?.decimals ?? 9;
     }
-    const amountStr = Math.floor(amount * Math.pow(10, decimals)).toString();
+    const amountStr = Math.floor(amount * 10 ** decimals).toString();
 
     // ─── Get Ultra order (unsigned tx + requestId) ─────────────
     const orderUrl =
@@ -289,9 +316,11 @@ export async function swapToken({
       `&amount=${amountStr}` +
       `&taker=${wallet.publicKey.toString()}`;
 
-    const orderRes = await fetch(orderUrl, {
-      headers: { "x-api-key": JUPITER_API_KEY },
-    });
+    const orderRes = await withRateLimit(rateLimiters.jupiter, () =>
+      fetchWithRetry(orderUrl, {
+        headers: { "x-api-key": JUPITER_API_KEY },
+      })
+    );
     if (!orderRes.ok) {
       const body = await orderRes.text();
       if (orderRes.status === 500) {
@@ -315,14 +344,16 @@ export async function swapToken({
     const signedTx = Buffer.from(tx.serialize()).toString("base64");
 
     // ─── Execute ───────────────────────────────────────────────
-    const execRes = await fetch(`${JUPITER_ULTRA_API}/execute`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": JUPITER_API_KEY,
-      },
-      body: JSON.stringify({ signedTransaction: signedTx, requestId }),
-    });
+    const execRes = await withRateLimit(rateLimiters.jupiter, () =>
+      fetchWithRetry(`${JUPITER_ULTRA_API}/execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": JUPITER_API_KEY,
+        },
+        body: JSON.stringify({ signedTransaction: signedTx, requestId }),
+      })
+    );
     if (!execRes.ok) {
       throw new Error(`Ultra execute failed: ${execRes.status} ${await execRes.text()}`);
     }
@@ -357,9 +388,11 @@ async function swapViaQuoteApi({
   amountStr,
 }: SwapViaQuoteParams): Promise<SwapResult> {
   // ─── Get quote ─────────────────────────────────────────────
-  const quoteRes = await fetch(
-    `${JUPITER_QUOTE_API}/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amountStr}&slippageBps=300`,
-    { headers: { "x-api-key": JUPITER_API_KEY } }
+  const quoteRes = await withRateLimit(rateLimiters.jupiter, () =>
+    fetchWithRetry(
+      `${JUPITER_QUOTE_API}/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amountStr}&slippageBps=300`,
+      { headers: { "x-api-key": JUPITER_API_KEY } }
+    )
   );
   if (!quoteRes.ok) throw new Error(`Quote failed: ${quoteRes.status} ${await quoteRes.text()}`);
   const quote = (await quoteRes.json()) as JupiterQuote;
@@ -367,15 +400,17 @@ async function swapViaQuoteApi({
     throw new Error(`Quote error: ${(quote as unknown as { error?: string }).error}`);
 
   // ─── Get swap tx ───────────────────────────────────────────
-  const swapRes = await fetch(`${JUPITER_QUOTE_API}/swap`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": JUPITER_API_KEY },
-    body: JSON.stringify({
-      quoteResponse: quote,
-      userPublicKey: wallet.publicKey.toString(),
-      wrapAndUnwrapSol: true,
-    }),
-  });
+  const swapRes = await withRateLimit(rateLimiters.jupiter, () =>
+    fetchWithRetry(`${JUPITER_QUOTE_API}/swap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": JUPITER_API_KEY },
+      body: JSON.stringify({
+        quoteResponse: quote,
+        userPublicKey: wallet.publicKey.toString(),
+        wrapAndUnwrapSol: true,
+      }),
+    })
+  );
   if (!swapRes.ok) throw new Error(`Swap tx failed: ${swapRes.status} ${await swapRes.text()}`);
   const { swapTransaction } = (await swapRes.json()) as { swapTransaction: string };
 

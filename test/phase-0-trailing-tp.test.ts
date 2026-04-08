@@ -91,7 +91,7 @@ function getMockPosition(position_address: string): MockPositionState {
       out_of_range_since: null,
     });
   }
-  return mockStateStore.get(position_address)!;
+  return mockStateStore.get(position_address) as MockPositionState;
 }
 
 function saveMockPosition(position: MockPositionState): void {
@@ -405,7 +405,7 @@ describe("Trailing TP - Activation", () => {
       in_range: true,
     };
 
-    const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
+    const _result = updatePnlAndCheckExits(posId, positionData, baseConfig);
     const updatedPos = getMockPosition(posId);
 
     expect(updatedPos.trailing_active).toBeTruthy();
@@ -425,7 +425,7 @@ describe("Trailing TP - Activation", () => {
       in_range: true,
     };
 
-    const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
+    const _result = updatePnlAndCheckExits(posId, positionData, baseConfig);
     const updatedPos = getMockPosition(posId);
 
     expect(updatedPos.trailing_active).toBeTruthy();
@@ -450,7 +450,7 @@ describe("Trailing TP - Activation", () => {
       in_range: true,
     };
 
-    const result = updatePnlAndCheckExits(posId, positionData, disabledConfig);
+    const _result = updatePnlAndCheckExits(posId, positionData, disabledConfig);
     const updatedPos = getMockPosition(posId);
 
     expect(updatedPos.trailing_active).toBeFalsy();
@@ -458,7 +458,7 @@ describe("Trailing TP - Activation", () => {
 });
 
 describe("Trailing TP - Peak Updates", () => {
-  const baseConfig: ManagementConfig = {
+  const _baseConfig: ManagementConfig = {
     trailingTakeProfit: true,
     trailingTriggerPct: 50,
     trailingDropPct: 20,
@@ -606,11 +606,11 @@ describe("Trailing TP - Drop Detection", () => {
     const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
 
     expect(result).toBeTruthy();
-    expect(result!.action).toBe("TRAILING_TP");
-    expect(result!.needs_confirmation).toBeTruthy();
-    expect(result!.peak_pnl_pct).toBe(70);
-    expect(result!.current_pnl_pct).toBe(48);
-    expect(result!.reason.includes("dropped 22")).toBeTruthy();
+    expect(result?.action).toBe("TRAILING_TP");
+    expect(result?.needs_confirmation).toBeTruthy();
+    expect(result?.peak_pnl_pct).toBe(70);
+    expect(result?.current_pnl_pct).toBe(48);
+    expect(result?.reason.includes("dropped 22")).toBeTruthy();
   });
 
   test("closes exactly at drop threshold", () => {
@@ -631,7 +631,7 @@ describe("Trailing TP - Drop Detection", () => {
     const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
 
     expect(result).toBeTruthy();
-    expect(result!.action).toBe("TRAILING_TP");
+    expect(result?.action).toBe("TRAILING_TP");
   });
 
   test("does not close if trailing disabled even with large drop", () => {
@@ -710,7 +710,7 @@ describe("Trailing TP - Stop Loss Priority", () => {
 
     // Stop loss should trigger before trailing TP check
     expect(result).toBeTruthy();
-    expect(result!.action).toBe("STOP_LOSS");
+    expect(result?.action).toBe("STOP_LOSS");
   });
 
   test("trailing TP triggers when stop loss not hit", () => {
@@ -731,7 +731,7 @@ describe("Trailing TP - Stop Loss Priority", () => {
     const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
 
     expect(result).toBeTruthy();
-    expect(result!.action).toBe("TRAILING_TP");
+    expect(result?.action).toBe("TRAILING_TP");
   });
 });
 
@@ -758,7 +758,7 @@ describe("Trailing TP - Edge Cases", () => {
       in_range: true,
     };
 
-    const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
+    const _result = updatePnlAndCheckExits(posId, positionData, baseConfig);
 
     // Should not activate (0 < 50 trigger)
     const updatedPos = getMockPosition(posId);
@@ -779,7 +779,7 @@ describe("Trailing TP - Edge Cases", () => {
       in_range: true,
     };
 
-    const result = updatePnlAndCheckExits(posId, positionData, baseConfig);
+    const _result = updatePnlAndCheckExits(posId, positionData, baseConfig);
 
     // Should not activate (-10 < 50 trigger)
     const updatedPos = getMockPosition(posId);
@@ -951,9 +951,9 @@ describe("Confirmed Trailing Exit Cooldown", () => {
     });
 
     expect(result).toBeTruthy();
-    expect(result!.action).toBe("TRAILING_TP");
-    expect(result!.needs_confirmation).toBeFalsy(); // Already confirmed
-    expect(result!.reason).toBe("Trailing TP: peak 70.00% → current 48.00% (dropped 22.00%)");
+    expect(result?.action).toBe("TRAILING_TP");
+    expect(result?.needs_confirmation).toBeFalsy(); // Already confirmed
+    expect(result?.reason).toBe("Trailing TP: peak 70.00% → current 48.00% (dropped 22.00%)");
   });
 
   test("clears expired cooldown and continues normal checks", () => {
@@ -1007,7 +1007,7 @@ describe("Confirmed Trailing Exit Cooldown", () => {
     const afterResolve = Date.now();
 
     const updatedPos = getMockPosition(posId);
-    const cooldownUntil = new Date(updatedPos.confirmed_trailing_exit_until!).getTime();
+    const cooldownUntil = new Date(updatedPos.confirmed_trailing_exit_until as string).getTime();
 
     // Cooldown should be approximately 5 minutes (300 seconds) from resolution
     expect(cooldownUntil).toBeGreaterThan(beforeResolve + 5 * 60 * 1000 - 2000); // Allow 2s tolerance

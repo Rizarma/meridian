@@ -1,4 +1,4 @@
-import fs from "fs";
+import fs from "node:fs";
 import { USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   LiveMessageAPI,
@@ -10,11 +10,13 @@ import type {
   TelegramNotifySwap,
   TelegramUpdate,
 } from "../types/telegram.d.ts";
+import { getErrorMessage } from "../utils/errors.js";
 import { log } from "./logger.js";
 
 /**
  * Sanitize parsed JSON to prevent prototype pollution.
  * Removes __proto__, constructor, and prototype keys from objects.
+ * Uses Object.create(null) to avoid prototype chain and recursively sanitizes nested objects.
  */
 function sanitizeJson<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") {
@@ -22,17 +24,28 @@ function sanitizeJson<T>(obj: T): T {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(sanitizeJson) as unknown as T;
+    return obj.map((item) => sanitizeJson(item)) as unknown as T;
   }
 
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    // Block prototype pollution keys
+  // Use Object.create(null) to avoid prototype chain
+  const sanitized = Object.create(null) as Record<string, unknown>;
+
+  for (const key of Object.keys(obj)) {
+    // Block dangerous keys at all levels
     if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      log("security", `Blocked dangerous key: ${key}`);
       continue;
     }
-    sanitized[key] = sanitizeJson(value);
+
+    // Recursively sanitize nested objects
+    const value = (obj as Record<string, unknown>)[key];
+    if (typeof value === "object" && value !== null) {
+      sanitized[key] = sanitizeJson(value);
+    } else {
+      sanitized[key] = value;
+    }
   }
+
   return sanitized as T;
 }
 
@@ -51,6 +64,7 @@ let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
+let _pollAbortController: AbortController | null = null;
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
@@ -67,7 +81,7 @@ function loadChatId(): void {
   }
 }
 
-function saveChatId(id: string): void {
+function _saveChatId(id: string): void {
   try {
     const raw: { telegramChatId?: string } & Record<string, unknown> = fs.existsSync(
       USER_CONFIG_PATH
@@ -80,7 +94,7 @@ function saveChatId(id: string): void {
     cfg.telegramChatId = id;
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
   } catch (e) {
-    log("telegram_error", `Failed to persist chatId: ${(e as Error).message}`);
+    log("telegram_error", `Failed to persist chatId: ${getErrorMessage(e)}`);
   }
 }
 
@@ -147,7 +161,7 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
     return await res.json();
   } catch (e) {
     // Only log if it's not a parse entities error (those are expected and handled)
-    const msg = (e as Error).message || "";
+    const msg = getErrorMessage(e);
     if (msg.includes("parse entities")) {
       log("telegram_debug", `Parse entities error: ${msg}`);
       // Continue to suppress from error level logging
@@ -258,12 +272,12 @@ function createTypingIndicator(): TypingIndicator {
   async function tick(): Promise<void> {
     if (stopped) return;
     await postTelegram("sendChatAction", { action: "typing" });
-    timer = setTimeout(() => {
-      tick().catch(() => null);
+    timer = setTimeout((): void => {
+      tick().catch((): null => null);
     }, 4000);
   }
 
-  tick().catch(() => null);
+  tick().catch((): null => null);
 
   return {
     stop() {
@@ -385,8 +399,8 @@ export async function createLiveMessage(
       state.flushRequested = true;
       return;
     }
-    state.flushTimer = setTimeout(() => {
-      state.flushPromise = flushNow().catch(() => undefined);
+    state.flushTimer = setTimeout((): void => {
+      state.flushPromise = flushNow().catch((): undefined => undefined);
     }, delay);
   }
 
@@ -444,9 +458,16 @@ export async function createLiveMessage(
 async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
   while (_polling) {
     try {
+      _pollAbortController = new AbortController();
+      const timeoutId = setTimeout(() => _pollAbortController?.abort(), 35_000);
+
       const res = await fetch(`${BASE}/getUpdates?offset=${_offset}&timeout=30`, {
-        signal: AbortSignal.timeout(35_000),
+        signal: _pollAbortController.signal,
       });
+
+      clearTimeout(timeoutId);
+      _pollAbortController = null;
+
       if (!res.ok) {
         await sleep(5000);
         continue;
@@ -460,8 +481,8 @@ async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise
         await onMessage(msg);
       }
     } catch (e) {
-      if (!(e as Error).message?.includes("aborted")) {
-        log("telegram_error", `Poll error: ${(e as Error).message}`);
+      if (!getErrorMessage(e).includes("aborted")) {
+        log("telegram_error", `Poll error: ${getErrorMessage(e)}`);
       }
       await sleep(5000);
     }
@@ -477,6 +498,7 @@ export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>)
 
 export function stopPolling(): void {
   _polling = false;
+  _pollAbortController?.abort();
 }
 
 // ─── Notification helpers ────────────────────────────────────────
@@ -495,7 +517,7 @@ export async function notifyDeploy({
     : "";
   const poolStr =
     binStep || baseFee
-      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
+      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? `${baseFee}%` : "?"}\n`
       : "";
   await sendHTML(
     `✅ <b>Deployed</b> ${pair}\n` +

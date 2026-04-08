@@ -12,7 +12,7 @@ export function buildSystemPrompt(
   lessons: string | null = null,
   perfSummary: unknown = null
 ): string {
-  const s: typeof config.screening = config.screening;
+  const _s: typeof config.screening = config.screening;
 
   // MANAGER gets a leaner prompt — positions are pre-loaded in the goal, not repeated here
   if (agentType === "MANAGER") {
@@ -155,5 +155,5 @@ TOP LPERS RULE: If the user asks about top LPers, LP behavior, or wants to add t
 `;
   }
 
-  return basePrompt + `\nTimestamp: ${new Date().toISOString()}\n`;
+  return `${basePrompt}\nTimestamp: ${new Date().toISOString()}\n`;
 }

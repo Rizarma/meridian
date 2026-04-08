@@ -3,7 +3,7 @@
  * Uses Ok-Access-Client-type: agent-cli header for unauthenticated access.
  * Docs: https://web3.okx.com/build/dev-docs/
  */
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { config } from "../src/config/config.js";
 import type {
   OKXAdvancedInfo,

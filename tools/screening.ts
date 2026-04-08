@@ -21,6 +21,8 @@ import type {
   TopCandidatesResult,
 } from "../src/types/screening.js";
 import { cache } from "../src/utils/cache.js";
+import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
 import { isEnabled as isOKXEnabled } from "./okx.js";
 import { registerTool } from "./registry.js";
 
@@ -69,7 +71,7 @@ export async function discoverPools({
     `&timeframe=${s.timeframe}` +
     `&category=${s.category}`;
 
-  const res = await fetch(url);
+  const res = await withRateLimit(rateLimiters.meteora, () => fetchWithRetry(url));
 
   if (!res.ok) {
     throw new Error(`Pool Discovery API error: ${res.status} ${res.statusText}`);
@@ -109,13 +111,13 @@ export async function discoverPools({
     if (missingDev.length > 0) {
       const devResults = await Promise.allSettled(
         missingDev.map((p) =>
-          fetch(`${DATAPI_JUP}/assets/search?query=${p.base.mint}`)
+          fetchWithRetry(`${DATAPI_JUP}/assets/search?query=${p.base.mint}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((d) => {
               const t = Array.isArray(d) ? d[0] : d;
               return { pool: p.pool, dev: t?.dev || null };
             })
-            .catch(() => ({ pool: p.pool, dev: null }))
+            .catch((): { pool: string; dev: null } => ({ pool: p.pool, dev: null }))
         )
       );
       const devMap: Record<string, string | null> = {};
@@ -369,7 +371,7 @@ export async function getPoolDetail({
     `&filter_by=${encodeURIComponent(`pool_address=${pool_address}`)}` +
     `&timeframe=${timeframe}`;
 
-  const res = await fetch(url);
+  const res = await withRateLimit(rateLimiters.meteora, () => fetchWithRetry(url));
 
   if (!res.ok) {
     throw new Error(`Pool detail API error: ${res.status} ${res.statusText}`);

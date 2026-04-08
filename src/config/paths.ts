@@ -1,10 +1,10 @@
-import path from "path";
-import { fileURLToPath } from "url";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // If running from dist/, go up two levels to project root (dist/src → project root)
-export const PROJECT_ROOT = __dirname.includes(path.sep + "dist" + path.sep)
+export const PROJECT_ROOT = __dirname.includes(`${path.sep}dist${path.sep}`)
   ? path.join(__dirname, "..", "..")
   : __dirname;
 
