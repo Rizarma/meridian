@@ -1,13 +1,6 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  sendAndConfirmTransaction,
-  type Transaction,
-} from "@solana/web3.js";
+import { Keypair, PublicKey, sendAndConfirmTransaction, type Transaction } from "@solana/web3.js";
 import { Mutex } from "async-mutex";
 import BN from "bn.js";
-import bs58 from "bs58";
 import { config } from "../src/config/config.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
 import { getSharedConnection } from "../src/infrastructure/connection.js";
@@ -30,14 +23,12 @@ import type {
   CloseResult,
   DeployParams,
   DeployResult,
-  DLMMPool,
   EnrichedPosition,
   PositionPnL,
   PositionsResult,
   RawPnLData,
   SearchPoolsParams,
   SearchPoolsResult,
-  StrategyType,
   WalletPositionsParams,
   WalletPositionsResult,
   WithdrawLiquidityParams,
@@ -47,7 +38,7 @@ import { getErrorMessage } from "../src/utils/errors.js";
 import { recordActivity } from "../src/utils/health-check.js";
 import { fetchWithRetry } from "../src/utils/retry.js";
 import { isArray, isObject } from "../src/utils/validation.js";
-import { getWallet, validateWalletKey } from "../src/utils/wallet.js";
+import { getWallet } from "../src/utils/wallet.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
