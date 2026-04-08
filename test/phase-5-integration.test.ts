@@ -19,9 +19,7 @@ import type { AgentType } from "../src/types/index.js";
 import type { PerformanceRecord as LessonsPerformanceRecord } from "../src/types/lessons.js";
 import type { PerformanceRecord as WeightsPerformanceRecord } from "../src/types/weights.js";
 import type { MiddlewareFn } from "../tools/middleware.js";
-import {
-  applyMiddleware,
-} from "../tools/middleware.js";
+import { applyMiddleware } from "../tools/middleware.js";
 import {
   clearRegistry,
   getTool,

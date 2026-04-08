@@ -303,7 +303,7 @@ export function reloadScreeningThresholds(): void {
       }
     }
   } catch {
-    /* ignore */
+    log("config_error", "Failed to reload screening thresholds");
   }
 }
 

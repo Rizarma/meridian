@@ -1,7 +1,6 @@
 // types/screening.d.ts
 // Pool screening and discovery types
 
-
 // Pool Discovery
 export interface DiscoverPoolsInput {
   page_size?: number;

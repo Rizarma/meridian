@@ -393,15 +393,23 @@ After executing, write a brief one-line result per position.
     deps.setManagementBusy(false);
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
-        if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
-        else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => {});
+        if (liveMessage)
+          await liveMessage
+            .finalize(stripThink(mgmtReport))
+            .catch((e) => log("telegram_error", getErrorMessage(e)));
+        else
+          sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch((e) =>
+            log("telegram_error", getErrorMessage(e))
+          );
       }
       for (const p of positions) {
         if (
           !p.in_range &&
           (p.minutes_out_of_range ?? 0) >= config.management.outOfRangeWaitMinutes
         ) {
-          notifyOutOfRange({ pair: p.pair, minutesOOR: p.minutes_out_of_range }).catch(() => {});
+          notifyOutOfRange({ pair: p.pair, minutesOOR: p.minutes_out_of_range }).catch((e) =>
+            log("telegram_error", getErrorMessage(e))
+          );
         }
       }
     }

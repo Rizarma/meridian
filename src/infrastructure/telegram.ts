@@ -1,17 +1,28 @@
 import fs from "node:fs";
+import { Bot, type Context, GrammyError, HttpError } from "grammy";
 import { USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   LiveMessageAPI,
-  LiveMessageState,
   TelegramMessage,
   TelegramNotifyClose,
   TelegramNotifyDeploy,
   TelegramNotifyOOR,
   TelegramNotifySwap,
-  TelegramUpdate,
-} from "../types/telegram.d.ts";
+} from "../types/telegram.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { log } from "./logger.js";
+
+// Local types for live messages
+interface LiveMessageState {
+  title: string;
+  intro: string;
+  toolLines: string[];
+  footer: string;
+  messageId: number | null;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  flushPromise: Promise<void> | null;
+  flushRequested: boolean;
+}
 
 /**
  * Sanitize parsed JSON to prevent prototype pollution.
@@ -50,7 +61,7 @@ function sanitizeJson<T>(obj: T): T {
 }
 
 const TOKEN: string | null = process.env.TELEGRAM_BOT_TOKEN || null;
-const BASE: string | null = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
+const bot = TOKEN ? new Bot(TOKEN) : null;
 const ALLOWED_USER_IDS: Set<string> = new Set(
   String(process.env.TELEGRAM_ALLOWED_USER_IDS || "")
     .split(",")
@@ -59,12 +70,11 @@ const ALLOWED_USER_IDS: Set<string> = new Set(
 );
 
 let chatId: string | null = process.env.TELEGRAM_CHAT_ID || null;
-let _offset = 0;
-let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
-let _pollAbortController: AbortController | null = null;
+let _pollingStarted = false;
+let _onMessage: ((msg: TelegramMessage) => Promise<void>) | null = null;
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
@@ -100,76 +110,97 @@ function _saveChatId(id: string): void {
 
 loadChatId();
 
-function isAuthorizedIncomingMessage(msg: TelegramMessage): boolean {
-  const incomingChatId = String(msg.chat?.id || "");
-  const senderUserId = msg.from?.id != null ? String(msg.from.id) : null;
-  const chatType = msg.chat?.type || "unknown";
+// ─── Bot handlers (module level - registered once) ───────────────
 
-  if (!chatId) {
-    if (!_warnedMissingChatId) {
-      log(
-        "telegram_warn",
-        "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety."
-      );
-      _warnedMissingChatId = true;
+function contextToMessage(ctx: Context): TelegramMessage | null {
+  const msg = ctx.message;
+  if (!msg) return null;
+  return {
+    message_id: msg.message_id,
+    from: msg.from
+      ? {
+          id: msg.from.id,
+          username: msg.from.username,
+        }
+      : undefined,
+    chat: msg.chat
+      ? {
+          id: msg.chat.id,
+          type: msg.chat.type as "private" | "group" | "supergroup" | "channel",
+        }
+      : undefined,
+    text: msg.text,
+  };
+}
+
+// Register handlers at module level (once)
+if (bot) {
+  // Authorization middleware
+  bot.use(async (ctx, next) => {
+    const msg = ctx.message;
+    if (!msg?.text) return;
+
+    const incomingChatId = String(msg.chat?.id || "");
+    const senderUserId = msg.from?.id != null ? String(msg.from.id) : null;
+    const chatType = msg.chat?.type || "unknown";
+
+    if (!chatId) {
+      if (!_warnedMissingChatId) {
+        log(
+          "telegram_warn",
+          "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety."
+        );
+        _warnedMissingChatId = true;
+      }
+      return;
     }
-    return false;
-  }
 
-  if (incomingChatId !== chatId) return false;
+    if (incomingChatId !== chatId) return;
 
-  if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
-    if (!_warnedMissingAllowedUsers) {
-      log(
-        "telegram_warn",
-        "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control."
-      );
-      _warnedMissingAllowedUsers = true;
+    if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
+      if (!_warnedMissingAllowedUsers) {
+        log(
+          "telegram_warn",
+          "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control."
+        );
+        _warnedMissingAllowedUsers = true;
+      }
+      return;
     }
-    return false;
-  }
 
-  if (ALLOWED_USER_IDS.size > 0) {
-    if (!senderUserId || !ALLOWED_USER_IDS.has(senderUserId)) return false;
-  }
+    if (ALLOWED_USER_IDS.size > 0) {
+      if (!senderUserId || !ALLOWED_USER_IDS.has(senderUserId)) return;
+    }
 
-  return true;
+    await next();
+  });
+
+  // Message handler
+  bot.on("message:text", async (ctx) => {
+    const msg = contextToMessage(ctx);
+    if (msg && _onMessage) {
+      await _onMessage(msg);
+    }
+  });
+
+  // Error handling
+  bot.catch((err) => {
+    const _ctx = err.ctx;
+    const e = err.error;
+
+    if (e instanceof GrammyError) {
+      log("telegram_error", `API error ${e.error_code}: ${e.description}`);
+    } else if (e instanceof HttpError) {
+      log("telegram_error", `Network error: ${getErrorMessage(e)}`);
+    } else {
+      log("telegram_error", `Unexpected error: ${getErrorMessage(e)}`);
+    }
+  });
 }
 
 // ─── Core send ───────────────────────────────────────────────────
 export function isEnabled(): boolean {
-  return !!TOKEN;
-}
-
-async function postTelegram(method: string, body: Record<string, unknown>): Promise<unknown> {
-  if (!TOKEN || !chatId || !BASE) return null;
-  try {
-    const res = await fetch(`${BASE}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, ...body }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      // Don't log "parse entities" errors here — they're handled by callers with fallback
-      if (!err.includes("parse entities") && !err.includes("message is not modified")) {
-        log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
-      }
-      // Throw so callers can handle specific errors (e.g., Markdown parsing)
-      throw new Error(`${method} ${res.status}: ${err}`);
-    }
-    return await res.json();
-  } catch (e) {
-    // Only log if it's not a parse entities error (those are expected and handled)
-    const msg = getErrorMessage(e);
-    if (msg.includes("parse entities")) {
-      log("telegram_debug", `Parse entities error: ${msg}`);
-      // Continue to suppress from error level logging
-    } else if (!msg.includes("message is not modified")) {
-      log("telegram_error", `${method} failed: ${msg}`);
-    }
-    throw e; // Re-throw so callers can handle it
-  }
+  return !!bot;
 }
 
 function escapeMarkdown(text: string): string {
@@ -197,57 +228,72 @@ function escapeMarkdown(text: string): string {
 }
 
 export async function sendMessage(text: string): Promise<unknown> {
-  if (!TOKEN || !chatId) return null;
+  if (!bot || !chatId) return null;
   const safeText = String(text).slice(0, 4096);
   try {
-    return await postTelegram("sendMessage", {
-      text: safeText,
-      parse_mode: "Markdown",
-    });
+    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "Markdown" });
   } catch (error) {
     // If Markdown parsing fails, retry with escaped text as plain text
-    const errorMessage = String((error as { message?: string }).message || "");
-    if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
-      log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
-      // Re-slice after escaping to ensure we don't exceed Telegram's limit
-      return postTelegram("sendMessage", { text: escapeMarkdown(safeText).slice(0, 4096) });
-    }
-    // Ignore "message is not modified" — content hasn't changed, no need to update
-    if (errorMessage.includes("message is not modified")) {
-      return null;
+    if (error instanceof GrammyError) {
+      const errorMessage = error.description || "";
+      if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
+        log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
+        // Re-slice after escaping to ensure we don't exceed Telegram's limit
+        return await bot.api.sendMessage(chatId, escapeMarkdown(safeText).slice(0, 4096));
+      }
+      // Ignore "message is not modified" — content hasn't changed, no need to update
+      if (errorMessage.includes("message is not modified")) {
+        return null;
+      }
     }
     throw error;
   }
 }
 
 export async function sendHTML(html: string): Promise<void> {
-  if (!TOKEN || !chatId) return;
-  await postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
+  if (!bot || !chatId) return;
+  try {
+    await bot.api.sendMessage(chatId, html.slice(0, 4096), { parse_mode: "HTML" });
+  } catch (error) {
+    if (error instanceof GrammyError) {
+      const errorMessage = error.description || "";
+      if (errorMessage.includes("parse entities")) {
+        log("telegram_warn", "HTML parsing failed, sending as plain text");
+        await bot.api.sendMessage(chatId, html.slice(0, 4096));
+        return;
+      }
+      if (errorMessage.includes("message is not modified")) {
+        return;
+      }
+    }
+    throw error;
+  }
 }
 
 export async function editMessage(text: string, messageId: number): Promise<unknown> {
-  if (!TOKEN || !chatId || !messageId) return null;
+  if (!bot || !chatId || !messageId) return null;
   const safeText = String(text).slice(0, 4096);
   try {
-    return await postTelegram("editMessageText", {
-      message_id: messageId,
-      text: safeText,
+    return await bot.api.editMessageText(chatId, messageId, safeText, {
       parse_mode: "Markdown",
     });
   } catch (error) {
     // If Markdown parsing fails, retry as plain text
-    const errorMessage = String((error as { message?: string }).message || "");
-    if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
-      log("telegram_warn", "Markdown parsing failed, editing as plain text");
-      // Re-slice after escaping to ensure we don't exceed Telegram's limit
-      return postTelegram("editMessageText", {
-        message_id: messageId,
-        text: escapeMarkdown(safeText).slice(0, 4096),
-      });
-    }
-    // Ignore "message is not modified" — content hasn't changed, no need to update
-    if (errorMessage.includes("message is not modified")) {
-      return null;
+    if (error instanceof GrammyError) {
+      const errorMessage = error.description || "";
+      if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
+        log("telegram_warn", "Markdown parsing failed, editing as plain text");
+        // Re-slice after escaping to ensure we don't exceed Telegram's limit
+        return await bot.api.editMessageText(
+          chatId,
+          messageId,
+          escapeMarkdown(safeText).slice(0, 4096)
+        );
+      }
+      // Ignore "message is not modified" — content hasn't changed, no need to update
+      if (errorMessage.includes("message is not modified")) {
+        return null;
+      }
     }
     throw error;
   }
@@ -262,16 +308,18 @@ interface TypingIndicator {
 }
 
 function createTypingIndicator(): TypingIndicator {
-  if (!TOKEN || !chatId) {
+  if (!bot || !chatId) {
     return { stop() {} };
   }
 
+  const botInstance = bot;
+  const chatIdStr = chatId;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   async function tick(): Promise<void> {
     if (stopped) return;
-    await postTelegram("sendChatAction", { action: "typing" });
+    await botInstance.api.sendChatAction(chatIdStr, "typing");
     timer = setTimeout((): void => {
       tick().catch((): null => null);
     }, 4000);
@@ -358,7 +406,7 @@ export async function createLiveMessage(
   title: string,
   intro = "Starting..."
 ): Promise<LiveMessageAPI | null> {
-  if (!TOKEN || !chatId) return null;
+  if (!bot || !chatId) return null;
   const typing = createTypingIndicator();
 
   const state: LiveMessageState = {
@@ -385,10 +433,8 @@ export async function createLiveMessage(
     state.flushRequested = false;
     const text = render();
     if (!state.messageId) {
-      const sent = (await sendMessage(text)) as {
-        result?: { message_id?: number };
-      } | null;
-      state.messageId = sent?.result?.message_id ?? null;
+      const sent = (await sendMessage(text)) as { message_id?: number } | null;
+      state.messageId = sent?.message_id ?? null;
       return;
     }
     await editMessage(text, state.messageId);
@@ -455,50 +501,31 @@ export async function createLiveMessage(
 }
 
 // ─── Long polling ────────────────────────────────────────────────
-async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
-  while (_polling) {
-    try {
-      _pollAbortController = new AbortController();
-      const timeoutId = setTimeout(() => _pollAbortController?.abort(), 35_000);
+export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
+  if (!bot || _pollingStarted) return Promise.resolve();
+  _pollingStarted = true;
+  _onMessage = onMessage;
 
-      const res = await fetch(`${BASE}/getUpdates?offset=${_offset}&timeout=30`, {
-        signal: _pollAbortController.signal,
-      });
+  // Set up graceful shutdown
+  const stopHandler = (): void => {
+    log("telegram", "Received shutdown signal, stopping bot...");
+    bot?.stop();
+  };
+  process.once("SIGINT", stopHandler);
+  process.once("SIGTERM", stopHandler);
 
-      clearTimeout(timeoutId);
-      _pollAbortController = null;
-
-      if (!res.ok) {
-        await sleep(5000);
-        continue;
-      }
-      const data = (await res.json()) as { result?: TelegramUpdate[] };
-      for (const update of data.result || []) {
-        _offset = update.update_id + 1;
-        const msg = update.message;
-        if (!msg?.text) continue;
-        if (!isAuthorizedIncomingMessage(msg)) continue;
-        await onMessage(msg);
-      }
-    } catch (e) {
-      if (!getErrorMessage(e).includes("aborted")) {
-        log("telegram_error", `Poll error: ${getErrorMessage(e)}`);
-      }
-      await sleep(5000);
-    }
-  }
-}
-
-export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>): void {
-  if (!TOKEN) return;
-  _polling = true;
-  poll(onMessage); // fire-and-forget
-  log("telegram", "Bot polling started");
+  // Start polling
+  return bot.start({
+    drop_pending_updates: false,
+    onStart: () => {
+      log("telegram", "Bot polling started");
+    },
+  });
 }
 
 export function stopPolling(): void {
-  _polling = false;
-  _pollAbortController?.abort();
+  _pollingStarted = false;
+  bot?.stop();
 }
 
 // ─── Notification helpers ────────────────────────────────────────
@@ -556,8 +583,4 @@ export async function notifySwap({
 export async function notifyOutOfRange({ pair, minutesOOR }: TelegramNotifyOOR): Promise<void> {
   if (hasActiveLiveMessage()) return;
   await sendHTML(`⚠️ <b>Out of Range</b> ${pair}\n` + `Been OOR for ${minutesOOR} minutes`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
