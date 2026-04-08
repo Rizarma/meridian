@@ -294,9 +294,12 @@ export function addStrategy({
 
 // Strategies that are documented but not fully implemented
 // See: plan/strategy-audit/ for detailed audit reports
-// P2A complete: multi_layer and partial_harvest are now functional (addLiquidity and withdrawLiquidity implemented)
+// P2A partial: multi_layer is functional (addLiquidity and withdrawLiquidity implemented)
+// P2A pending: partial_harvest, fee_compounding, single_sided_reseed lack strategy-specific execution
 const NON_FUNCTIONAL_STRATEGIES = new Set([
-  // Empty - all documented strategies are now functional. Add new non-functional strategies here.
+  "partial_harvest", // withdraw_liquidity exists but management cycle doesn't call it at TP threshold
+  "fee_compounding", // claim_fees exists but management cycle doesn't reinvest via add_liquidity
+  "single_sided_reseed", // close_position exists but management cycle doesn't redeploy with skip_swap
 ]);
 
 /**
