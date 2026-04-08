@@ -28,6 +28,7 @@ import { startNonTTY, startREPL } from "./repl.js";
 import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
 import { cache } from "./utils/cache.js";
 import { getErrorMessage } from "./utils/errors.js";
+import { recordActivity } from "./utils/health-check.js";
 import { isArray } from "./utils/validation.js";
 
 // ═══════════════════════════════════════════
@@ -110,7 +111,7 @@ export function stopCronJobs(): void {
 
 export async function runManagementCycle(options: CycleOptions = {}): Promise<string | null> {
   const screeningCooldownMs = 5 * 60 * 1000;
-  return runManagementCycleImpl(options, {
+  const result = await runManagementCycleImpl(options, {
     timers,
     setManagementBusy: (busy: boolean) => {
       _managementBusy = busy;
@@ -135,6 +136,8 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
       await runManagementCycle({ silent: true });
     },
   });
+  recordActivity();
+  return result;
 }
 
 export async function runScreeningCycle(options: CycleOptions = {}): Promise<string | null> {
@@ -300,6 +303,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
         }
         // Reset consecutive failures on successful poll completion
         _pnlPollConsecutiveFailures = 0;
+        recordActivity();
       } catch (error) {
         log("poll_error", `PnL poll error: ${getErrorMessage(error)}`);
         _pnlPollConsecutiveFailures++;
