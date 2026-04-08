@@ -428,7 +428,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
     .sort(byPriority)
     .slice(0, ROLE_CAP);
 
-  roleMatched.forEach((l) => usedIds.add(l.id));
+  for (const l of roleMatched) usedIds.add(l.id);
 
   // ── Tier 3: Recent fill ─────────────────────────────────────────
   const remainingBudget = RECENT_CAP - pinned.length - roleMatched.length;

@@ -20,7 +20,7 @@ import type {
   Presets,
   UserConfig,
 } from "../types/setup.d.ts";
-import { colors, error, header, } from "./colors.js";
+import { colors, error, header } from "./colors.js";
 
 const _DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
@@ -49,31 +49,28 @@ const ask: AskFn = (question: string, defaultVal?: string): Promise<string> => {
  * @param options - Optional min/max constraints
  * @returns Promise resolving to the validated number
  */
-const askNum: AskNumFn = (
+const askNum: AskNumFn = async (
   question: string,
   defaultVal: number,
   { min, max }: AskNumOptions = {}
 ): Promise<number> => {
-  return new Promise(async (resolve) => {
-    while (true) {
-      const raw = await ask(question, String(defaultVal));
-      const n = parseFloat(raw);
-      if (Number.isNaN(n)) {
-        console.log(error(`  Please enter a number.`));
-        continue;
-      }
-      if (min !== undefined && n < min) {
-        console.log(error(`  Minimum is ${min}.`));
-        continue;
-      }
-      if (max !== undefined && n > max) {
-        console.log(error(`  Maximum is ${max}.`));
-        continue;
-      }
-      resolve(n);
-      break;
+  while (true) {
+    const raw = await ask(question, String(defaultVal));
+    const n = parseFloat(raw);
+    if (Number.isNaN(n)) {
+      console.log(error(`  Please enter a number.`));
+      continue;
     }
-  });
+    if (min !== undefined && n < min) {
+      console.log(error(`  Minimum is ${min}.`));
+      continue;
+    }
+    if (max !== undefined && n > max) {
+      console.log(error(`  Maximum is ${max}.`));
+      continue;
+    }
+    return n;
+  }
 };
 
 /**
@@ -82,26 +79,15 @@ const askNum: AskNumFn = (
  * @param defaultVal - Default boolean value
  * @returns Promise resolving to true (yes) or false (no)
  */
-const askBool: AskBoolFn = (question: string, defaultVal: boolean): Promise<boolean> => {
-  return new Promise(async (resolve) => {
-    while (true) {
-      const hint = defaultVal ? "Y/n" : "y/N";
-      const raw = await ask(`${question} [${hint}]`, "");
-      if (raw === "") {
-        resolve(defaultVal);
-        break;
-      }
-      if (/^y(es)?$/i.test(raw)) {
-        resolve(true);
-        break;
-      }
-      if (/^n(o)?$/i.test(raw)) {
-        resolve(false);
-        break;
-      }
-      console.log(error("  Enter y or n."));
-    }
-  });
+const askBool: AskBoolFn = async (question: string, defaultVal: boolean): Promise<boolean> => {
+  while (true) {
+    const hint = defaultVal ? "Y/n" : "y/N";
+    const raw = await ask(`${question} [${hint}]`, "");
+    if (raw === "") return defaultVal;
+    if (/^y(es)?$/i.test(raw)) return true;
+    if (/^n(o)?$/i.test(raw)) return false;
+    console.log(error("  Enter y or n."));
+  }
 };
 
 /**
@@ -110,24 +96,19 @@ const askBool: AskBoolFn = (question: string, defaultVal: boolean): Promise<bool
  * @param choices - Array of choice options with label and key
  * @returns Promise resolving to the selected choice option
  */
-const askChoice: AskChoiceFn = <T extends string>(
+const askChoice: AskChoiceFn = async <T extends string>(
   question: string,
   choices: ChoiceOption<T>[]
 ): Promise<ChoiceOption<T>> => {
-  return new Promise(async (resolve) => {
-    const labels = choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n");
-    while (true) {
-      console.log(`\n${question}`);
-      console.log(labels);
-      const raw = await ask("Enter number", "");
-      const idx = parseInt(raw, 10) - 1;
-      if (idx >= 0 && idx < choices.length) {
-        resolve(choices[idx]);
-        break;
-      }
-      console.log("  ⚠ Invalid choice.");
-    }
-  });
+  const labels = choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n");
+  while (true) {
+    console.log(`\n${question}`);
+    console.log(labels);
+    const raw = await ask("Enter number", "");
+    const idx = parseInt(raw, 10) - 1;
+    if (idx >= 0 && idx < choices.length) return choices[idx];
+    console.log("  ⚠ Invalid choice.");
+  }
 };
 
 /**
@@ -150,11 +131,9 @@ function parseEnv(content: string): EnvMap {
  * @returns String content for .env file
  */
 function buildEnv(map: EnvMap): string {
-  return (
-    `${Object.entries(map)
-      .map(([k, v]) => `${k}=${v}`)
-      .join("\n")}\n`
-  );
+  return `${Object.entries(map)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n")}\n`;
 }
 
 // ─── Presets ──────────────────────────────────────────────────────────────────
@@ -400,7 +379,11 @@ const providerChoice = await askChoice(
   "Select LLM provider:",
   LLM_PROVIDERS.map((p) => ({ label: p.label, key: p.key }))
 );
-const provider = LLM_PROVIDERS.find((p) => p.key === providerChoice.key)!;
+const provider = LLM_PROVIDERS.find((p) => p.key === providerChoice.key);
+if (!provider) {
+  console.log(error("Invalid provider selection."));
+  process.exit(1);
+}
 
 let llmBaseUrl = provider.baseUrl;
 if (provider.key === "local" || provider.key === "custom") {
