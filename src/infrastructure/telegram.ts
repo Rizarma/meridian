@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { Bot, type Context, GrammyError } from "grammy";
+import { Bot, type Context, GrammyError, HttpError } from "grammy";
 import { USER_CONFIG_PATH } from "../config/paths.js";
 import type {
   LiveMessageAPI,
@@ -8,7 +8,7 @@ import type {
   TelegramNotifyDeploy,
   TelegramNotifyOOR,
   TelegramNotifySwap,
-} from "../types/telegram.d.ts";
+} from "../types/telegram.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { log } from "./logger.js";
 
@@ -74,6 +74,7 @@ let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
 let _pollingStarted = false;
+let _onMessage: ((msg: TelegramMessage) => Promise<void>) | null = null;
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
@@ -109,6 +110,94 @@ function _saveChatId(id: string): void {
 
 loadChatId();
 
+// ─── Bot handlers (module level - registered once) ───────────────
+
+function contextToMessage(ctx: Context): TelegramMessage | null {
+  const msg = ctx.message;
+  if (!msg) return null;
+  return {
+    message_id: msg.message_id,
+    from: msg.from
+      ? {
+          id: msg.from.id,
+          username: msg.from.username,
+        }
+      : undefined,
+    chat: msg.chat
+      ? {
+          id: msg.chat.id,
+          type: msg.chat.type as "private" | "group" | "supergroup" | "channel",
+        }
+      : undefined,
+    text: msg.text,
+  };
+}
+
+// Register handlers at module level (once)
+if (bot) {
+  // Authorization middleware
+  bot.use(async (ctx, next) => {
+    const msg = ctx.message;
+    if (!msg?.text) return;
+
+    const incomingChatId = String(msg.chat?.id || "");
+    const senderUserId = msg.from?.id != null ? String(msg.from.id) : null;
+    const chatType = msg.chat?.type || "unknown";
+
+    if (!chatId) {
+      if (!_warnedMissingChatId) {
+        log(
+          "telegram_warn",
+          "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety."
+        );
+        _warnedMissingChatId = true;
+      }
+      return;
+    }
+
+    if (incomingChatId !== chatId) return;
+
+    if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
+      if (!_warnedMissingAllowedUsers) {
+        log(
+          "telegram_warn",
+          "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control."
+        );
+        _warnedMissingAllowedUsers = true;
+      }
+      return;
+    }
+
+    if (ALLOWED_USER_IDS.size > 0) {
+      if (!senderUserId || !ALLOWED_USER_IDS.has(senderUserId)) return;
+    }
+
+    await next();
+  });
+
+  // Message handler
+  bot.on("message:text", async (ctx) => {
+    const msg = contextToMessage(ctx);
+    if (msg && _onMessage) {
+      await _onMessage(msg);
+    }
+  });
+
+  // Error handling
+  bot.catch((err) => {
+    const _ctx = err.ctx;
+    const e = err.error;
+
+    if (e instanceof GrammyError) {
+      log("telegram_error", `API error ${e.error_code}: ${e.description}`);
+    } else if (e instanceof HttpError) {
+      log("telegram_error", `Network error: ${getErrorMessage(e)}`);
+    } else {
+      log("telegram_error", `Unexpected error: ${getErrorMessage(e)}`);
+    }
+  });
+}
+
 // ─── Core send ───────────────────────────────────────────────────
 export function isEnabled(): boolean {
   return !!bot;
@@ -141,9 +230,8 @@ function escapeMarkdown(text: string): string {
 export async function sendMessage(text: string): Promise<unknown> {
   if (!bot || !chatId) return null;
   const safeText = String(text).slice(0, 4096);
-  const chatIdNum = Number(chatId);
   try {
-    return await bot.api.sendMessage(chatIdNum, safeText, { parse_mode: "Markdown" });
+    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "Markdown" });
   } catch (error) {
     // If Markdown parsing fails, retry with escaped text as plain text
     if (error instanceof GrammyError) {
@@ -151,7 +239,7 @@ export async function sendMessage(text: string): Promise<unknown> {
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
         log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
         // Re-slice after escaping to ensure we don't exceed Telegram's limit
-        return bot.api.sendMessage(chatIdNum, escapeMarkdown(safeText).slice(0, 4096));
+        return await bot.api.sendMessage(chatId, escapeMarkdown(safeText).slice(0, 4096));
       }
       // Ignore "message is not modified" — content hasn't changed, no need to update
       if (errorMessage.includes("message is not modified")) {
@@ -164,15 +252,29 @@ export async function sendMessage(text: string): Promise<unknown> {
 
 export async function sendHTML(html: string): Promise<void> {
   if (!bot || !chatId) return;
-  await bot.api.sendMessage(Number(chatId), html.slice(0, 4096), { parse_mode: "HTML" });
+  try {
+    await bot.api.sendMessage(chatId, html.slice(0, 4096), { parse_mode: "HTML" });
+  } catch (error) {
+    if (error instanceof GrammyError) {
+      const errorMessage = error.description || "";
+      if (errorMessage.includes("parse entities")) {
+        log("telegram_warn", "HTML parsing failed, sending as plain text");
+        await bot.api.sendMessage(chatId, html.slice(0, 4096));
+        return;
+      }
+      if (errorMessage.includes("message is not modified")) {
+        return;
+      }
+    }
+    throw error;
+  }
 }
 
 export async function editMessage(text: string, messageId: number): Promise<unknown> {
   if (!bot || !chatId || !messageId) return null;
   const safeText = String(text).slice(0, 4096);
-  const chatIdNum = Number(chatId);
   try {
-    return await bot.api.editMessageText(chatIdNum, messageId, safeText, {
+    return await bot.api.editMessageText(chatId, messageId, safeText, {
       parse_mode: "Markdown",
     });
   } catch (error) {
@@ -182,8 +284,8 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
         log("telegram_warn", "Markdown parsing failed, editing as plain text");
         // Re-slice after escaping to ensure we don't exceed Telegram's limit
-        return bot.api.editMessageText(
-          chatIdNum,
+        return await bot.api.editMessageText(
+          chatId,
           messageId,
           escapeMarkdown(safeText).slice(0, 4096)
         );
@@ -211,13 +313,13 @@ function createTypingIndicator(): TypingIndicator {
   }
 
   const botInstance = bot;
-  const chatIdNum = Number(chatId);
+  const chatIdStr = chatId;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   async function tick(): Promise<void> {
     if (stopped) return;
-    await botInstance.api.sendChatAction(chatIdNum, "typing");
+    await botInstance.api.sendChatAction(chatIdStr, "typing");
     timer = setTimeout((): void => {
       tick().catch((): null => null);
     }, 4000);
@@ -399,83 +501,21 @@ export async function createLiveMessage(
 }
 
 // ─── Long polling ────────────────────────────────────────────────
-function contextToMessage(ctx: Context): TelegramMessage {
-  const msg = ctx.message;
-  return {
-    message_id: msg?.message_id || 0,
-    from: msg?.from
-      ? {
-          id: msg.from.id,
-          username: msg.from.username,
-        }
-      : undefined,
-    chat: msg?.chat
-      ? {
-          id: msg.chat.id,
-          type: msg.chat.type as "private" | "group" | "supergroup" | "channel",
-        }
-      : undefined,
-    text: msg?.text,
-  };
-}
-
-export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>): void {
-  if (!bot || _pollingStarted) return;
+export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
+  if (!bot || _pollingStarted) return Promise.resolve();
   _pollingStarted = true;
+  _onMessage = onMessage;
 
-  // Authorization middleware
-  bot.use(async (ctx, next) => {
-    const msg = ctx.message;
-    if (!msg?.text) return;
-
-    const incomingChatId = String(msg.chat?.id || "");
-    const senderUserId = msg.from?.id != null ? String(msg.from.id) : null;
-    const chatType = msg.chat?.type || "unknown";
-
-    if (!chatId) {
-      if (!_warnedMissingChatId) {
-        log(
-          "telegram_warn",
-          "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety."
-        );
-        _warnedMissingChatId = true;
-      }
-      return;
-    }
-
-    if (incomingChatId !== chatId) return;
-
-    if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
-      if (!_warnedMissingAllowedUsers) {
-        log(
-          "telegram_warn",
-          "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control."
-        );
-        _warnedMissingAllowedUsers = true;
-      }
-      return;
-    }
-
-    if (ALLOWED_USER_IDS.size > 0) {
-      if (!senderUserId || !ALLOWED_USER_IDS.has(senderUserId)) return;
-    }
-
-    await next();
-  });
-
-  // Message handler
-  bot.on("message:text", async (ctx) => {
-    const msg = contextToMessage(ctx);
-    await onMessage(msg);
-  });
-
-  // Error handling
-  bot.catch((err) => {
-    log("telegram_error", `Bot error: ${getErrorMessage(err)}`);
-  });
+  // Set up graceful shutdown
+  const stopHandler = (): void => {
+    log("telegram", "Received shutdown signal, stopping bot...");
+    bot?.stop();
+  };
+  process.once("SIGINT", stopHandler);
+  process.once("SIGTERM", stopHandler);
 
   // Start polling
-  bot.start({
+  return bot.start({
     drop_pending_updates: false,
     onStart: () => {
       log("telegram", "Bot polling started");
@@ -484,6 +524,7 @@ export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>)
 }
 
 export function stopPolling(): void {
+  _pollingStarted = false;
   bot?.stop();
 }
 
