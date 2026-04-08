@@ -25,6 +25,8 @@ import type {
   ToolResult,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
+import { recordActivity } from "../utils/health-check.js";
+import { rateLimiters, withRateLimit } from "../utils/rate-limiter.js";
 import { INTENTS } from "./intent.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
@@ -196,7 +198,9 @@ export async function agentLoop(
           if (toolChoice !== null) {
             requestParams.tool_choice = toolChoice;
           }
-          response = await client.chat.completions.create(requestParams);
+          response = await withRateLimit(rateLimiters.openrouter, () =>
+            client.chat.completions.create(requestParams)
+          );
         } catch (error) {
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";
@@ -282,6 +286,7 @@ export async function agentLoop(
             `Rejected no-tool final answer (${noToolRetryCount}/2) for tool-required request`
           );
           if (noToolRetryCount >= 2) {
+            recordActivity();
             return {
               content:
                 "I couldn't complete that reliably because no tool call was made. Please retry after checking the logs.",
@@ -299,6 +304,7 @@ export async function agentLoop(
         }
         log("agent", "Final answer reached");
         log("agent", msg.content);
+        recordActivity();
         return { content: msg.content, userMessage: goal };
       }
       sawToolCall = true;
@@ -409,6 +415,7 @@ export async function agentLoop(
   }
 
   log("agent", "Max steps reached without final answer");
+  recordActivity();
   return { content: "Max steps reached. Review logs for partial progress.", userMessage: goal };
 }
 

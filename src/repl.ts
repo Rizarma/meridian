@@ -24,6 +24,7 @@ import {
 } from "./infrastructure/telegram.js";
 import type { CondensedPool, EnrichedPosition } from "./types/index.js";
 import type { TelegramMessage } from "./types/telegram.js";
+import { formatHealthStatus, runHealthCheck } from "./utils/health-check.js";
 
 // DEPLOY constant from config
 const DEPLOY: number = config.management.deployAmountSol;
@@ -384,6 +385,16 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
     return;
   }
 
+  if (text === "/health") {
+    try {
+      const health = await runHealthCheck();
+      await sendMessage(formatHealthStatus(health));
+    } catch (e) {
+      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    }
+    return;
+  }
+
   if (text === "/briefing") {
     try {
       const briefing = await generateBriefing();
@@ -631,6 +642,17 @@ const cmdCandidates: Command = {
   },
 };
 
+const cmdHealth: Command = {
+  name: "/health",
+  description: "Show system health status",
+  handler: async ({ rl, deps }) => {
+    await runBusy(rl, deps, async () => {
+      const health = await runHealthCheck();
+      console.log(colors.dim(`\n${formatHealthStatus(health)}\n`));
+    });
+  },
+};
+
 const cmdBriefing: Command = {
   name: "/briefing",
   description: "Show morning briefing (last 24h)",
@@ -820,6 +842,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   registerCommand(cmdStop);
   registerCommand(cmdStatus);
   registerCommand(cmdCandidates);
+  registerCommand(cmdHealth);
   registerCommand(cmdBriefing);
   registerCommand(cmdThresholds);
   registerCommand(cmdLearn);

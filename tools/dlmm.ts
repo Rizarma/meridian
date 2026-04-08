@@ -43,24 +43,14 @@ import type {
   WithdrawLiquidityParams,
   WithdrawLiquidityResult,
 } from "../src/types/dlmm.js";
+import { recordActivity } from "../src/utils/health-check.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
 import { isArray, isObject } from "../src/utils/validation.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
 
 // Default slippage in basis points (1000 bps = 10%)
 const DEFAULT_SLIPPAGE_BPS = 1000;
-
-// Helper function for fetch with timeout (30 seconds)
-async function fetchWithTimeout(url: string, timeoutMs = 30000): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 // Simple LRU cache implementation
 class LRUCache<K, V> {
@@ -404,6 +394,7 @@ export async function deployPosition({
     }
 
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
+    recordActivity();
 
     await withPositionsCacheLock(async () => {
       _positionsCacheAt = 0;
@@ -650,6 +641,7 @@ export async function addLiquidity({
     }
 
     log("add_liquidity", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
+    recordActivity();
 
     // Invalidate positions cache
     await withPositionsCacheLock(async () => {
@@ -703,7 +695,7 @@ async function fetchDlmmPnlForPool(
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
   try {
-    const res = await fetchWithTimeout(url);
+    const res = await fetchWithRetry(url);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log(
@@ -835,7 +827,7 @@ export async function getMyPositions({
       // Single portfolio API call — returns all positions with full PnL data
       if (!silent) log("positions", "Fetching portfolio via Meteora portfolio API...");
       const portfolioUrl = `https://dlmm.datapi.meteora.ag/portfolio/open?user=${walletAddress}`;
-      const res = await fetchWithTimeout(portfolioUrl);
+      const res = await fetchWithRetry(portfolioUrl);
       if (!res.ok)
         throw new Error(`Portfolio API ${res.status}: ${await res.text().catch(() => "")}`);
       const portfolio = (await res.json()) as { pools?: any[] };
@@ -1063,7 +1055,7 @@ export async function searchPools({
   limit = 10,
 }: SearchPoolsParams): Promise<SearchPoolsResult> {
   const url = `https://dlmm.datapi.meteora.ag/pools?query=${encodeURIComponent(query)}`;
-  const res = await fetchWithTimeout(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`Pool search API error: ${res.status} ${res.statusText}`);
   interface PoolSearchResult {
     address?: string;
@@ -1157,6 +1149,7 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
       txHashes.push(txHash);
     }
     log("claim", `SUCCESS txs: ${txHashes.join(", ")}`);
+    recordActivity();
     await withPositionsCacheLock(async () => {
       _positionsCacheAt = 0; // invalidate cache after claim
     });
@@ -1611,6 +1604,7 @@ export async function closePosition({
     const txHashes = [...claimTxHashes, ...closeTxHashes];
     log("close", `Step 2 OK (close only): ${closeTxHashes.join(", ") || "none"}`);
     log("close", `SUCCESS txs: ${txHashes.join(", ")}`);
+    recordActivity();
     // Wait for RPC to reflect withdrawn balances before returning — prevents
     // agent from seeing zero balance when attempting post-close swap
     await new Promise((r) => setTimeout(r, 5000));
@@ -1669,7 +1663,7 @@ export async function closePosition({
       let feesUsd = tracked.total_fees_claimed_usd || 0;
       try {
         const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
-        const res = await fetchWithTimeout(closedUrl);
+        const res = await fetchWithRetry(closedUrl);
         if (res.ok) {
           const rawClosedData = await res.json();
           if (!isObject(rawClosedData)) {

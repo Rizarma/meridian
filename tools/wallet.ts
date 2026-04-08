@@ -3,6 +3,8 @@ import bs58 from "bs58";
 import { config } from "../src/config/config.js";
 import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
+import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
+import { fetchWithRetry } from "../src/utils/retry.js";
 import { registerTool } from "./registry.js";
 
 // Type imports from types/wallet.d.ts
@@ -129,7 +131,7 @@ function validateWalletKey(key: string | undefined): string {
   return trimmed;
 }
 
-function getWallet(): Keypair {
+export function getWallet(): Keypair {
   if (!_wallet) {
     const validKey = validateWalletKey(process.env.WALLET_PRIVATE_KEY);
     _wallet = Keypair.fromSecretKey(bs58.decode(validKey));
@@ -183,7 +185,7 @@ export async function getWalletBalances(): Promise<WalletBalances> {
 
   try {
     const url = `https://api.helius.xyz/v1/wallet/${walletAddress}/balances?api-key=${HELIUS_KEY}`;
-    const res = await fetch(url);
+    const res = await withRateLimit(rateLimiters.helius, () => fetchWithRetry(url));
 
     if (!res.ok) {
       throw new Error(`Helius API error: ${res.status} ${res.statusText}`);
@@ -313,9 +315,11 @@ export async function swapToken({
       `&amount=${amountStr}` +
       `&taker=${wallet.publicKey.toString()}`;
 
-    const orderRes = await fetch(orderUrl, {
-      headers: { "x-api-key": JUPITER_API_KEY },
-    });
+    const orderRes = await withRateLimit(rateLimiters.jupiter, () =>
+      fetchWithRetry(orderUrl, {
+        headers: { "x-api-key": JUPITER_API_KEY },
+      })
+    );
     if (!orderRes.ok) {
       const body = await orderRes.text();
       if (orderRes.status === 500) {
@@ -339,14 +343,16 @@ export async function swapToken({
     const signedTx = Buffer.from(tx.serialize()).toString("base64");
 
     // ─── Execute ───────────────────────────────────────────────
-    const execRes = await fetch(`${JUPITER_ULTRA_API}/execute`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": JUPITER_API_KEY,
-      },
-      body: JSON.stringify({ signedTransaction: signedTx, requestId }),
-    });
+    const execRes = await withRateLimit(rateLimiters.jupiter, () =>
+      fetchWithRetry(`${JUPITER_ULTRA_API}/execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": JUPITER_API_KEY,
+        },
+        body: JSON.stringify({ signedTransaction: signedTx, requestId }),
+      })
+    );
     if (!execRes.ok) {
       throw new Error(`Ultra execute failed: ${execRes.status} ${await execRes.text()}`);
     }
@@ -381,9 +387,11 @@ async function swapViaQuoteApi({
   amountStr,
 }: SwapViaQuoteParams): Promise<SwapResult> {
   // ─── Get quote ─────────────────────────────────────────────
-  const quoteRes = await fetch(
-    `${JUPITER_QUOTE_API}/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amountStr}&slippageBps=300`,
-    { headers: { "x-api-key": JUPITER_API_KEY } }
+  const quoteRes = await withRateLimit(rateLimiters.jupiter, () =>
+    fetchWithRetry(
+      `${JUPITER_QUOTE_API}/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amountStr}&slippageBps=300`,
+      { headers: { "x-api-key": JUPITER_API_KEY } }
+    )
   );
   if (!quoteRes.ok) throw new Error(`Quote failed: ${quoteRes.status} ${await quoteRes.text()}`);
   const quote = (await quoteRes.json()) as JupiterQuote;
@@ -391,15 +399,17 @@ async function swapViaQuoteApi({
     throw new Error(`Quote error: ${(quote as unknown as { error?: string }).error}`);
 
   // ─── Get swap tx ───────────────────────────────────────────
-  const swapRes = await fetch(`${JUPITER_QUOTE_API}/swap`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": JUPITER_API_KEY },
-    body: JSON.stringify({
-      quoteResponse: quote,
-      userPublicKey: wallet.publicKey.toString(),
-      wrapAndUnwrapSol: true,
-    }),
-  });
+  const swapRes = await withRateLimit(rateLimiters.jupiter, () =>
+    fetchWithRetry(`${JUPITER_QUOTE_API}/swap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": JUPITER_API_KEY },
+      body: JSON.stringify({
+        quoteResponse: quote,
+        userPublicKey: wallet.publicKey.toString(),
+        wrapAndUnwrapSol: true,
+      }),
+    })
+  );
   if (!swapRes.ok) throw new Error(`Swap tx failed: ${swapRes.status} ${await swapRes.text()}`);
   const { swapTransaction } = (await swapRes.json()) as { swapTransaction: string };
 
