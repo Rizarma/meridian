@@ -133,12 +133,7 @@ export async function agentLoop(
   maxOutputTokens: number | null = null,
   options: AgentOptions = {}
 ): Promise<AgentResult> {
-  const {
-    requireTool = false,
-    interactive = false,
-    onToolStart = null,
-    onToolFinish = null,
-  } = options;
+  const { requireTool = false, onToolStart = null, onToolFinish = null } = options;
 
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);

@@ -466,7 +466,7 @@ export async function addLiquidity({
 
     // Get position data to determine bin range
     const positionPubKey = new PublicKey(position_address);
-    let positionData;
+    let positionData: unknown;
     try {
       positionData = await pool.getPosition(positionPubKey);
     } catch (e: any) {
@@ -480,7 +480,9 @@ export async function addLiquidity({
     }
 
     // Get bin range from position data
-    const processed = positionData?.positionData;
+    const processed = (
+      positionData as { positionData?: { lowerBinId?: number; upperBinId?: number } }
+    )?.positionData;
     const minBinId = processed?.lowerBinId ?? -887272;
     const maxBinId = processed?.upperBinId ?? 887272;
 

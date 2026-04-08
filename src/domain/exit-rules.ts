@@ -29,13 +29,7 @@ export function evaluateExitConditions(
   mgmtConfig: ManagementConfig,
   _strategyConfig?: Strategy | null
 ): ExitAction | null {
-  const {
-    pnl_pct: currentPnlPct,
-    pnl_pct_suspicious,
-    in_range,
-    fee_per_tvl_24h,
-    age_minutes,
-  } = positionData;
+  const { pnl_pct: currentPnlPct, pnl_pct_suspicious, fee_per_tvl_24h, age_minutes } = positionData;
 
   // Check if we're in a confirmed trailing exit cooldown period
   if (position.confirmed_trailing_exit_until) {
