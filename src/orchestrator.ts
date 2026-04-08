@@ -14,7 +14,7 @@ import {
   setScreeningLastTriggered,
 } from "./cycles/screening.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
-import { log } from "./infrastructure/logger.js";
+import { closeLogStreams, log } from "./infrastructure/logger.js";
 import {
   getLastBriefingDate,
   getTrackedPosition,
@@ -316,15 +316,44 @@ Summarize the current portfolio health, total fees earned, and performance of al
 // ═══════════════════════════════════════════
 //  GRACEFUL SHUTDOWN
 // ═══════════════════════════════════════════
+const SHUTDOWN_TIMEOUT_MS = 5000;
+
 export async function shutdown(signal: string): Promise<void> {
-  log("shutdown", `Received ${signal}. Shutting down...`);
-  stopPolling();
-  stopCronJobs();
-  stopPoolCache();
-  cache.destroy();
-  const positionsResult = await getMyPositions();
-  log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
-  process.exit(0);
+  log("shutdown", `Received ${signal}. Shutting down gracefully...`);
+
+  // Create a timeout promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("Shutdown timeout")), SHUTDOWN_TIMEOUT_MS);
+  });
+
+  try {
+    // Race cleanup against timeout
+    await Promise.race([
+      (async () => {
+        stopPolling();
+        stopCronJobs();
+        stopPoolCache();
+        cache.destroy();
+
+        // Get final positions state
+        const positionsResult = await getMyPositions();
+        log("shutdown", `Open positions at shutdown: ${positionsResult.total_positions ?? 0}`);
+
+        // Close log streams properly
+        closeLogStreams();
+
+        // Small delay to let final logs flush
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      })(),
+      timeoutPromise,
+    ]);
+
+    log("shutdown", "Graceful shutdown completed");
+  } catch (error) {
+    log("shutdown", `Shutdown error or timeout: ${(error as Error).message}`);
+  } finally {
+    process.exit(0);
+  }
 }
 
 process.on("SIGINT", async () => {

@@ -51,6 +51,7 @@ let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
+let _pollAbortController: AbortController | null = null;
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
@@ -444,9 +445,16 @@ export async function createLiveMessage(
 async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise<void> {
   while (_polling) {
     try {
+      _pollAbortController = new AbortController();
+      const timeoutId = setTimeout(() => _pollAbortController?.abort(), 35_000);
+
       const res = await fetch(`${BASE}/getUpdates?offset=${_offset}&timeout=30`, {
-        signal: AbortSignal.timeout(35_000),
+        signal: _pollAbortController.signal,
       });
+
+      clearTimeout(timeoutId);
+      _pollAbortController = null;
+
       if (!res.ok) {
         await sleep(5000);
         continue;
@@ -477,6 +485,7 @@ export function startPolling(onMessage: (msg: TelegramMessage) => Promise<void>)
 
 export function stopPolling(): void {
   _polling = false;
+  _pollAbortController?.abort();
 }
 
 // ─── Notification helpers ────────────────────────────────────────

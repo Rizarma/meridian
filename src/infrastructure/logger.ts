@@ -1,3 +1,4 @@
+import type { WriteStream } from "node:fs";
 import fs from "node:fs";
 import path from "node:path";
 import type { LogAction, LogCategory, LogSnapshot } from "../types/index.js";
@@ -11,6 +12,49 @@ const currentLevel = LEVELS[LOG_LEVEL] ?? 1;
 // Ensure log directory exists
 if (!fs.existsSync(LOG_DIR)) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
+}
+
+// Module-level stream cache for file descriptor management
+const _logStreams: Map<string, WriteStream> = new Map();
+let _currentLogDate: string | null = null;
+
+function getLogStream(dateStr: string, type: "agent" | "actions" | "snapshots"): WriteStream {
+  const key = `${type}-${dateStr}`;
+  const logFile = path.join(LOG_DIR, `${type}-${dateStr}.${type === "agent" ? "log" : "jsonl"}`);
+
+  // Close streams from previous dates when date changes
+  if (_currentLogDate !== dateStr && _currentLogDate !== null) {
+    for (const [streamKey, stream] of _logStreams.entries()) {
+      if (streamKey.endsWith(_currentLogDate)) {
+        stream.end();
+        _logStreams.delete(streamKey);
+      }
+    }
+  }
+  _currentLogDate = dateStr;
+
+  // Create new stream if needed
+  if (!_logStreams.has(key)) {
+    const stream = fs.createWriteStream(logFile, { flags: "a" });
+    _logStreams.set(key, stream);
+  }
+
+  const stream = _logStreams.get(key);
+  if (!stream) {
+    throw new Error(`Failed to create log stream for ${key}`);
+  }
+  return stream;
+}
+
+/**
+ * Close all open log streams. Call this for graceful shutdown.
+ */
+export function closeLogStreams(): void {
+  for (const stream of _logStreams.values()) {
+    stream.end();
+  }
+  _logStreams.clear();
+  _currentLogDate = null;
 }
 
 /**
@@ -30,10 +74,10 @@ export function log(category: LogCategory, message: string): void {
   // Console output
   console.log(line);
 
-  // File output (daily rotation)
+  // File output (daily rotation) - using persistent stream
   const dateStr = timestamp.split("T")[0];
-  const logFile = path.join(LOG_DIR, `agent-${dateStr}.log`);
-  fs.appendFileSync(logFile, `${line}\n`);
+  const stream = getLogStream(dateStr, "agent");
+  stream.write(`${line}\n`);
 }
 
 /**
@@ -86,10 +130,10 @@ export function logAction(action: LogAction): void {
   const hint = actionHint(action);
   console.log(`[${action.tool}] ${status}${hint}${dur}`);
 
-  // File: full JSON for audit trail
+  // File: full JSON for audit trail - using persistent stream
   const dateStr = timestamp.split("T")[0];
-  const actionsFile = path.join(LOG_DIR, `actions-${dateStr}.jsonl`);
-  fs.appendFileSync(actionsFile, `${JSON.stringify(entry)}\n`);
+  const stream = getLogStream(dateStr, "actions");
+  stream.write(`${JSON.stringify(entry)}\n`);
 }
 
 /**
@@ -105,7 +149,8 @@ export function logSnapshot(snapshot: LogSnapshot): void {
     ...snapshot,
   };
 
+  // File output - using persistent stream
   const dateStr = timestamp.split("T")[0];
-  const snapshotFile = path.join(LOG_DIR, `snapshots-${dateStr}.jsonl`);
-  fs.appendFileSync(snapshotFile, `${JSON.stringify(entry)}\n`);
+  const stream = getLogStream(dateStr, "snapshots");
+  stream.write(`${JSON.stringify(entry)}\n`);
 }
