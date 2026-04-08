@@ -27,6 +27,8 @@ jobs:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Allow failure if default setup is enabled (conflicts with advanced config)
+    continue-on-error: true
 
     strategy:
       fail-fast: false
