@@ -7,7 +7,7 @@
  * - Config updates via update_config tool can toggle feature flags
  */
 
-import { config, } from "../src/config/config.js";
+import { config } from "../src/config/config.js";
 import type { Config, FeaturesConfig, UserConfigPartial } from "../src/types/config.js";
 import { isEnabled as isOKXEnabled } from "../tools/okx.js";
 import { describe, expect, runTests, test } from "./test-harness.js";

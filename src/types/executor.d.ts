@@ -1,7 +1,6 @@
 // types/executor.d.ts
 // Tool executor types for the central dispatcher
 
-
 // Tool names
 export type ToolName =
   | "discover_pools"

@@ -22,9 +22,10 @@ const anchorPkg = JSON.parse(fs.readFileSync(anchorPkgPath, "utf8"));
 const anchorUtils = path.join(root, "node_modules/@coral-xyz/anchor/dist/cjs/utils");
 
 if (!anchorPkg.exports) {
-  const dirs = fs.readdirSync(anchorUtils, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => d.name);
+  const dirs = fs
+    .readdirSync(anchorUtils, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
 
   anchorPkg.exports = {
     // Always serve CJS — anchor's ESM dist has its own bare directory import bugs
@@ -33,10 +34,7 @@ if (!anchorPkg.exports) {
     },
     // Map each util directory to its explicit CJS index.js
     ...Object.fromEntries(
-      dirs.map(dir => [
-        `./dist/cjs/utils/${dir}`,
-        `./dist/cjs/utils/${dir}/index.js`,
-      ])
+      dirs.map((dir) => [`./dist/cjs/utils/${dir}`, `./dist/cjs/utils/${dir}/index.js`])
     ),
     // Allow any other direct file path through
     "./*": "./*",
@@ -71,7 +69,7 @@ if (fs.existsSync(dlmmMjs)) {
   src = src.replace(/^const BN = require\(["']bn\.js["']\);\n/gm, "");
 
   // Add exactly one canonical BN import at the top if BN is used anywhere
-  if (src.includes('BN')) {
+  if (src.includes("BN")) {
     src = `import BN from "bn.js";\n${src}`;
   }
 
@@ -79,8 +77,8 @@ if (fs.existsSync(dlmmMjs)) {
   function removeBNFromSpecifiers(specifiers) {
     return specifiers
       .split(",")
-      .map(s => s.trim())
-      .filter(s => s && !/^BN(\s+as\s+\w+)?$/.test(s))
+      .map((s) => s.trim())
+      .filter((s) => s && !/^BN(\s+as\s+\w+)?$/.test(s))
       .join(", ");
   }
 
