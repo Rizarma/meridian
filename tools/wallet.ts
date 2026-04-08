@@ -1,6 +1,7 @@
-import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { type Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { config, getRpcUrl } from "../src/config/config.js";
+import { config } from "../src/config/config.js";
+import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
 import { registerTool } from "./registry.js";
 
@@ -80,13 +81,7 @@ interface SwapViaQuoteParams {
   amountStr: string;
 }
 
-let _connection: Connection | null = null;
 let _wallet: Keypair | null = null;
-
-function getConnection(): Connection {
-  if (!_connection) _connection = new Connection(getRpcUrl(), "confirmed");
-  return _connection;
-}
 
 // Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -298,7 +293,7 @@ export async function swapToken({
   try {
     log("swap", `${amount} of ${input_mint} → ${output_mint}`);
     const wallet = getWallet();
-    const connection = getConnection();
+    const connection = getSharedConnection();
 
     // ─── Convert to smallest unit ──────────────────────────────
     let decimals = 9; // SOL default
