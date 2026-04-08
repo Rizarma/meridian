@@ -21,6 +21,7 @@ import type {
   PositionPerformance,
   ThresholdEvolution,
 } from "../types/lessons.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { recordPoolDeploy } from "./pool-memory.js";
 import { recalculateWeights } from "./signal-weights.js";
 
@@ -78,7 +79,7 @@ export async function runThresholdEvolution(
   }
 
   // 4. Fire-and-forget sync to hive mind (if enabled)
-  syncToHive().catch(() => {});
+  syncToHive().catch((e) => log("hive_error", getErrorMessage(e)));
 }
 
 // ─── Threshold Evolution Algorithm ──────────────────────────────
