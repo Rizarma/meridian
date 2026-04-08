@@ -278,8 +278,7 @@ function buildStatusBar(deps: REPLDependencies): string {
 function drawStatusBar(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
 
-  // @ts-ignore - line is a private property
-  const currentLine = _ttyInterface.line;
+  const currentLine = (_ttyInterface as unknown as { line: string }).line;
 
   // Don't draw status bar if user is typing (has input on current line)
   if (currentLine && currentLine.length > 0) return;
@@ -298,8 +297,7 @@ function clearStatusBar(): void {
 function refreshPrompt(deps: REPLDependencies): void {
   if (!_ttyInterface) return;
 
-  // @ts-ignore - line is a private property
-  const currentLine = _ttyInterface.line;
+  const currentLine = (_ttyInterface as unknown as { line: string }).line;
 
   // Skip if user is typing
   if (currentLine && currentLine.length > 0) return;
@@ -486,6 +484,10 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
     const sanitizedText = sanitizeUntrustedPromptText(text);
+    if (!sanitizedText) {
+      await liveMessage?.fail("Empty or invalid input");
+      return;
+    }
     const { content } = await agentLoop(
       sanitizedText,
       config.llm.maxSteps,
@@ -929,7 +931,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
           colors.white(`${(positions as { total_positions?: number }).total_positions ?? 0} open\n`)
       );
 
-      if ((positions as { total_positions?: number }).total_positions ?? 0 > 0) {
+      if (((positions as { total_positions?: number }).total_positions ?? 0) > 0) {
         console.log(colors.bold("Open positions:"));
         for (const p of (positions as { positions?: EnrichedPosition[] }).positions || []) {
           const status = p.in_range ? colors.green("in-range ✓") : colors.yellow("OUT OF RANGE ⚠");
