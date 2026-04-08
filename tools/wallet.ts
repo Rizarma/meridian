@@ -1,9 +1,4 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  VersionedTransaction,
-} from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { config, getRpcUrl } from "../src/config/config.js";
 import { log } from "../src/infrastructure/logger.js";
@@ -96,6 +91,25 @@ function getConnection(): Connection {
 // Base58 validation regex (Solana keys are base58, typically 88 chars for 64-byte secret)
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
 const MIN_SECRET_KEY_LENGTH = 64; // 64 bytes = 88 base58 chars typically
+
+// Validation helpers for public keys and amounts
+function validatePublicKey(key: string, fieldName: string): void {
+  if (!key || typeof key !== "string") {
+    throw new Error(`Invalid ${fieldName}: must be a non-empty string`);
+  }
+  if (!BASE58_REGEX.test(key) || key.length < 32 || key.length > 44) {
+    throw new Error(`Invalid ${fieldName} format: ${key.slice(0, 8)}...`);
+  }
+}
+
+function validateAmount(amount: number, fieldName: string, max = 1_000_000_000): void {
+  if (typeof amount !== "number" || Number.isNaN(amount) || amount <= 0) {
+    throw new Error(`Invalid ${fieldName}: ${amount}. Must be a positive number.`);
+  }
+  if (amount > max) {
+    throw new Error(`${fieldName} ${amount} exceeds maximum allowed (${max})`);
+  }
+}
 
 function validateWalletKey(key: string | undefined): string {
   if (!key || key.trim() === "") {
@@ -254,8 +268,24 @@ export async function swapToken({
   output_mint: string;
   amount: number;
 }): Promise<SwapResult> {
+  // Validate inputs before normalization
+  if (!input_mint || typeof input_mint !== "string") {
+    throw new Error("Invalid input_mint: must be a non-empty string");
+  }
+  if (!output_mint || typeof output_mint !== "string") {
+    throw new Error("Invalid output_mint: must be a non-empty string");
+  }
+  validateAmount(amount, "amount");
+
   input_mint = normalizeMint(input_mint);
   output_mint = normalizeMint(output_mint);
+
+  // Validate normalized mints are different and valid base58
+  if (input_mint === output_mint) {
+    throw new Error("Input and output mints must be different");
+  }
+  validatePublicKey(input_mint, "input_mint");
+  validatePublicKey(output_mint, "output_mint");
 
   if (process.env.DRY_RUN === "true") {
     return {

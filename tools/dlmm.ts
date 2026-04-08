@@ -332,6 +332,13 @@ export async function deployPosition({
       const createTxArray = Array.isArray(createTxs) ? createTxs : [createTxs];
       for (let i = 0; i < createTxArray.length; i++) {
         const signers = i === 0 ? [wallet, newPosition] : [wallet];
+        // Simulate first to catch errors before spending gas
+        const simulation = await getConnection().simulateTransaction(createTxArray[i], signers);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("deploy", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
         const txHash = await sendAndConfirmTransaction(getConnection(), createTxArray[i], signers);
         txHashes.push(txHash);
         log("deploy", `Create tx ${i + 1}/${createTxArray.length}: ${txHash}`);
@@ -348,6 +355,13 @@ export async function deployPosition({
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
+        // Simulate first to catch errors before spending gas
+        const simulation = await getConnection().simulateTransaction(addTxArray[i], [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("deploy", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
         const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet]);
         txHashes.push(txHash);
         log("deploy", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
@@ -362,6 +376,13 @@ export async function deployPosition({
         strategy: { maxBinId, minBinId, strategyType },
         slippage: DEFAULT_SLIPPAGE_BPS,
       });
+      // Simulate first to catch errors before spending gas
+      const simulation = await getConnection().simulateTransaction(tx, [wallet, newPosition]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("deploy", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
       const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet, newPosition]);
       txHashes.push(txHash);
     }
@@ -564,6 +585,13 @@ export async function addLiquidity({
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
+        // Simulate first to catch errors before spending gas
+        const simulation = await getConnection().simulateTransaction(addTxArray[i], [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("add_liquidity", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
         const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet]);
         txHashes.push(txHash);
         log("add_liquidity", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
@@ -578,6 +606,13 @@ export async function addLiquidity({
         strategy: { minBinId, maxBinId, strategyType },
         slippage: DEFAULT_SLIPPAGE_BPS,
       });
+      // Simulate first to catch errors before spending gas
+      const simulation = await getConnection().simulateTransaction(addTx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("add_liquidity", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
       const txHash = await sendAndConfirmTransaction(getConnection(), addTx, [wallet]);
       txHashes.push(txHash);
       log("add_liquidity", `Add liquidity tx: ${txHash}`);
@@ -1052,6 +1087,13 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
 
     const txHashes: string[] = [];
     for (const tx of txs) {
+      // Simulate first to catch errors before spending gas
+      const simulation = await getConnection().simulateTransaction(tx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("claim", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
       const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
       txHashes.push(txHash);
     }
@@ -1156,6 +1198,13 @@ export async function withdrawLiquidity({
           });
           if (claimTxs && claimTxs.length > 0) {
             for (const tx of claimTxs) {
+              // Simulate first to catch errors before spending gas
+              const simulation = await getConnection().simulateTransaction(tx, [wallet]);
+              if (simulation.value.err) {
+                const errorMessage = JSON.stringify(simulation.value.err);
+                log("withdraw", `Transaction simulation failed: ${errorMessage}`);
+                throw new Error(`Simulation failed: ${errorMessage}`);
+              }
               const claimHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
               claimTxHashes.push(claimHash);
             }
@@ -1232,6 +1281,13 @@ export async function withdrawLiquidity({
 
     const withdrawTxHashes: string[] = [];
     for (const tx of Array.isArray(withdrawTxs) ? withdrawTxs : [withdrawTxs]) {
+      // Simulate first to catch errors before spending gas
+      const simulation = await getConnection().simulateTransaction(tx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("withdraw", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
       const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
       withdrawTxHashes.push(txHash);
     }
@@ -1397,6 +1453,13 @@ export async function closePosition({
         });
         if (claimTxs && claimTxs.length > 0) {
           for (const tx of claimTxs) {
+            // Simulate first to catch errors before spending gas
+            const simulation = await getConnection().simulateTransaction(tx, [wallet]);
+            if (simulation.value.err) {
+              const errorMessage = JSON.stringify(simulation.value.err);
+              log("close", `Transaction simulation failed: ${errorMessage}`);
+              throw new Error(`Simulation failed: ${errorMessage}`);
+            }
             const claimHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
             claimTxHashes.push(claimHash);
           }
@@ -1436,6 +1499,13 @@ export async function closePosition({
       });
 
       for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
+        // Simulate first to catch errors before spending gas
+        const simulation = await getConnection().simulateTransaction(tx, [wallet]);
+        if (simulation.value.err) {
+          const errorMessage = JSON.stringify(simulation.value.err);
+          log("close", `Transaction simulation failed: ${errorMessage}`);
+          throw new Error(`Simulation failed: ${errorMessage}`);
+        }
         const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet]);
         closeTxHashes.push(txHash);
       }
@@ -1445,6 +1515,13 @@ export async function closePosition({
         owner: wallet.publicKey,
         position: { publicKey: positionPubKey },
       });
+      // Simulate first to catch errors before spending gas
+      const simulation = await getConnection().simulateTransaction(closeTx, [wallet]);
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        log("close", `Transaction simulation failed: ${errorMessage}`);
+        throw new Error(`Simulation failed: ${errorMessage}`);
+      }
       const txHash = await sendAndConfirmTransaction(getConnection(), closeTx, [wallet]);
       closeTxHashes.push(txHash);
     }
