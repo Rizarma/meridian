@@ -220,16 +220,11 @@ export * from "./study.js";
 
 // Export from telegram.d.ts (unique only)
 export type {
-  LiveMessage,
   LiveMessageAPI,
-  LiveMessageState,
-  OutOfRangeNotification,
-  TelegramContext,
   TelegramNotifyClose,
   TelegramNotifyDeploy,
   TelegramNotifyOOR,
   TelegramNotifySwap,
-  TelegramUpdate,
 } from "./telegram.js";
 
 // Export from token.d.ts (unique only)

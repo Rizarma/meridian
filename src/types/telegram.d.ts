@@ -13,26 +13,6 @@ export interface TelegramMessage {
   };
 }
 
-export interface TelegramContext {
-  message?: TelegramMessage;
-  chat?: {
-    id: number;
-  };
-}
-
-export interface LiveMessage {
-  toolStart: (name: string) => Promise<void>;
-  toolFinish: (name: string, result: unknown, success: boolean) => Promise<void>;
-  note: (text: string) => Promise<void>;
-  finalize: (text: string) => Promise<void>;
-  fail: (error: string) => Promise<void>;
-}
-
-export interface OutOfRangeNotification {
-  pair: string;
-  minutesOOR: number;
-}
-
 export interface TelegramNotifyDeploy {
   pair: string;
   amountSol: number;
@@ -62,26 +42,10 @@ export interface TelegramNotifyOOR {
   minutesOOR: number;
 }
 
-export interface LiveMessageState {
-  title: string;
-  intro: string;
-  toolLines: string[];
-  footer: string;
-  messageId: number | null;
-  flushTimer: ReturnType<typeof setTimeout> | null;
-  flushPromise: Promise<void> | null;
-  flushRequested: boolean;
-}
-
 export interface LiveMessageAPI {
   toolStart(name: string): Promise<void>;
   toolFinish(name: string, result: unknown, success: boolean): Promise<void>;
   note(text: string): Promise<void>;
   finalize(finalText: string): Promise<void>;
   fail(errorText: string): Promise<void>;
-}
-
-export interface TelegramUpdate {
-  update_id: number;
-  message?: TelegramMessage;
 }
