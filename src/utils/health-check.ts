@@ -1,6 +1,6 @@
-import { getWallet } from "../../tools/wallet.js";
 import { getSharedConnection } from "../infrastructure/connection.js";
 import { log } from "../infrastructure/logger.js";
+import { getWallet } from "../utils/wallet.js";
 import { getErrorMessage } from "./errors.js";
 
 export interface HealthStatus {
