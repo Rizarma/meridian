@@ -1,5 +1,5 @@
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import type { LogAction, LogCategory, LogSnapshot } from "../types/index.js";
 
 const LOG_DIR = "./logs";
@@ -33,7 +33,7 @@ export function log(category: LogCategory, message: string): void {
   // File output (daily rotation)
   const dateStr = timestamp.split("T")[0];
   const logFile = path.join(LOG_DIR, `agent-${dateStr}.log`);
-  fs.appendFileSync(logFile, line + "\n");
+  fs.appendFileSync(logFile, `${line}\n`);
 }
 
 /**
@@ -89,7 +89,7 @@ export function logAction(action: LogAction): void {
   // File: full JSON for audit trail
   const dateStr = timestamp.split("T")[0];
   const actionsFile = path.join(LOG_DIR, `actions-${dateStr}.jsonl`);
-  fs.appendFileSync(actionsFile, JSON.stringify(entry) + "\n");
+  fs.appendFileSync(actionsFile, `${JSON.stringify(entry)}\n`);
 }
 
 /**
@@ -107,5 +107,5 @@ export function logSnapshot(snapshot: LogSnapshot): void {
 
   const dateStr = timestamp.split("T")[0];
   const snapshotFile = path.join(LOG_DIR, `snapshots-${dateStr}.jsonl`);
-  fs.appendFileSync(snapshotFile, JSON.stringify(entry) + "\n");
+  fs.appendFileSync(snapshotFile, `${JSON.stringify(entry)}\n`);
 }

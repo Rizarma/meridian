@@ -4,7 +4,6 @@ import type {
   ChatCompletion,
   ChatCompletionMessage,
   ChatCompletionMessageParam,
-  ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import { tools } from "../../tools/definitions/index.js";
 import { getMyPositions } from "../../tools/dlmm.js";
@@ -19,7 +18,6 @@ import type {
   AgentOptions,
   AgentResult,
   AgentType,
-  IntentTools,
   OpenAIError,
   ProviderMode,
   ToolChoice,

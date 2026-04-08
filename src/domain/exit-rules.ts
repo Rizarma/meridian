@@ -27,7 +27,7 @@ export function evaluateExitConditions(
   position: TrackedPosition,
   positionData: PositionData,
   mgmtConfig: ManagementConfig,
-  strategyConfig?: Strategy | null
+  _strategyConfig?: Strategy | null
 ): ExitAction | null {
   const {
     pnl_pct: currentPnlPct,

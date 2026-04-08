@@ -1,6 +1,5 @@
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
-import { config } from "../src/config/config.js";
 import { log } from "../src/infrastructure/logger.js";
 import type {
   OKXAdvancedResult,
@@ -308,7 +307,7 @@ export async function getTokenHolders({
 
   // ─── Bundle / Cluster Analysis (OKX) ─────────────────────────
   let advancedData: OKXAdvancedResult | null = null;
-  let clusterList: OKXClusterResult[] = [];
+  let _clusterList: OKXClusterResult[] = [];
   if (isOKXEnabled()) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
@@ -322,7 +321,7 @@ export async function getTokenHolders({
       }),
     ]);
     advancedData = adv;
-    clusterList = clusters;
+    _clusterList = clusters;
   }
 
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────

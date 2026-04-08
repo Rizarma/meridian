@@ -15,6 +15,3 @@ import "./domain/token-blacklist.js";
 
 // Import infrastructure modules that register tools
 import "./infrastructure/state.js";
-
-// Export nothing - this module is for side-effects only
-export {};

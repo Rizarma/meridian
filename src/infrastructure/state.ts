@@ -8,8 +8,8 @@
  * - Actions taken (claims, rebalances)
  */
 
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { registerTool } from "../../tools/registry.js";
 import {
   MAX_INSTRUCTION_LENGTH,
@@ -238,7 +238,7 @@ export function markInRange(position_address: string): void {
 export function minutesOutOfRange(position_address: string): number {
   const state = load();
   const pos = state.positions[position_address];
-  if (!pos || !pos.out_of_range_since) return 0;
+  if (!pos?.out_of_range_since) return 0;
   const ms = Date.now() - new Date(pos.out_of_range_since).getTime();
   return Math.floor(ms / 60000);
 }

@@ -1,11 +1,6 @@
 // types/cli.d.ts
 // CLI types for meridian command-line interface
 
-import { PoolCandidate } from "./screening.js";
-import { PositionInfo } from "./dlmm.js";
-import { TokenInfoResult } from "./token.js";
-import { SmartWalletInPool } from "./smart-wallets.js";
-import { PoolMemoryEntry } from "./pool-memory.js";
 
 /** CLI flag definitions from parseArgs */
 export interface CLIFlags {

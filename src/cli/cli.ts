@@ -5,10 +5,10 @@
  */
 
 import "dotenv/config";
-import fs from "fs";
-import os from "os";
-import path from "path";
-import { ParseArgsOptionsConfig, parseArgs } from "util";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
 
 import type {
   BlacklistAddOutput,
@@ -26,14 +26,7 @@ import type {
   PerformanceOutput,
   PoolMemoryOutput,
 } from "../types/cli.js";
-import type {
-  ActiveBinResult,
-  PositionPnL,
-  PositionsResult,
-  SearchPoolsResult,
-  WalletPositionsResult,
-} from "../types/dlmm.js";
-import type { PoolMemoryEntry } from "../types/pool-memory.js";
+import type { ActiveBinResult, PositionPnL, PositionsResult } from "../types/dlmm.js";
 import type { CondensedPool, TopCandidatesResult } from "../types/screening.js";
 import type { WalletPositionCheck } from "../types/smart-wallets.js";
 import type {
@@ -60,7 +53,7 @@ if (fs.existsSync(meridianEnv)) {
  * @param data - The data to output
  */
 const out: CLIOutputFn = (data: unknown): void => {
-  process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 };
 
 /**
@@ -69,7 +62,7 @@ const out: CLIOutputFn = (data: unknown): void => {
  * @param extra - Additional error context
  */
 const die: CLIDieFn = (msg: string, extra: Record<string, unknown> = {}): never => {
-  process.stderr.write(JSON.stringify({ error: msg, ...extra }) + "\n");
+  process.stderr.write(`${JSON.stringify({ error: msg, ...extra })}\n`);
   process.exit(1);
 };
 
@@ -363,7 +356,7 @@ switch (subcommand as CLISubcommand) {
     const { checkSmartWalletsOnPool } = await import("../domain/smart-wallets.js");
     const { recallForPool } = await import("../domain/pool-memory.js");
 
-    const limit: number = parseInt(typedFlags.limit || "5");
+    const limit: number = parseInt(typedFlags.limit || "5", 10);
     const raw: TopCandidatesResult = await getTopCandidates({ limit });
     const pools: CondensedPool[] = raw.candidates || [];
 
@@ -454,7 +447,7 @@ switch (subcommand as CLISubcommand) {
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "token-holders");
     if (!mint) die("Usage: meridian token-holders --mint <addr>");
     const { getTokenHolders } = await import("../../tools/token.js");
-    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 20;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 20;
     out(await getTokenHolders({ mint, limit }));
     break;
   }
@@ -490,7 +483,7 @@ switch (subcommand as CLISubcommand) {
       argv.find((a: string, i: number) => !a.startsWith("-") && i > 0 && a !== "search-pools");
     if (!query) die("Usage: meridian search-pools --query <name_or_symbol>");
     const { searchPools } = await import("../../tools/dlmm.js");
-    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 10;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 10;
     out(await searchPools({ query, limit }));
     break;
   }
@@ -530,8 +523,8 @@ switch (subcommand as CLISubcommand) {
         amount_x: amountX,
         strategy: typedFlags.strategy,
         single_sided_x: argv.includes("--single-sided-x"),
-        bins_below: typedFlags["bins-below"] ? parseInt(typedFlags["bins-below"]) : undefined,
-        bins_above: typedFlags["bins-above"] ? parseInt(typedFlags["bins-above"]) : undefined,
+        bins_below: typedFlags["bins-below"] ? parseInt(typedFlags["bins-below"], 10) : undefined,
+        bins_above: typedFlags["bins-above"] ? parseInt(typedFlags["bins-above"], 10) : undefined,
         allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
       })
     );
@@ -621,7 +614,7 @@ switch (subcommand as CLISubcommand) {
   case "study": {
     if (!typedFlags.pool) die("Usage: meridian study --pool <addr> [--limit 4]");
     const { studyTopLPers } = await import("../../tools/study.js");
-    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 4;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 4;
     out(await studyTopLPers({ pool_address: typedFlags.pool, limit }));
     break;
   }
@@ -648,7 +641,7 @@ switch (subcommand as CLISubcommand) {
       out(output);
     } else {
       const { listLessons } = await import("../domain/lessons.js");
-      const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 50;
+      const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 50;
       out(listLessons({ limit }) as unknown as LessonsListOutput);
     }
     break;
@@ -666,7 +659,7 @@ switch (subcommand as CLISubcommand) {
   case "evolve": {
     const { config } = await import("../config/config.js");
     const { evolveThresholds } = await import("../domain/threshold-evolution.js");
-    const fs2: typeof fs = await import("fs");
+    const fs2: typeof fs = await import("node:fs");
     const lessonsFile: string = "./lessons.json";
     interface LessonsData {
       performance?: Array<Record<string, unknown>>;
@@ -728,7 +721,7 @@ switch (subcommand as CLISubcommand) {
   // ── performance ──────────────────────────────────────────────────
   case "performance": {
     const { getPerformanceHistory, getPerformanceSummary } = await import("../domain/lessons.js");
-    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit) : 200;
+    const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 200;
     const history = getPerformanceHistory({ hours: 999999, limit });
     const summary = getPerformanceSummary();
     const output: PerformanceOutput = {
@@ -751,7 +744,7 @@ switch (subcommand as CLISubcommand) {
       await executeTool("withdraw_liquidity", {
         position_address: typedFlags.position,
         pool_address: typedFlags.pool,
-        bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
+        bps: typedFlags.bps ? parseInt(typedFlags.bps, 10) : 10000,
         claim_fees: !argv.includes("--no-claim"),
       })
     );

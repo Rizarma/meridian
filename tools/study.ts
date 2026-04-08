@@ -84,13 +84,13 @@ export async function studyTopLPers({
   for (const lper of top) {
     const sample: LPerHistoricalSample = {
       owner: lper.owner,
-      owner_short: lper.owner.slice(0, 8) + "...",
+      owner_short: `${lper.owner.slice(0, 8)}...`,
       summary: {
         total_positions: lper.total_lp,
-        win_rate: Math.round(lper.win_rate * 100) + "%",
+        win_rate: `${Math.round(lper.win_rate * 100)}%`,
         avg_hold_hours: lper.avg_age_hour != null ? Number(lper.avg_age_hour.toFixed(2)) : null,
-        roi: (lper.roi * 100).toFixed(2) + "%",
-        fee_pct_of_capital: (lper.fee_percent * 100).toFixed(2) + "%",
+        roi: `${(lper.roi * 100).toFixed(2)}%`,
+        fee_pct_of_capital: `${(lper.fee_percent * 100).toFixed(2)}%`,
         total_pnl_usd: Math.round(lper.total_pnl),
       },
       positions: [],
@@ -118,9 +118,9 @@ export async function studyTopLPers({
         pair: p.pairName || `${p.tokenName0}-${p.tokenName1}`,
         hold_hours: p.ageHour != null ? Number(p.ageHour?.toFixed(2)) : null,
         pnl_usd: Math.round(p.pnl?.value || 0),
-        pnl_pct: ((p.pnl?.percent || 0) * 100).toFixed(1) + "%",
+        pnl_pct: `${((p.pnl?.percent || 0) * 100).toFixed(1)}%`,
         fee_usd: Math.round(p.collectedFee || 0),
-        in_range_pct: p.inRangePct != null ? Math.round(p.inRangePct * 100) + "%" : null,
+        in_range_pct: p.inRangePct != null ? `${Math.round(p.inRangePct * 100)}%` : null,
         strategy: p.strategy || null,
         closed_reason: p.closeReason || null,
       }));
@@ -137,7 +137,7 @@ export async function studyTopLPers({
     avg_win_rate: avg(top.map((l) => l.win_rate).filter(isNum)),
     avg_roi_pct: avg(top.map((l) => l.roi * 100).filter(isNum)),
     avg_fee_pct_of_capital: avg(top.map((l) => l.fee_percent * 100).filter(isNum)),
-    best_roi: (Math.max(...top.map((l) => l.roi)) * 100).toFixed(2) + "%",
+    best_roi: `${(Math.max(...top.map((l) => l.roi)) * 100).toFixed(2)}%`,
     // Scalpers (hold < 1h) vs holders (> 4h)
     scalper_count: top.filter((l) => l.avg_age_hour < 1).length,
     holder_count: top.filter((l) => l.avg_age_hour >= 4).length,
@@ -156,7 +156,7 @@ function avg(arr: number[]): number | null {
 }
 
 function isNum(n: unknown): n is number {
-  return typeof n === "number" && isFinite(n);
+  return typeof n === "number" && Number.isFinite(n);
 }
 
 // Tool registrations

@@ -291,7 +291,7 @@ export async function deployPosition({
       new PublicKey(pool.lbPair.tokenXMint)
     );
     const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
-    totalXLamports = new BN(Math.floor(finalAmountX * Math.pow(10, decimals)));
+    totalXLamports = new BN(Math.floor(finalAmountX * 10 ** decimals));
   }
 
   const totalBins = activeBinsBelow + activeBinsAbove;
@@ -368,8 +368,8 @@ export async function deployPosition({
 
     const actualBinStep = pool.lbPair.binStep;
     const activePrice = parseFloat(activeBin.price);
-    const minPrice = activePrice * Math.pow(1 + actualBinStep / 10000, minBinId - activeBin.binId);
-    const maxPrice = activePrice * Math.pow(1 + actualBinStep / 10000, maxBinId - activeBin.binId);
+    const minPrice = activePrice * (1 + actualBinStep / 10000) ** (minBinId - activeBin.binId);
+    const maxPrice = activePrice * (1 + actualBinStep / 10000) ** (maxBinId - activeBin.binId);
 
     // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
     const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
@@ -520,12 +520,12 @@ export async function addLiquidity({
 
     // Convert to lamports
     const totalXLamports =
-      finalAmountX > 0 ? new BN(Math.floor(finalAmountX * Math.pow(10, decimalsX))) : new BN(0);
+      finalAmountX > 0 ? new BN(Math.floor(finalAmountX * 10 ** decimalsX)) : new BN(0);
     const totalYLamports =
-      finalAmountY > 0 ? new BN(Math.floor(finalAmountY * Math.pow(10, decimalsY))) : new BN(0);
+      finalAmountY > 0 ? new BN(Math.floor(finalAmountY * 10 ** decimalsY)) : new BN(0);
 
     // Handle single-sided liquidity
-    let finalXLamports = totalXLamports;
+    const finalXLamports = totalXLamports;
     let finalYLamports = totalYLamports;
     if (single_sided_x && finalAmountX > 0) {
       if (finalAmountY > 0) {
@@ -1297,8 +1297,8 @@ export async function withdrawLiquidity({
 
         if (preTotalX.gt(new BN(0)) || preTotalY.gt(new BN(0))) {
           // SDK provides per-token amounts — use bps ratio directly
-          amountXWithdrawn = (preTotalX.toNumber() * bpsRatio) / Math.pow(10, decimalsX);
-          amountYWithdrawn = (preTotalY.toNumber() * bpsRatio) / Math.pow(10, decimalsY);
+          amountXWithdrawn = (preTotalX.toNumber() * bpsRatio) / 10 ** decimalsX;
+          amountYWithdrawn = (preTotalY.toNumber() * bpsRatio) / 10 ** decimalsY;
         } else {
           // Fallback: estimate from total liquidity change ratio applied to
           // current wallet balance. NOTE: This may be inaccurate if other

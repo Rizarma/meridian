@@ -1,4 +1,4 @@
-import fs from "fs";
+import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { log } from "../infrastructure/logger.js";
 import type {
@@ -95,7 +95,7 @@ export function getRpcUrl(): string {
 }
 
 // Helper: Get value with precedence env > user-config > default
-const getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
+const _getConfig = <T>(envKey: string, userKey: keyof UserConfigPartial, defaultValue: T): T => {
   const envValue = process.env[envKey];
   if (hasEnvValue(envValue)) {
     // Try to parse as the same type as default
