@@ -21,6 +21,7 @@ import type {
 import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
 import type { TokenInfoResult } from "../src/types/token.js";
 import { cache } from "../src/utils/cache.js";
+import { getErrorMessage } from "../src/utils/errors.js";
 import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
 import { fetchWithRetry } from "../src/utils/retry.js";
 import { isEnabled as isOKXEnabled } from "./okx.js";
@@ -219,11 +220,11 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
       getAdvancedInfo(results[0].mint).catch((err: unknown): null => {
-        log("token", `OKX advanced info failed: ${(err as Error).message}`);
+        log("token", `OKX advanced info failed: ${getErrorMessage(err)}`);
         return null;
       }),
       getClusterList(results[0].mint).catch((err: unknown): TokenCluster[] => {
-        log("token", `OKX cluster list failed: ${(err as Error).message}`);
+        log("token", `OKX cluster list failed: ${getErrorMessage(err)}`);
         return [];
       }),
     ]);
@@ -316,11 +317,11 @@ export async function getTokenHolders({
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
       getAdvancedInfo(mint).catch((err: unknown): null => {
-        log("token", `OKX advanced info failed: ${(err as Error).message}`);
+        log("token", `OKX advanced info failed: ${getErrorMessage(err)}`);
         return null;
       }),
       getClusterList(mint).catch((err: unknown): OKXClusterResult[] => {
-        log("token", `OKX cluster list failed: ${(err as Error).message}`);
+        log("token", `OKX cluster list failed: ${getErrorMessage(err)}`);
         return [];
       }),
     ]);

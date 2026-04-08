@@ -37,6 +37,7 @@ import type {
   TrailingConfirmation,
 } from "../types/state.js";
 import type { Strategy } from "../types/strategy.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
 import { log } from "./logger.js";
 
@@ -79,7 +80,7 @@ function load(): PositionState {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as PositionState;
   } catch (err) {
-    log("state_error", `Failed to read state.json: ${(err as Error).message}`);
+    log("state_error", `Failed to read state.json: ${getErrorMessage(err)}`);
     return { positions: {}, recentEvents: [], lastUpdated: null };
   }
 }
@@ -116,7 +117,7 @@ function save(state: PositionState): void {
       }
     }
   } catch (err) {
-    log("state_error", `Failed to write state.json: ${(err as Error).message}`);
+    log("state_error", `Failed to write state.json: ${getErrorMessage(err)}`);
   }
 }
 

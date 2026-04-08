@@ -8,6 +8,7 @@ import type {
   UpdateConfigResult,
   UserConfigPartial,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
 /**
@@ -54,7 +55,7 @@ if (fs.existsSync(USER_CONFIG_PATH)) {
   } catch (e) {
     log(
       "config_warn",
-      `Failed to parse user-config.json: ${(e as Error).message}. Using empty config.`
+      `Failed to parse user-config.json: ${getErrorMessage(e)}. Using empty config.`
     );
     u = {};
   }
@@ -431,7 +432,7 @@ registerTool({
     try {
       fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
     } catch (e) {
-      log("config_error", `Failed to write user-config.json: ${(e as Error).message}`);
+      log("config_error", `Failed to write user-config.json: ${getErrorMessage(e)}`);
       return { success: false, unknown, reason, applied: {} } as UpdateConfigResult;
     }
 

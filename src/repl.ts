@@ -24,6 +24,7 @@ import {
 } from "./infrastructure/telegram.js";
 import type { CondensedPool, EnrichedPosition } from "./types/index.js";
 import type { TelegramMessage } from "./types/telegram.js";
+import { getErrorMessage } from "./utils/errors.js";
 import { formatHealthStatus, runHealthCheck } from "./utils/health-check.js";
 
 // DEPLOY constant from config
@@ -218,7 +219,7 @@ function setupSignalHandlers(deps: REPLDependencies): void {
       await deps.shutdown(signal);
       process.exit(0);
     } catch (e) {
-      console.error(colors.red(`Shutdown error: ${(e as Error).message}`));
+      console.error(colors.red(`Shutdown error: ${getErrorMessage(e)}`));
       process.exit(1);
     }
   };
@@ -390,7 +391,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       const health = await runHealthCheck();
       await sendMessage(formatHealthStatus(health));
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -400,7 +401,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       const briefing = await generateBriefing();
       await sendHTML(briefing);
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -426,7 +427,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         `📊 Open Positions (${totalPositions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`
       );
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -456,7 +457,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
         await sendMessage(`❌ Close failed: ${JSON.stringify(closeResult)}`);
       }
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -478,7 +479,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       setPositionInstruction(pos.position, note);
       await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
     } catch (e) {
-      await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+      await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
     }
     return;
   }
@@ -531,8 +532,8 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       else await sendMessage(stripThink(content));
     }
   } catch (e) {
-    if (liveMessage) await liveMessage.fail((e as Error).message).catch(() => {});
-    else await sendMessage(`Error: ${(e as Error).message}`).catch(() => {});
+    if (liveMessage) await liveMessage.fail(getErrorMessage(e)).catch(() => {});
+    else await sendMessage(`Error: ${getErrorMessage(e)}`).catch(() => {});
   } finally {
     busy = false;
     refreshPrompt(deps);
@@ -555,7 +556,7 @@ async function runBusy(
   try {
     await fn();
   } catch (e) {
-    console.error(colors.red(`Error: ${(e as Error).message}`));
+    console.error(colors.red(`Error: ${getErrorMessage(e)}`));
   } finally {
     busy = false;
     rl.setPrompt(buildPrompt(deps));
@@ -974,7 +975,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
       );
       console.log(formatCandidates(candidates));
     } catch (e) {
-      console.error(colors.red(`Startup fetch failed: ${(e as Error).message}`));
+      console.error(colors.red(`Startup fetch failed: ${getErrorMessage(e)}`));
     } finally {
       busy = false;
 
@@ -1102,7 +1103,7 @@ STARTUP CHECK
         "SCREENER"
       );
     } catch (e) {
-      log("startup_error", (e as Error).message);
+      log("startup_error", getErrorMessage(e));
     }
   })();
 }

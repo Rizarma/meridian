@@ -43,6 +43,7 @@ import type {
   WithdrawLiquidityParams,
   WithdrawLiquidityResult,
 } from "../src/types/dlmm.js";
+import { getErrorMessage } from "../src/utils/errors.js";
 import { recordActivity } from "../src/utils/health-check.js";
 import { fetchWithRetry } from "../src/utils/retry.js";
 import { isArray, isObject } from "../src/utils/validation.js";
@@ -132,7 +133,7 @@ function validateWalletKey(key: string | undefined): string {
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
-    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${getErrorMessage(e)}`);
   }
   return trimmed;
 }
@@ -973,12 +974,12 @@ export async function getMyPositions({
       });
       return result;
     } catch (error: any) {
-      log("positions_error", `Portfolio fetch failed: ${error.stack || error.message}`);
+      log("positions_error", `Portfolio fetch failed: ${error.stack || getErrorMessage(error)}`);
       return {
         wallet: walletAddress,
         total_positions: 0,
         positions: [] as EnrichedPosition[],
-        error: (error as Error).message,
+        error: getErrorMessage(error),
       };
     } finally {
       _positionsInflight = null;

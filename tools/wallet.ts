@@ -3,6 +3,7 @@ import bs58 from "bs58";
 import { config } from "../src/config/config.js";
 import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
+import { getErrorMessage } from "../src/utils/errors.js";
 import { rateLimiters, withRateLimit } from "../src/utils/rate-limiter.js";
 import { fetchWithRetry } from "../src/utils/retry.js";
 import { registerTool } from "./registry.js";
@@ -126,7 +127,7 @@ function validateWalletKey(key: string | undefined): string {
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes("WALLET_PRIVATE_KEY")) throw e;
-    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${(e as Error).message}`);
+    throw new Error(`WALLET_PRIVATE_KEY is not valid base58: ${getErrorMessage(e)}`);
   }
   return trimmed;
 }

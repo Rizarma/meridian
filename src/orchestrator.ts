@@ -76,7 +76,7 @@ async function runBriefing(): Promise<void> {
     }
     setLastBriefingDate();
   } catch (error) {
-    log("cron_error", `Morning briefing failed: ${(error as Error).message}`);
+    log("cron_error", `Morning briefing failed: ${getErrorMessage(error)}`);
   }
 }
 
@@ -184,7 +184,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
         "MANAGER"
       );
     } catch (error) {
-      log("cron_error", `Health check failed: ${(error as Error).message}`);
+      log("cron_error", `Health check failed: ${getErrorMessage(error)}`);
     } finally {
       _managementBusy = false;
     }
@@ -362,7 +362,7 @@ export async function shutdown(signal: string): Promise<void> {
 
     log("shutdown", "Graceful shutdown completed");
   } catch (error) {
-    log("shutdown", `Shutdown error or timeout: ${(error as Error).message}`);
+    log("shutdown", `Shutdown error or timeout: ${getErrorMessage(error)}`);
   } finally {
     process.exit(0);
   }

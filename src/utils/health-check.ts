@@ -1,6 +1,7 @@
 import { getWallet } from "../../tools/wallet.js";
 import { getSharedConnection } from "../infrastructure/connection.js";
 import { log } from "../infrastructure/logger.js";
+import { getErrorMessage } from "./errors.js";
 
 export interface HealthStatus {
   healthy: boolean;
@@ -38,7 +39,7 @@ async function checkRpc(): Promise<{ healthy: boolean; latencyMs: number; error?
     return {
       healthy: false,
       latencyMs: Date.now() - start,
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     };
   }
 }
@@ -54,7 +55,7 @@ function checkWallet(): { healthy: boolean; error?: string } {
     }
     return { healthy: true };
   } catch (error) {
-    return { healthy: false, error: (error as Error).message };
+    return { healthy: false, error: getErrorMessage(error) };
   }
 }
 
@@ -92,7 +93,7 @@ async function checkApi(
     return {
       healthy: false,
       latencyMs: Date.now() - start,
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     };
   }
 }

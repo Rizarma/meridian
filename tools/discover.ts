@@ -11,6 +11,7 @@
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { getErrorMessage } from "../src/utils/errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,7 +54,7 @@ export async function discoverTools(): Promise<void> {
       const filePath = pathToFileURL(join(__dirname, file)).href;
       await import(filePath);
     } catch (error) {
-      console.error(`[discover] Failed to import tools/${file}:`, (error as Error).message);
+      console.error(`[discover] Failed to import tools/${file}:`, getErrorMessage(error));
     }
   }
 }
