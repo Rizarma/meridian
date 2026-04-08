@@ -32,3 +32,10 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 - [Screening Logic](.claude/docs/screening-logic.md) — safety checks, bins_below formula, bundler/OKX signals, Darwinian weights
 - [Features](.claude/docs/features.md) — lessons, trailing TP, SOL mode, telegram commands, hive mind
 - [Known Issues](.claude/docs/known-issues.md) — intentional quirks and tech debt
+
+## Claude Code resources
+
+- [`.claude/agents/`](.claude/agents/) — Screener and Manager agent definitions for Claude Code
+- [`.claude/commands/`](.claude/commands/) — Terminal command definitions (`/screen`, `/manage`, `/balance`, etc.)
+
+<!-- Last reviewed: 2025-04-09 -->
