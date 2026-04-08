@@ -6,7 +6,7 @@
     "lib": ["ES2022"],
     "outDir": "./dist",
     "strict": false,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "allowJs": true,
     "checkJs": true,
     "esModuleInterop": true,

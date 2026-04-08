@@ -120,10 +120,10 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
       _managementBusy = busy;
     },
     isManagementBusy: () => _managementBusy,
-    triggerScreening: async (positionCount?: number) => {
+    triggerScreening: async (positionCount?: number): Promise<void> => {
       const afterCount =
         positionCount ??
-        (await getMyPositions({ force: true }).catch(() => null))?.positions?.length ??
+        (await getMyPositions({ force: true }).catch((): null => null))?.positions?.length ??
         0;
       if (
         afterCount < config.risk.maxPositions &&
@@ -164,7 +164,9 @@ export function startCronJobs(): void {
 
   const screenTask = cron.schedule(
     `*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`,
-    runScreeningCycle
+    (): void => {
+      void runScreeningCycle();
+    }
   );
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
@@ -216,7 +218,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
       if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
       _pnlPollBusy = true;
       try {
-        const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
+        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
         const positions = result?.positions;
         if (!positions?.length) {
           _pnlPollConsecutiveFailures = 0; // Reset on successful empty poll

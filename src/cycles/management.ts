@@ -43,6 +43,7 @@ import type {
   EnrichedPosition,
   LiveMessageHandler,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -53,23 +54,27 @@ function stripThink(text: string | null | undefined): string {
 export function schedulePeakConfirmation(positionAddress: string): void {
   if (!positionAddress || getPeakConfirmTimer(positionAddress)) return;
 
-  const timer = setTimeout(async () => {
-    deletePeakConfirmTimer(positionAddress);
-    try {
-      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const positions = result?.positions;
-      const position = positions?.find((p) => p.position === positionAddress);
-      resolvePendingPeak(
-        positionAddress,
-        position?.pnl_pct ?? null,
-        TRAILING_PEAK_CONFIRM_TOLERANCE
-      );
-    } catch (error) {
-      log(
-        "state_warn",
-        `Peak confirmation failed for ${positionAddress}: ${(error as Error).message}`
-      );
-    }
+  const timer = setTimeout((): void => {
+    void (async (): Promise<void> => {
+      deletePeakConfirmTimer(positionAddress);
+      try {
+        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
+        const positions = result?.positions;
+        const position = positions?.find(
+          (p: { position: string }) => p.position === positionAddress
+        );
+        resolvePendingPeak(
+          positionAddress,
+          position?.pnl_pct ?? null,
+          TRAILING_PEAK_CONFIRM_TOLERANCE
+        );
+      } catch (error) {
+        log(
+          "state_warn",
+          `Peak confirmation failed for ${positionAddress}: ${getErrorMessage(error)}`
+        );
+      }
+    })();
   }, TRAILING_PEAK_CONFIRM_DELAY_MS);
 
   setPeakConfirmTimer(positionAddress, timer);
@@ -81,31 +86,35 @@ export function scheduleTrailingDropConfirmation(
 ) {
   if (!positionAddress || getTrailingDropConfirmTimer(positionAddress)) return;
 
-  const timer = setTimeout(async () => {
-    deleteTrailingDropConfirmTimer(positionAddress);
-    try {
-      const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const position = result?.positions?.find((p) => p.position === positionAddress);
-      const resolved = resolvePendingTrailingDrop(
-        positionAddress,
-        position?.pnl_pct ?? null,
-        config.management.trailingDropPct,
-        TRAILING_DROP_CONFIRM_TOLERANCE_PCT
-      );
-      if (resolved?.confirmed) {
-        log(
-          "state",
-          `[Trailing recheck] Confirmed trailing exit for ${positionAddress} — triggering management`
+  const timer = setTimeout((): void => {
+    void (async (): Promise<void> => {
+      deleteTrailingDropConfirmTimer(positionAddress);
+      try {
+        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
+        const position = result?.positions?.find(
+          (p: { position: string }) => p.position === positionAddress
         );
-        // Trigger management cycle to close the position
-        onConfirmed?.();
+        const resolved = resolvePendingTrailingDrop(
+          positionAddress,
+          position?.pnl_pct ?? null,
+          config.management.trailingDropPct,
+          TRAILING_DROP_CONFIRM_TOLERANCE_PCT
+        );
+        if (resolved?.confirmed) {
+          log(
+            "state",
+            `[Trailing recheck] Confirmed trailing exit for ${positionAddress} — triggering management`
+          );
+          // Trigger management cycle to close the position
+          onConfirmed?.();
+        }
+      } catch (error: unknown) {
+        log(
+          "state_warn",
+          `Trailing drop confirmation failed for ${positionAddress}: ${getErrorMessage(error)}`
+        );
       }
-    } catch (error: any) {
-      log(
-        "state_warn",
-        `Trailing drop confirmation failed for ${positionAddress}: ${error.message}`
-      );
-    }
+    })();
   }, TRAILING_DROP_CONFIRM_DELAY_MS);
 
   setTrailingDropConfirmTimer(positionAddress, timer);
@@ -136,7 +145,7 @@ export async function runManagementCycle(
     if (!silent && telegramEnabled()) {
       liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
     }
-    const livePositions = await getMyPositions({ force: true }).catch(() => null);
+    const livePositions = await getMyPositions({ force: true }).catch((): null => null);
     positions = livePositions?.positions || [];
 
     if (positions.length === 0) {
@@ -364,7 +373,7 @@ After executing, write a brief one-line result per position.
     }
 
     // Trigger screening after management
-    const afterPositions = await getMyPositions({ force: true }).catch(() => null);
+    const afterPositions = await getMyPositions({ force: true }).catch((): null => null);
     const afterCount = afterPositions?.positions?.length ?? 0;
     // Note: screeningCooldown check is handled by the orchestrator via _screeningLastTriggered
     if (afterCount < config.risk.maxPositions) {

@@ -215,12 +215,12 @@ export async function getTokenInfo({ query }: TokenInfoInput): Promise<TokenInfo
   if (isOKXEnabled() && results[0]?.mint) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
-      getAdvancedInfo(results[0].mint).catch((err) => {
-        log("token", `OKX advanced info failed: ${err.message}`);
+      getAdvancedInfo(results[0].mint).catch((err: unknown): null => {
+        log("token", `OKX advanced info failed: ${(err as Error).message}`);
         return null;
       }),
-      getClusterList(results[0].mint).catch((err) => {
-        log("token", `OKX cluster list failed: ${err.message}`);
+      getClusterList(results[0].mint).catch((err: unknown): TokenCluster[] => {
+        log("token", `OKX cluster list failed: ${(err as Error).message}`);
         return [];
       }),
     ]);
@@ -312,12 +312,12 @@ export async function getTokenHolders({
   if (isOKXEnabled()) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
-      getAdvancedInfo(mint).catch((err) => {
-        log("token", `OKX advanced info failed: ${err.message}`);
+      getAdvancedInfo(mint).catch((err: unknown): null => {
+        log("token", `OKX advanced info failed: ${(err as Error).message}`);
         return null;
       }),
-      getClusterList(mint).catch((err) => {
-        log("token", `OKX cluster list failed: ${err.message}`);
+      getClusterList(mint).catch((err: unknown): OKXClusterResult[] => {
+        log("token", `OKX cluster list failed: ${(err as Error).message}`);
         return [];
       }),
     ]);
@@ -334,7 +334,7 @@ export async function getTokenHolders({
   if (smartWallets.length > 0) {
     const addresses = smartWallets.map((w) => w.address).join(",");
     const kwRes = await fetch(`${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`).catch(
-      () => null
+      (): null => null
     );
     const kwData = kwRes?.ok
       ? ((await kwRes.json()) as

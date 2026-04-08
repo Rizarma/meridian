@@ -57,7 +57,9 @@
   ],
   "devDependencies": {
     "@biomejs/biome": "2.4.10",
+    "@types/bn.js": "^5.2.0",
     "@types/node": "^25.5.2",
+    "@types/node-cron": "^3.0.11",
     "cross-env": "^10.1.0",
     "typescript": "^6.0.2"
   }

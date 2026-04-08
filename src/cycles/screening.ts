@@ -154,15 +154,20 @@ export async function runScreeningCycle(
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
     const topCandidatesResult = await getTopCandidates({
       limit: config.screening.maxCandidatesEnriched,
-    }).catch((e) => {
+    }).catch((e: unknown): null => {
       log("screening_warn", `Failed to fetch top candidates: ${(e as Error).message}`);
       return null;
     });
-    const { candidates: initialCandidates, filtered_examples: earlyFilteredExamples } =
-      topCandidatesResult ?? {
-        candidates: [],
-        filtered_examples: [],
-      };
+    const {
+      candidates: initialCandidates,
+      filtered_examples: earlyFilteredExamples,
+    }: {
+      candidates: CondensedPool[];
+      filtered_examples: FilteredExample[];
+    } = topCandidatesResult ?? {
+      candidates: [],
+      filtered_examples: [],
+    };
     const candidates = initialCandidates ?? [];
 
     // Array for late-stage filtered examples

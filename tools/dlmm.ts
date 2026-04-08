@@ -919,7 +919,12 @@ export async function getMyPositions({
       return result;
     } catch (error: any) {
       log("positions_error", `Portfolio fetch failed: ${error.stack || error.message}`);
-      return { wallet: walletAddress, total_positions: 0, positions: [], error: error.message };
+      return {
+        wallet: walletAddress,
+        total_positions: 0,
+        positions: [] as EnrichedPosition[],
+        error: (error as Error).message,
+      };
     } finally {
       _positionsInflight = null;
     }
