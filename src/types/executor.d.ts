@@ -119,9 +119,11 @@ export interface ActionLog {
 export interface DeployPositionArgs {
   pool_address: string;
   bin_step?: number;
+  amount_x?: number;
   amount_y?: number;
   amount_sol?: number;
   base_mint?: string;
+  strategy?: string;
   [key: string]: unknown;
 }
 

@@ -746,9 +746,9 @@ switch (subcommand as CLISubcommand) {
       die(
         "Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps <n>] [--no-claim]"
       );
-    const { withdrawLiquidity } = await import("../../tools/dlmm.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(
-      await withdrawLiquidity({
+      await executeTool("withdraw_liquidity", {
         position_address: typedFlags.position,
         pool_address: typedFlags.pool,
         bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
@@ -764,9 +764,9 @@ switch (subcommand as CLISubcommand) {
       die(
         "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>] [--strategy <spot|bid_ask>] [--single-sided-x]"
       );
-    const { addLiquidity } = await import("../../tools/dlmm.js");
+    const { executeTool } = await import("../../tools/executor.js");
     out(
-      await addLiquidity({
+      await executeTool("add_liquidity", {
         position_address: typedFlags.position,
         pool_address: typedFlags.pool,
         amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,

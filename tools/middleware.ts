@@ -367,15 +367,17 @@ async function validateStrategyCompliance(
   }
 
   // Validate 2: lp_strategy match (if not "any" or "mixed")
+  // Use active strategy if deployArgs.strategy is not provided
+  const effectiveStrategy = deployArgs.strategy ?? strategy.lp_strategy;
   if (
     strategy.lp_strategy &&
     strategy.lp_strategy !== "any" &&
     strategy.lp_strategy !== "mixed" &&
-    deployArgs.strategy !== strategy.lp_strategy
+    effectiveStrategy !== strategy.lp_strategy
   ) {
     return {
       pass: false,
-      reason: `Strategy '${strategy.name}' requires lp_strategy: "${strategy.lp_strategy}", but deploy used: "${deployArgs.strategy}"`,
+      reason: `Strategy '${strategy.name}' requires lp_strategy: "${strategy.lp_strategy}", but deploy used: "${effectiveStrategy}"`,
     };
   }
 
@@ -435,15 +437,23 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 
       // Check amount limits
       const amountY = deployArgs.amount_y ?? deployArgs.amount_sol ?? 0;
-      if (amountY <= 0) {
+      const amountX = deployArgs.amount_x ?? 0;
+
+      // Allow single-sided token entry (amount_y=0) if strategy permits it
+      const activeStrategy = await getActiveStrategy();
+      const allowsSingleSidedToken = activeStrategy?.entry?.single_side === "token";
+      const isSingleSidedToken = allowsSingleSidedToken && amountY === 0 && amountX > 0;
+
+      if (amountY <= 0 && !isSingleSidedToken) {
         return {
           pass: false,
-          reason: `Must provide a positive SOL amount (amount_y).`,
+          reason: `Must provide a positive SOL amount (amount_y), or use a single-sided token strategy.`,
         };
       }
 
       const minDeploy = Math.max(0.1, config.management.deployAmountSol);
-      if (amountY < minDeploy) {
+      // Skip minDeploy check for single-sided token entries (amount_y=0 is intentional)
+      if (!isSingleSidedToken && amountY < minDeploy) {
         return {
           pass: false,
           reason: `Amount ${amountY} SOL is below the minimum deploy amount (${minDeploy} SOL). Use at least ${minDeploy} SOL.`,
