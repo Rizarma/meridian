@@ -27,6 +27,8 @@ import { sendHTML, stopPolling, isEnabled as telegramEnabled } from "./infrastru
 import { startNonTTY, startREPL } from "./repl.js";
 import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
 import { cache } from "./utils/cache.js";
+import { getErrorMessage } from "./utils/errors.js";
+import { isArray } from "./utils/validation.js";
 
 // ═══════════════════════════════════════════
 //  GLOBAL STATE
@@ -212,95 +214,101 @@ Summarize the current portfolio health, total fees earned, and performance of al
       if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
       _pnlPollBusy = true;
       try {
-        const result = await getMyPositions({ force: true, silent: true }).catch((): null => null);
-        const positions = result?.positions;
-        if (!positions?.length) {
+        const result = await getMyPositions({ force: true, silent: true }).catch((err): null => {
+          log("poll_error", `getMyPositions failed: ${getErrorMessage(err)}`);
+          _pnlPollConsecutiveFailures++;
+          if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
+            log("poll_error", "PnL poll failing consistently - backing off");
+            // Could disable polling here if needed
+          }
+          return null;
+        });
+
+        if (!result) return; // Early exit on failure
+
+        // Validate positions array before processing
+        const rawPositions = result?.positions;
+        if (!isArray(rawPositions)) {
+          log("poll_error", "Invalid positions response: positions is not an array");
+          return;
+        }
+        if (rawPositions.length === 0) {
           _pnlPollConsecutiveFailures = 0; // Reset on successful empty poll
           return;
         }
-        for (const p of positions) {
-          if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
-            schedulePeakConfirmation(p.position);
-          }
-          const trackedP = getTrackedPosition(p.position);
-          const exit = updatePnlAndCheckExits(
-            p.position,
-            p,
-            config.management,
-            trackedP?.strategy_config
-          );
-          if (exit) {
-            // Trailing TP needs confirmation - queue it and continue polling
-            if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
-              if (
-                queueTrailingDropConfirmation(
-                  p.position,
-                  exit.peak_pnl_pct ?? null,
-                  exit.current_pnl_pct ?? null,
-                  config.management.trailingDropPct ?? null
-                )
-              ) {
-                scheduleTrailingDropConfirmation(p.position, () => {
-                  runManagementCycle({ silent: true }).catch((e: Error) =>
-                    log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
-                  );
-                });
+
+        // Process each position with individual error handling
+        for (const p of rawPositions) {
+          try {
+            if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+              schedulePeakConfirmation(p.position);
+            }
+            const trackedP = getTrackedPosition(p.position);
+            const exit = updatePnlAndCheckExits(
+              p.position,
+              p,
+              config.management,
+              trackedP?.strategy_config
+            );
+            if (exit) {
+              // Trailing TP needs confirmation - queue it and continue polling
+              if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
+                if (
+                  queueTrailingDropConfirmation(
+                    p.position,
+                    exit.peak_pnl_pct ?? null,
+                    exit.current_pnl_pct ?? null,
+                    config.management.trailingDropPct ?? null
+                  )
+                ) {
+                  scheduleTrailingDropConfirmation(p.position, () => {
+                    runManagementCycle({ silent: true }).catch((e: Error) =>
+                      log("cron_error", `Trailing drop-triggered management failed: ${e.message}`)
+                    );
+                  });
+                }
+                continue;
               }
-              continue;
+              const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
+              const sinceLastTrigger = Date.now() - _pollTriggeredAt;
+              if (sinceLastTrigger >= cooldownMs) {
+                _pollTriggeredAt = Date.now();
+                log(
+                  "state",
+                  `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
+                );
+                runManagementCycle({ silent: true }).catch((e: Error) =>
+                  log("cron_error", `Poll-triggered management failed: ${e.message}`)
+                );
+              } else {
+                log(
+                  "state",
+                  `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
+                    (cooldownMs - sinceLastTrigger) / 1000
+                  )}s left)`
+                );
+              }
+              break;
             }
-            const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-            const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-            if (sinceLastTrigger >= cooldownMs) {
-              _pollTriggeredAt = Date.now();
-              log(
-                "state",
-                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
-              );
-              runManagementCycle({ silent: true }).catch((e: Error) =>
-                log("cron_error", `Poll-triggered management failed: ${e.message}`)
-              );
-            } else {
-              log(
-                "state",
-                `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round(
-                  (cooldownMs - sinceLastTrigger) / 1000
-                )}s left)`
-              );
-            }
-            break;
+          } catch (positionError) {
+            log(
+              "poll_error",
+              `Error processing position ${p.position}: ${getErrorMessage(positionError)}`
+            );
+            // Continue to next position
           }
         }
         // Reset consecutive failures on successful poll completion
         _pnlPollConsecutiveFailures = 0;
       } catch (error) {
+        log("poll_error", `PnL poll error: ${getErrorMessage(error)}`);
         _pnlPollConsecutiveFailures++;
-        const errorMsg = (error as Error).message;
-        if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
-          log(
-            "error",
-            `[PnL poll] Persistent failure #${_pnlPollConsecutiveFailures}: ${errorMsg}. ` +
-              `Polling continues but state operations may be broken (disk full, permissions, etc.)`
-          );
-        } else {
-          log(
-            "cron_error",
-            `[PnL poll] Failure #${_pnlPollConsecutiveFailures}/${MAX_PNL_POLL_FAILURES}: ${errorMsg}`
-          );
-        }
       } finally {
         _pnlPollBusy = false;
       }
     })().catch((e) => {
-      // This catches async errors outside the try block (should be rare)
-      try {
-        _pnlPollConsecutiveFailures++;
-        log(
-          "error",
-          `PnL poll unhandled error (failure #${_pnlPollConsecutiveFailures}): ${(e as Error).message}`
-        );
-      } finally {
-        _pnlPollBusy = false;
-      }
+      log("poll_error", `Unhandled PnL poll error: ${getErrorMessage(e)}`);
+      _pnlPollBusy = false;
     });
   }, 30_000);
 
