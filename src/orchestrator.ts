@@ -18,6 +18,7 @@ import { generateBriefing } from "./infrastructure/briefing.js";
 import { log } from "./infrastructure/logger.js";
 import {
   getLastBriefingDate,
+  getTrackedPosition,
   queuePeakConfirmation,
   queueTrailingDropConfirmation,
   setLastBriefingDate,
@@ -225,7 +226,13 @@ Summarize the current portfolio health, total fees earned, and performance of al
           if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
             schedulePeakConfirmation(p.position);
           }
-          const exit = updatePnlAndCheckExits(p.position, p, config.management);
+          const trackedP = getTrackedPosition(p.position);
+          const exit = updatePnlAndCheckExits(
+            p.position,
+            p,
+            config.management,
+            trackedP?.strategy_config
+          );
           if (exit) {
             // Trailing TP needs confirmation - queue it and continue polling
             if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {

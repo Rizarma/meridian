@@ -742,16 +742,13 @@ switch (subcommand as CLISubcommand) {
 
   // ── withdraw-liquidity ─────────────────────────────────────────
   case "withdraw-liquidity": {
-    if (!typedFlags.position)
-      die("Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]");
-    if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("../../tools/dlmm.js");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const withdrawLiquidity = (dlmmModule as Record<string, unknown>).withdrawLiquidity as (
-      ...args: unknown[]
-    ) => Promise<unknown>;
+    if (!typedFlags.position || !typedFlags.pool)
+      die(
+        "Usage: meridian withdraw-liquidity --position <addr> --pool <addr> [--bps <n>] [--no-claim]"
+      );
+    const { executeTool } = await import("../../tools/executor.js");
     out(
-      await withdrawLiquidity({
+      await executeTool("withdraw_liquidity", {
         position_address: typedFlags.position,
         pool_address: typedFlags.pool,
         bps: typedFlags.bps ? parseInt(typedFlags.bps) : 10000,
@@ -763,18 +760,13 @@ switch (subcommand as CLISubcommand) {
 
   // ── add-liquidity ──────────────────────────────────────────────
   case "add-liquidity": {
-    if (!typedFlags.position)
+    if (!typedFlags.position || !typedFlags.pool)
       die(
-        "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>]"
+        "Usage: meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>] [--strategy <spot|bid_ask>] [--single-sided-x]"
       );
-    if (!typedFlags.pool) die("--pool is required");
-    const dlmmModule = await import("../../tools/dlmm.js");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const addLiquidity = (dlmmModule as Record<string, unknown>).addLiquidity as (
-      ...args: unknown[]
-    ) => Promise<unknown>;
+    const { executeTool } = await import("../../tools/executor.js");
     out(
-      await addLiquidity({
+      await executeTool("add_liquidity", {
         position_address: typedFlags.position,
         pool_address: typedFlags.pool,
         amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
