@@ -4,6 +4,8 @@
 
 Meridian runs continuous screening and management cycles, deploying capital into high-quality Meteora DLMM pools and closing positions based on live PnL, yield, and range data. It learns from every position it closes.
 
+> **Quick reference:** See [CLAUDE.md](CLAUDE.md) for a condensed cheat sheet of commands, config keys, and project layout.
+
 ---
 
 ## Features
@@ -105,9 +107,20 @@ WALLET_PRIVATE_KEY=your_base58_private_key
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
 OPENROUTER_API_KEY=sk-or-...
 HELIUS_API_KEY=your_helius_key          # for wallet balance lookups
+LPAGENT_API_KEY=your_lpagent_api_key_here      # for top LPer study
+JUPITER_API_KEY=your_jupiter_api_key_here      # Jupiter API access
+OKX_API_KEY=your_okx_api_key_here              # OKX OnchainOS risk data (optional)
+OKX_SECRET_KEY=your_okx_secret_key_here
+OKX_PASSPHRASE=your_okx_passphrase_here
+OKX_PROJECT_ID=your_okx_project_id_here
+HIVE_MIND_URL=                                  # Collective intelligence (optional)
+HIVE_MIND_API_KEY=
 TELEGRAM_BOT_TOKEN=123456:ABC...        # optional — for notifications + chat
 TELEGRAM_CHAT_ID=                       # auto-filled on first message
-DRY_RUN=true                            # set false for live trading
+TELEGRAM_ALLOWED_USER_IDS=                      # Access control (optional)
+# DRY_RUN=false                        # uncomment for live trading (default is dry-run if omitted)
+ALLOW_SELF_UPDATE=false                         # Dangerous admin actions
+LOG_LEVEL=info                                  # debug, info, warn, error
 ```
 
 > Never put your private key or API keys in `user-config.json` — use `.env` only. Both files are gitignored.
@@ -125,8 +138,14 @@ See [Config reference](#config-reference) below.
 ### 3. Run
 
 ```bash
-pnpm run dev    # dry run — no on-chain transactions
-pnpm start      # live mode
+pnpm run dev              # dry run — no on-chain transactions
+pnpm start                # live mode
+pnpm run typecheck        # TypeScript type checking only
+pnpm run format:changed   # format changed files
+pnpm run format:all       # format all files
+pnpm run lint:changed     # lint changed files
+pnpm run lint:check       # check lint on changed files
+pnpm run check            # format check + typecheck
 ```
 
 On startup Meridian fetches your wallet balance, open positions, and top pool candidates, then begins autonomous cycles immediately.
@@ -232,7 +251,7 @@ node dist/src/cli/cli.js <command> [flags]
 ```bash
 meridian positions
 meridian pnl <position_address>
-meridian wallet-positions --wallet <addr>
+meridian wallet-positions --wallet <addr>     # check any wallet's positions
 ```
 
 **Screening**
@@ -256,12 +275,12 @@ meridian token-narrative --mint <addr>
 **Deploy & manage**
 
 ```bash
-meridian deploy --pool <addr> --amount <sol> [--bins-below 69] [--bins-above 0] [--strategy bid_ask|spot|curve] [--dry-run]
+meridian deploy --pool <addr> --amount <sol> [--bins-below 69] [--bins-above 0] [--strategy bid_ask|spot] [--dry-run]
 meridian claim --position <addr>
 meridian close --position <addr> [--skip-swap] [--dry-run]
 meridian swap --from <mint> --to <mint> --amount <n> [--dry-run]
-meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>] [--strategy spot]
-meridian withdraw-liquidity --position <addr> --pool <addr> [--bps 10000]
+meridian add-liquidity --position <addr> --pool <addr> [--amount-x <n>] [--amount-y <n>] [--strategy <spot|bid_ask>] [--single-sided-x]   # add to existing position
+meridian withdraw-liquidity --position <addr> --pool <addr> [--bps <n>] [--no-claim]   # partial liquidity removal (10000 bps = 100%)
 ```
 
 **Agent cycles**
@@ -301,6 +320,7 @@ meridian blacklist add --mint <addr> --reason "reason"
 ```bash
 meridian balance
 ```
+Returns wallet SOL and token balances.
 
 **Flags**
 
@@ -308,6 +328,40 @@ meridian balance
 |---|---|
 | `--dry-run` | Skip all on-chain transactions |
 | `--silent` | Suppress Telegram notifications for this run |
+
+---
+
+## Test scripts
+
+The project includes comprehensive test suites organized by phase:
+
+**Phase 0 — Core safety & logic**
+```bash
+pnpm run test:phase0:exit      # exit rules validation
+pnpm run test:phase0:trailing   # trailing take-profit logic
+pnpm run test:phase0:config     # config mutation safety
+pnpm run test:phase0:safety     # tool safety checks
+pnpm run test:phase0:all        # run all phase 0 tests
+```
+
+**Phase 2 — Tooling infrastructure**
+```bash
+pnpm run test:phase2:registry   # tool registry tests
+pnpm run test:phase2:middleware # middleware validation
+```
+
+**Phase 5 — Integration & features**
+```bash
+pnpm run test:phase5:integration # full integration tests
+pnpm run test:phase5:features    # feature-specific tests
+pnpm run test:phase5:cache       # caching layer tests
+```
+
+**Agent & screening tests**
+```bash
+pnpm run test:agent              # agent loop dry-run test
+pnpm run test:screen             # screening pipeline test
+```
 
 ---
 
@@ -492,11 +546,26 @@ Opt-in collective intelligence — share lessons and pool outcomes, receive crow
 
 ### Setup
 
+Configure via `user-config.json` (recommended):
+```json
+{
+  "hiveMindUrl": "https://meridian-hive-api-production.up.railway.app",
+  "hiveMindApiKey": "YOUR_TOKEN"
+}
+```
+
+Or via environment variables:
+```env
+HIVE_MIND_URL=https://meridian-hive-api-production.up.railway.app
+HIVE_MIND_API_KEY=YOUR_TOKEN
+```
+
+Or register via CLI:
 ```bash
 npx tsx -e "import('./hive-mind.ts').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
 ```
 
-Get `YOUR_TOKEN` from the private Telegram discussion. This saves your credentials to `user-config.json` automatically.
+Get `YOUR_TOKEN` from the private Telegram discussion. Credentials are saved to `user-config.json` automatically when using the CLI register method.
 
 ### Disable
 
@@ -559,6 +628,7 @@ src/
     state.ts                Position registry (state.json)
     confirmation-timers.ts  Peak / trailing-TP confirmation timer registry
     hive-mind.ts            Optional collective intelligence sync
+    connection.ts           Solana RPC connection management
   config/
     config.ts           Runtime config from user-config.json + .env
     constants.ts        Shared constants
@@ -566,19 +636,29 @@ src/
   cli/
     cli.ts              Direct CLI — every tool as a JSON subcommand
     setup.ts            Interactive setup wizard
+    colors.ts           CLI color utilities
   utils/
     cache.ts            TTL cache with periodic cleanup
+    validation.ts       Input validation helpers
+    retry.ts            Retry logic with exponential backoff
+    rate-limiter.ts     Rate limiting for API calls
+    health-check.ts     System health monitoring
+    fetch.ts            HTTP fetch wrapper with timeouts
+    errors.ts           Custom error classes
   types/                TypeScript type definitions
 
 tools/                   (sibling of src/, loaded by the executor)
   registry.ts           Tool registry
   definitions/          Tool schemas (OpenAI format)
+    management.ts       Management tool definitions
+    screening.ts        Screening tool definitions
+    data.ts             Data tool definitions
+    admin.ts            Admin tool definitions
+    index.ts            Tool definitions export
   executor.ts           Tool dispatch + safety checks
   middleware.ts         Pre/post hooks (validation, audit)
-  admin.ts              Admin tools (config, lessons, blocklists)
   discover.ts           Tool discovery helpers
   dlmm.ts               Meteora DLMM SDK wrapper
-  screening.ts          Pool discovery
   wallet.ts             SOL/token balances + Jupiter swap
   token.ts              Token info, holders, narrative
   study.ts              Top LPer study via LPAgent API
