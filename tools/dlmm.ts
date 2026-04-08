@@ -5,6 +5,7 @@ import {
   sendAndConfirmTransaction,
   type Transaction,
 } from "@solana/web3.js";
+import { Mutex } from "async-mutex";
 import BN from "bn.js";
 import bs58 from "bs58";
 import { config, getRpcUrl } from "../src/config/config.js";
@@ -41,6 +42,9 @@ import type {
 } from "../src/types/dlmm.js";
 import { registerTool } from "./registry.js";
 import { normalizeMint } from "./wallet.js";
+
+// Default slippage in basis points (1000 bps = 10%)
+const DEFAULT_SLIPPAGE_BPS = 1000;
 
 // Helper function for fetch with timeout (30 seconds)
 async function fetchWithTimeout(url: string, timeoutMs = 30000): Promise<Response> {
@@ -284,7 +288,7 @@ export async function deployPosition({
   const finalAmountY = amount_y ?? amount_sol ?? 0;
   const finalAmountX = amount_x ?? 0;
 
-  const totalYLamports = new BN(Math.floor(finalAmountY * 1e9));
+  const totalYLamports = new BN((finalAmountY * 1e9).toFixed(0), 10);
   // For X, we assume it's also 9 decimals for now, or we'd need to fetch mint decimals.
   // Most Meteora pools base tokens are 6 or 9. To be safe, we should fetch.
   let totalXLamports = new BN(0);
@@ -293,7 +297,7 @@ export async function deployPosition({
       new PublicKey(pool.lbPair.tokenXMint)
     );
     const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals ?? 9;
-    totalXLamports = new BN(Math.floor(finalAmountX * 10 ** decimals));
+    totalXLamports = new BN((finalAmountX * 10 ** decimals).toFixed(0), 10);
   }
 
   const totalBins = activeBinsBelow + activeBinsAbove;
@@ -340,7 +344,7 @@ export async function deployPosition({
         totalXAmount: totalXLamports,
         totalYAmount: totalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
@@ -356,7 +360,7 @@ export async function deployPosition({
         totalXAmount: totalXLamports,
         totalYAmount: totalYLamports,
         strategy: { maxBinId, minBinId, strategyType },
-        slippage: 1000, // 10% in bps
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet, newPosition]);
       txHashes.push(txHash);
@@ -524,9 +528,9 @@ export async function addLiquidity({
 
     // Convert to lamports
     const totalXLamports =
-      finalAmountX > 0 ? new BN(Math.floor(finalAmountX * 10 ** decimalsX)) : new BN(0);
+      finalAmountX > 0 ? new BN((finalAmountX * 10 ** decimalsX).toFixed(0), 10) : new BN(0);
     const totalYLamports =
-      finalAmountY > 0 ? new BN(Math.floor(finalAmountY * 10 ** decimalsY)) : new BN(0);
+      finalAmountY > 0 ? new BN((finalAmountY * 10 ** decimalsY).toFixed(0), 10) : new BN(0);
 
     // Handle single-sided liquidity
     const finalXLamports = totalXLamports;
@@ -556,7 +560,7 @@ export async function addLiquidity({
         totalXAmount: finalXLamports,
         totalYAmount: finalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
       for (let i = 0; i < addTxArray.length; i++) {
@@ -572,7 +576,7 @@ export async function addLiquidity({
         totalXAmount: finalXLamports,
         totalYAmount: finalYLamports,
         strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+        slippage: DEFAULT_SLIPPAGE_BPS,
       });
       const txHash = await sendAndConfirmTransaction(getConnection(), addTx, [wallet]);
       txHashes.push(txHash);
@@ -619,32 +623,11 @@ let _positionsCacheAt = 0;
 let _positionsInflight: Promise<PositionsResult> | null = null;
 
 // ─── Position Cache Lock ───────────────────────────────────────
-// Simple async mutex to prevent race conditions on cache state
-let _positionsCacheLock: Promise<void> = Promise.resolve();
-let _positionsCacheLockResolve: (() => void) | null = null;
-
-async function acquirePositionsCacheLock(): Promise<void> {
-  // Wait for current lock to release, then create new lock
-  await _positionsCacheLock;
-  _positionsCacheLock = new Promise((resolve) => {
-    _positionsCacheLockResolve = resolve;
-  });
-}
-
-function releasePositionsCacheLock(): void {
-  if (_positionsCacheLockResolve) {
-    _positionsCacheLockResolve();
-    _positionsCacheLockResolve = null;
-  }
-}
+// Async mutex to prevent race conditions on cache state
+const positionsCacheMutex = new Mutex();
 
 async function withPositionsCacheLock<T>(fn: () => Promise<T>): Promise<T> {
-  await acquirePositionsCacheLock();
-  try {
-    return await fn();
-  } finally {
-    releasePositionsCacheLock();
-  }
+  return positionsCacheMutex.runExclusive(fn);
 }
 
 // ─── Fetch DLMM PnL API for all positions in a pool ────────────

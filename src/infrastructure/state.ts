@@ -88,7 +88,15 @@ function save(state: PositionState): void {
   try {
     state.lastUpdated = new Date().toISOString();
     const tmpFile = `${STATE_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
+    const data = JSON.stringify(state, null, 2);
+
+    // Write to temp file
+    fs.writeFileSync(tmpFile, data);
+
+    // Ensure data is synced to disk before renaming (crash safety)
+    const fd = fs.openSync(tmpFile, "r+");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
 
     // Retry rename for Windows compatibility (EBUSY errors)
     const maxRetries = 3;
@@ -101,12 +109,10 @@ function save(state: PositionState): void {
         const code = (err as { code?: string }).code;
         const isBusy = code === "EBUSY" || code === "EPERM" || code === "EACCES";
         if (isBusy && attempt < maxRetries) {
-          // Small non-blocking delay before retry using Atomics.wait
-          // This pauses the current thread briefly without consuming CPU
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
           continue;
         }
-        throw err; // Final attempt or non-busy error
+        throw err;
       }
     }
   } catch (err) {
