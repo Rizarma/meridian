@@ -258,12 +258,12 @@ function createTypingIndicator(): TypingIndicator {
   async function tick(): Promise<void> {
     if (stopped) return;
     await postTelegram("sendChatAction", { action: "typing" });
-    timer = setTimeout(() => {
-      tick().catch(() => null);
+    timer = setTimeout((): void => {
+      tick().catch((): null => null);
     }, 4000);
   }
 
-  tick().catch(() => null);
+  tick().catch((): null => null);
 
   return {
     stop() {
@@ -385,8 +385,8 @@ export async function createLiveMessage(
       state.flushRequested = true;
       return;
     }
-    state.flushTimer = setTimeout(() => {
-      state.flushPromise = flushNow().catch(() => undefined);
+    state.flushTimer = setTimeout((): void => {
+      state.flushPromise = flushNow().catch((): undefined => undefined);
     }, delay);
   }
 

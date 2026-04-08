@@ -115,7 +115,7 @@ export async function discoverPools({
               const t = Array.isArray(d) ? d[0] : d;
               return { pool: p.pool, dev: t?.dev || null };
             })
-            .catch(() => ({ pool: p.pool, dev: null }))
+            .catch((): { pool: string; dev: null } => ({ pool: p.pool, dev: null }))
         )
       );
       const devMap: Record<string, string | null> = {};
