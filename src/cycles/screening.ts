@@ -21,6 +21,7 @@ import type {
   LiveMessageHandler,
   ReconCandidate,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
 
 // Module-level state for race condition guards
 let _screeningBusy = false;
@@ -124,8 +125,8 @@ export async function runScreeningCycle(
         return screenReport;
       }
     } catch (e) {
-      log("cron_error", `Screening pre-check failed: ${(e as Error).message}`);
-      screenReport = `Screening pre-check failed: ${(e as Error).message}`;
+      log("cron_error", `Screening pre-check failed: ${getErrorMessage(e)}`);
+      screenReport = `Screening pre-check failed: ${getErrorMessage(e)}`;
       setBusy(false);
       return screenReport;
     }
@@ -156,7 +157,7 @@ export async function runScreeningCycle(
       const topCandidatesResult = await getTopCandidates({
         limit: config.screening.maxCandidatesEnriched,
       }).catch((e: unknown): null => {
-        log("screening_warn", `Failed to fetch top candidates: ${(e as Error).message}`);
+        log("screening_warn", `Failed to fetch top candidates: ${getErrorMessage(e)}`);
         return null;
       });
       const {
@@ -428,8 +429,8 @@ IMPORTANT:
       );
       screenReport = content;
     } catch (error) {
-      log("cron_error", `Screening cycle failed: ${(error as Error).message}`);
-      screenReport = `Screening cycle failed: ${(error as Error).message}`;
+      log("cron_error", `Screening cycle failed: ${getErrorMessage(error)}`);
+      screenReport = `Screening cycle failed: ${getErrorMessage(error)}`;
     } finally {
       setBusy(false);
       if (!silent && telegramEnabled()) {

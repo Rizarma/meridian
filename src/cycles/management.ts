@@ -153,7 +153,7 @@ export async function runManagementCycle(
       try {
         await trigger();
       } catch (e) {
-        log("cron_error", `Triggered screening failed: ${(e as Error).message}`);
+        log("cron_error", `Triggered screening failed: ${getErrorMessage(e)}`);
       }
       return mgmtReport;
     }
@@ -387,8 +387,8 @@ After executing, write a brief one-line result per position.
         .catch((e: Error) => log("cron_error", `Triggered screening failed: ${e.message}`));
     }
   } catch (error) {
-    log("cron_error", `Management cycle failed: ${(error as Error).message}`);
-    mgmtReport = `Management cycle failed: ${(error as Error).message}`;
+    log("cron_error", `Management cycle failed: ${getErrorMessage(error)}`);
+    mgmtReport = `Management cycle failed: ${getErrorMessage(error)}`;
   } finally {
     deps.setManagementBusy(false);
     if (!silent && telegramEnabled()) {

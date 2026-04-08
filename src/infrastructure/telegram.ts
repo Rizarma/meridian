@@ -10,6 +10,7 @@ import type {
   TelegramNotifySwap,
   TelegramUpdate,
 } from "../types/telegram.d.ts";
+import { getErrorMessage } from "../utils/errors.js";
 import { log } from "./logger.js";
 
 /**
@@ -93,7 +94,7 @@ function _saveChatId(id: string): void {
     cfg.telegramChatId = id;
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
   } catch (e) {
-    log("telegram_error", `Failed to persist chatId: ${(e as Error).message}`);
+    log("telegram_error", `Failed to persist chatId: ${getErrorMessage(e)}`);
   }
 }
 
@@ -160,7 +161,7 @@ async function postTelegram(method: string, body: Record<string, unknown>): Prom
     return await res.json();
   } catch (e) {
     // Only log if it's not a parse entities error (those are expected and handled)
-    const msg = (e as Error).message || "";
+    const msg = getErrorMessage(e);
     if (msg.includes("parse entities")) {
       log("telegram_debug", `Parse entities error: ${msg}`);
       // Continue to suppress from error level logging
@@ -480,8 +481,8 @@ async function poll(onMessage: (msg: TelegramMessage) => Promise<void>): Promise
         await onMessage(msg);
       }
     } catch (e) {
-      if (!(e as Error).message?.includes("aborted")) {
-        log("telegram_error", `Poll error: ${(e as Error).message}`);
+      if (!getErrorMessage(e).includes("aborted")) {
+        log("telegram_error", `Poll error: ${getErrorMessage(e)}`);
       }
       await sleep(5000);
     }
