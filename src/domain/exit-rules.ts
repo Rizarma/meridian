@@ -102,11 +102,7 @@ export function evaluateManagementExitRules(
   const takeProfitPct = strategyConfig?.exit?.take_profit_pct ?? mgmtConfig.takeProfitFeePct!;
 
   if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct >= takeProfitPct) {
-    return {
-      action: "CLOSE",
-      rule: 2,
-      reason: `take profit at ${takeProfitPct}% (strategy: ${strategyConfig?.name ?? "global"})`,
-    };
+    return { action: "CLOSE", rule: 2, reason: "take profit" };
   }
 
   // Rule 3: pumped far above range
