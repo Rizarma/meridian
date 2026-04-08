@@ -676,7 +676,14 @@ const cmdBriefing: Command = {
   handler: async ({ rl, deps }) => {
     await runBusy(rl, deps, async () => {
       const briefing = await generateBriefing();
-      console.log(colors.dim(`\n${briefing.replace(/<[^>]*>/g, "")}\n`));
+      // Repeatedly strip HTML tags to prevent incomplete sanitization (CodeQL fix)
+      let sanitized = briefing;
+      let prev: string;
+      do {
+        prev = sanitized;
+        sanitized = sanitized.replace(/<[^>]*>/g, "");
+      } while (sanitized !== prev);
+      console.log(colors.dim(`\n${sanitized}\n`));
     });
   },
 };
