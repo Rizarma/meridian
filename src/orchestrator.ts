@@ -32,6 +32,25 @@ import { recordActivity } from "./utils/health-check.js";
 import { isArray } from "./utils/validation.js";
 
 // ═══════════════════════════════════════════
+//  SANITIZATION HELPERS
+// ═══════════════════════════════════════════
+
+/**
+ * Sanitize a model name to prevent potential API key leakage in logs.
+ * If the model string looks like an API key (contains "sk-" or is very long),
+ * mask it and only show the last 4 characters.
+ */
+function sanitizeModelName(model: string): string {
+  if (!model) return model;
+  // If it looks like an API key (contains "sk-" or is longer than 40 chars), mask it
+  if (model.includes("sk-") || model.length > 40) {
+    const last4 = model.slice(-4);
+    return `${model.slice(0, 8)}...${last4}`;
+  }
+  return model;
+}
+
+// ═══════════════════════════════════════════
 //  GLOBAL STATE
 // ═══════════════════════════════════════════
 let _cronTasks: CronTaskList = [];
@@ -420,7 +439,7 @@ export async function start(): Promise<void> {
     log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
     log(
       "startup",
-      `Models: general=${config.llm.generalModel}, screening=${config.llm.screeningModel}, management=${config.llm.managementModel}`
+      `Models: general=${sanitizeModelName(config.llm.generalModel)}, screening=${sanitizeModelName(config.llm.screeningModel)}, management=${sanitizeModelName(config.llm.managementModel)}`
     );
     await startNonTTY(replDeps);
   }
