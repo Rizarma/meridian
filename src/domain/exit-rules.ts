@@ -17,6 +17,7 @@ import type {
   PositionData,
   TrackedPosition,
 } from "../types/state.js";
+import type { Strategy } from "../types/strategy.js";
 
 /**
  * Evaluate all exit conditions for a position and return an exit action if triggered.
@@ -25,7 +26,8 @@ import type {
 export function evaluateExitConditions(
   position: TrackedPosition,
   positionData: PositionData,
-  mgmtConfig: ManagementConfig
+  mgmtConfig: ManagementConfig,
+  strategyConfig?: Strategy | null
 ): ExitAction | null {
   const {
     pnl_pct: currentPnlPct,
@@ -87,7 +89,8 @@ export function evaluateExitConditions(
 export function evaluateManagementExitRules(
   position: EnrichedPosition,
   mgmtConfig: ManagementConfig,
-  pnlSuspect: boolean
+  pnlSuspect: boolean,
+  strategyConfig?: Strategy | null
 ): ActionDecision | null {
   // Rule 1: stop loss
   if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct <= mgmtConfig.stopLossPct!) {
@@ -95,7 +98,10 @@ export function evaluateManagementExitRules(
   }
 
   // Rule 2: take profit
-  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct >= mgmtConfig.takeProfitFeePct!) {
+  // Use strategy-specific take_profit_pct if available, otherwise fall back to global config
+  const takeProfitPct = strategyConfig?.exit?.take_profit_pct ?? mgmtConfig.takeProfitFeePct!;
+
+  if (!pnlSuspect && position.pnl_pct != null && position.pnl_pct >= takeProfitPct) {
     return { action: "CLOSE", rule: 2, reason: "take profit" };
   }
 

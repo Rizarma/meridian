@@ -3,6 +3,7 @@
  */
 
 import type { SignalSnapshot } from "./signals.js";
+import type { Strategy } from "./strategy.js";
 
 export interface BinRange {
   min?: number;
@@ -17,6 +18,7 @@ export interface TrackedPosition {
   pool: string;
   pool_name: string;
   strategy: string;
+  strategy_config?: Strategy | null; // Full strategy object stored at deploy time
   bin_range: BinRange;
   amount_sol: number;
   amount_x: number;

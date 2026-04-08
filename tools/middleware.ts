@@ -13,6 +13,7 @@
 import { config } from "../src/config/config.js";
 import { recordPerformance } from "../src/domain/lessons.js";
 import { addPoolNote } from "../src/domain/pool-memory.js";
+import { getActiveStrategy, getStrategy } from "../src/domain/strategy-library.js";
 import { log, logAction } from "../src/infrastructure/logger.js";
 import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
 import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
@@ -25,6 +26,7 @@ import type {
 import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
+import type { Strategy } from "../src/types/strategy.js";
 import type { TokenBalance, WalletBalances } from "../src/types/wallet.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
@@ -226,11 +228,17 @@ export const persistenceMiddleware: MiddlewareFn = async (tool, args, _role, nex
   // After deploy_position: track the new position
   if (tool.name === "deploy_position") {
     const deployArgs = args as DeployPositionArgs & { pool_name?: string };
+
+    // Load full strategy config to store with position
+    const activeStrategy = await getActiveStrategy();
+    const strategyConfig = activeStrategy;
+
     trackPosition({
       position: result.position as string,
       pool: result.pool as string,
       pool_name: (result.pool_name as string) || deployArgs.pool_name || "unknown",
       strategy: (result.strategy as string) || "spot",
+      strategy_config: strategyConfig,
       bin_range: result.bin_range as { min: number; max: number; active?: number },
       bin_step: (result.bin_step as number) || 80,
       volatility: (result.volatility as number) || 0,
@@ -324,6 +332,60 @@ async function handleAutoSwapAfterClaim(baseMint: string): Promise<void> {
 }
 
 /**
+ * Validate that deploy args comply with active strategy constraints.
+ * Returns { pass: true } if valid, { pass: false, reason: string } if violated.
+ */
+async function validateStrategyCompliance(
+  deployArgs: DeployPositionArgs
+): Promise<SafetyCheckResult> {
+  // Get active strategy
+  const activeStrategy = await getActiveStrategy();
+  if (!activeStrategy) {
+    return { pass: true }; // No active strategy, no validation needed
+  }
+
+  const strategy = activeStrategy;
+
+  // Normalize values before comparison to handle undefined/null/string edge cases
+  const amountY = Number(deployArgs.amount_y ?? 0);
+  const amountX = Number(deployArgs.amount_x ?? 0);
+
+  // Validate 1: single_side constraint
+  if (strategy.entry?.single_side) {
+    if (strategy.entry.single_side === "token" && amountY !== 0) {
+      return {
+        pass: false,
+        reason: `Strategy '${strategy.name}' requires single_side: "token" with amount_y=0. Received amount_y=${deployArgs.amount_y}`,
+      };
+    }
+    if (strategy.entry.single_side === "sol" && amountX !== 0) {
+      return {
+        pass: false,
+        reason: `Strategy '${strategy.name}' requires single_side: "sol" with amount_x=0. Received amount_x=${deployArgs.amount_x}`,
+      };
+    }
+  }
+
+  // Validate 2: lp_strategy match (if not "any" or "mixed")
+  // Use active strategy if deployArgs.strategy is not provided
+  const effectiveStrategy = deployArgs.strategy ?? strategy.lp_strategy;
+  if (
+    strategy.lp_strategy &&
+    strategy.lp_strategy !== "any" &&
+    strategy.lp_strategy !== "mixed" &&
+    effectiveStrategy !== strategy.lp_strategy
+  ) {
+    return {
+      pass: false,
+      reason: `Strategy '${strategy.name}' requires lp_strategy: "${strategy.lp_strategy}", but deploy used: "${effectiveStrategy}"`,
+    };
+  }
+
+  // All validations passed
+  return { pass: true };
+}
+
+/**
  * Run safety checks before executing write operations.
  */
 async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheckResult> {
@@ -375,15 +437,23 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
 
       // Check amount limits
       const amountY = deployArgs.amount_y ?? deployArgs.amount_sol ?? 0;
-      if (amountY <= 0) {
+      const amountX = deployArgs.amount_x ?? 0;
+
+      // Allow single-sided token entry (amount_y=0) if strategy permits it
+      const activeStrategy = await getActiveStrategy();
+      const allowsSingleSidedToken = activeStrategy?.entry?.single_side === "token";
+      const isSingleSidedToken = allowsSingleSidedToken && amountY === 0 && amountX > 0;
+
+      if (amountY <= 0 && !isSingleSidedToken) {
         return {
           pass: false,
-          reason: `Must provide a positive SOL amount (amount_y).`,
+          reason: `Must provide a positive SOL amount (amount_y), or use a single-sided token strategy.`,
         };
       }
 
       const minDeploy = Math.max(0.1, config.management.deployAmountSol);
-      if (amountY < minDeploy) {
+      // Skip minDeploy check for single-sided token entries (amount_y=0 is intentional)
+      if (!isSingleSidedToken && amountY < minDeploy) {
         return {
           pass: false,
           reason: `Amount ${amountY} SOL is below the minimum deploy amount (${minDeploy} SOL). Use at least ${minDeploy} SOL.`,
@@ -409,11 +479,75 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
         }
       }
 
+      // Strategy compliance check
+      const strategyCheck = await validateStrategyCompliance(deployArgs);
+      if (!strategyCheck.pass) {
+        return strategyCheck;
+      }
+
       return { pass: true };
     }
 
     case "swap_token": {
       // Basic check — handled inside swapToken itself
+      return { pass: true };
+    }
+
+    case "add_liquidity": {
+      const addArgs = args as {
+        position_address?: string;
+        pool_address?: string;
+        amount_x?: number;
+        amount_y?: number;
+      };
+
+      if (!addArgs.position_address || !addArgs.pool_address) {
+        return { pass: false, reason: "position_address and pool_address are required" };
+      }
+
+      const addAmountY = addArgs.amount_y ?? 0;
+      const addAmountX = addArgs.amount_x ?? 0;
+      if (addAmountX <= 0 && addAmountY <= 0) {
+        return {
+          pass: false,
+          reason: "At least one amount (amount_x or amount_y) must be > 0",
+        };
+      }
+
+      // Check SOL balance to cover gas for the add liquidity transaction
+      if (process.env.DRY_RUN !== "true") {
+        const balance = (await getWalletBalances()) as WalletBalances;
+        const gasReserve = config.management.gasReserve ?? 0.01;
+        if (balance.sol < gasReserve) {
+          return {
+            pass: false,
+            reason: `Insufficient SOL for gas: have ${balance.sol} SOL, need at least ${gasReserve} SOL reserve`,
+          };
+        }
+      }
+
+      return { pass: true };
+    }
+
+    case "withdraw_liquidity": {
+      const withdrawArgs = args as {
+        position_address?: string;
+        pool_address?: string;
+        bps?: number;
+      };
+
+      if (!withdrawArgs.position_address || !withdrawArgs.pool_address) {
+        return { pass: false, reason: "position_address and pool_address are required" };
+      }
+
+      const bps = withdrawArgs.bps ?? 10000;
+      if (bps < 1 || bps > 10000) {
+        return {
+          pass: false,
+          reason: `Invalid bps: ${bps}. Must be between 1 and 10000`,
+        };
+      }
+
       return { pass: true };
     }
 
