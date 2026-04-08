@@ -24,6 +24,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../types/index.js";
+import { getErrorMessage } from "../utils/errors.js";
 import { INTENTS } from "./intent.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
@@ -305,77 +306,95 @@ export async function agentLoop(
       // Execute each tool call in parallel
       const toolResults: ToolResult[] = await Promise.all(
         msg.tool_calls.map(async (toolCall) => {
-          const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
-          let functionArgs: Record<string, unknown>;
-
           try {
-            functionArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-          } catch {
-            try {
-              functionArgs = JSON.parse(jsonrepair(toolCall.function.arguments)) as Record<
-                string,
-                unknown
-              >;
-              log("warn", `Repaired malformed JSON args for ${functionName}`);
-            } catch (parseError) {
-              log(
-                "error",
-                `Failed to parse args for ${functionName}: ${(parseError as Error).message}`
-              );
-              functionArgs = {};
-            }
-          }
+            const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
+            let functionArgs: Record<string, unknown>;
 
-          // Block once-per-session tools from firing a second time
-          if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
-            log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
+            try {
+              functionArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+            } catch {
+              try {
+                const repaired = jsonrepair(toolCall.function.arguments);
+                // Validate repaired JSON is safe (no prototype pollution)
+                if (repaired.includes("__proto__") || repaired.includes("constructor")) {
+                  throw new Error("Potentially malicious JSON detected");
+                }
+                functionArgs = JSON.parse(repaired) as Record<string, unknown>;
+                log("warn", `Repaired malformed JSON args for ${functionName}`);
+              } catch (parseError) {
+                log(
+                  "error",
+                  `Failed to parse args for ${functionName}: ${getErrorMessage(parseError)}`
+                );
+                functionArgs = {};
+              }
+            }
+
+            // Block once-per-session tools from firing a second time
+            if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
+              log(
+                "agent",
+                `Blocked duplicate ${functionName} call — already executed this session`
+              );
+              await onToolFinish?.({
+                name: functionName,
+                args: functionArgs,
+                result: {
+                  blocked: true,
+                  reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+                },
+                success: false,
+                step,
+              });
+              return {
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: JSON.stringify({
+                  blocked: true,
+                  reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+                }),
+              };
+            }
+
+            await onToolStart?.({ name: functionName, args: functionArgs, step });
+            const result = await executeTool(functionName, functionArgs);
             await onToolFinish?.({
               name: functionName,
               args: functionArgs,
-              result: {
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-              },
-              success: false,
+              result,
+              success: result?.success !== false && !result?.error && !result?.blocked,
               step,
             });
+
+            // Lock deploy_position after first attempt regardless of outcome — retrying is never right
+            // For close/swap: only lock on success so genuine failures can be retried
+            if (NO_RETRY_TOOLS.has(functionName)) firedOnce.add(functionName);
+            else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
+              firedOnce.add(functionName);
+
+            return {
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(result),
+            };
+          } catch (error) {
+            const errorMessage = getErrorMessage(error);
+            log("error", `Tool ${toolCall.function.name} failed: ${errorMessage}`);
             return {
               role: "tool",
               tool_call_id: toolCall.id,
               content: JSON.stringify({
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+                error: errorMessage,
+                success: false,
               }),
             };
           }
-
-          await onToolStart?.({ name: functionName, args: functionArgs, step });
-          const result = await executeTool(functionName, functionArgs);
-          await onToolFinish?.({
-            name: functionName,
-            args: functionArgs,
-            result,
-            success: result?.success !== false && !result?.error && !result?.blocked,
-            step,
-          });
-
-          // Lock deploy_position after first attempt regardless of outcome — retrying is never right
-          // For close/swap: only lock on success so genuine failures can be retried
-          if (NO_RETRY_TOOLS.has(functionName)) firedOnce.add(functionName);
-          else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
-            firedOnce.add(functionName);
-
-          return {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
-          };
         })
       );
 
       messages.push(...toolResults);
     } catch (error) {
-      log("error", `Agent loop error at step ${step}: ${(error as Error).message}`);
+      log("error", `Agent loop error at step ${step}: ${getErrorMessage(error)}`);
 
       // If it's a rate limit, wait and retry
       if ((error as { status?: number }).status === 429) {
