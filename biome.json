@@ -26,7 +26,11 @@
       "recommended": true,
       "correctness": {
         "noUnusedVariables": "error",
-        "noUndeclaredVariables": "error"
+        "noUndeclaredVariables": "error",
+        "noUnresolvedImports": "error",
+        "noUnusedImports": "error",
+        "noUnusedPrivateClassMembers": "error",
+        "noUndeclaredDependencies": "error"
       },
       "suspicious": {
         "noExplicitAny": "warn",

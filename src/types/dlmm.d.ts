@@ -1,7 +1,7 @@
 // types/dlmm.d.ts
 // DLMM (Meteora) pool and position types
 
-import type { BN } from "bn.js";
+import type BN from "bn.js";
 import type { PublicKey } from "@solana/web3.js";
 
 // ─── SDK Types (external - use any with JSDoc) ─────────────────
