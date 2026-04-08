@@ -420,7 +420,7 @@ switch (subcommand as CLISubcommand) {
             : null,
         pool_memory: recallForPool(pool.pool),
       });
-      await new Promise((r: (value: void) => void) => setTimeout(r, 150)); // avoid 429s
+      await new Promise<void>((r) => setTimeout(() => r(), 150)); // avoid 429s
     }
 
     const output: CandidatesOutput = { candidates: enriched, total_screened: raw.total_screened };

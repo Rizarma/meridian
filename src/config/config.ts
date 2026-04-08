@@ -381,9 +381,9 @@ registerTool({
 
     // Build case-insensitive lookup
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const CONFIG_MAP_LOWER: Record<string, any> = Object.entries(CONFIG_MAP)
-      .map(([k, v]) => [k.toLowerCase(), [k, v]])
-      .reduce((acc, [k, v]) => ({ ...acc, [k as string]: v }), {});
+    const CONFIG_MAP_LOWER: Record<string, any> = Object.fromEntries(
+      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]])
+    );
 
     for (const [key, val] of Object.entries(changes)) {
       const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];

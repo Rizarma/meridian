@@ -351,7 +351,8 @@ export async function getTokenHolders({
 
     await Promise.all(
       matchedHolders.map(async (h) => {
-        const wallet = smartWalletMap.get(h.addr)!;
+        const wallet = smartWalletMap.get(h.addr);
+        if (!wallet) return;
         const pct = totalSupply
           ? parseFloat(((Number(h.amount) / totalSupply) * 100).toFixed(4))
           : null;

@@ -34,6 +34,7 @@ import type {
   SyncResult,
   ThresholdConsensus,
 } from "../types/hive-mind.js";
+import { getErrorMessage } from "../utils/errors.js";
 
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 const GET_TIMEOUT_MS = 5_000;
@@ -218,8 +219,8 @@ export async function syncToHive(): Promise<void> {
     try {
       const { getPerformanceSummary } = await import("../domain/lessons.js");
       agentStats = getPerformanceSummary();
-    } catch (e: any) {
-      console.log("[hive]", `Could not load agent stats: ${e.message}`);
+    } catch (e) {
+      console.log("[hive]", `Could not load agent stats: ${getErrorMessage(e)}`);
     }
 
     // ── POST to /api/sync ───────────────────────────
@@ -252,8 +253,8 @@ export async function syncToHive(): Promise<void> {
       "[hive]",
       `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`
     );
-  } catch (e: any) {
-    console.log("[hive]", `Sync error: ${e.message}`);
+  } catch (e) {
+    console.log("[hive]", `Sync error: ${getErrorMessage(e)}`);
   }
 }
 
@@ -403,8 +404,8 @@ export async function formatPoolConsensusForPrompt(poolAddresses: string[]): Pro
     }
 
     return output;
-  } catch (e: any) {
-    console.log("[hive]", `formatPoolConsensusForPrompt error: ${e.message}`);
+  } catch (e) {
+    console.log("[hive]", `formatPoolConsensusForPrompt error: ${getErrorMessage(e)}`);
     return "";
   }
 }

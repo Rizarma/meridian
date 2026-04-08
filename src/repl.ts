@@ -676,7 +676,7 @@ const cmdThresholds: Command = {
 const cmdLearn: Command = {
   name: "/learn",
   description: "Study top LPers from pools and save lessons",
-  handler: async ({ rl, deps, args, rawInput }) => {
+  handler: async ({ rl, deps, args, rawInput: _rawInput }) => {
     await runBusy(rl, deps, async () => {
       const poolArg = args[0] || null;
 
