@@ -137,8 +137,10 @@ export async function register(url: string, registrationToken: string): Promise<
   const { agent_id, api_key } = (await res.json()) as RegistrationResult;
   writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
-  console.log("[hive]", `API key: ${api_key}`);
-  console.log("[hive]", `Save this key — it will NOT be shown again.`);
+  console.log(
+    "[hive]",
+    "API key saved to user-config.json — view it there (will NOT be shown again)"
+  );
 
   return api_key;
 }
