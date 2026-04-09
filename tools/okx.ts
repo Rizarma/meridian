@@ -247,7 +247,7 @@ export async function getPriceInfo(
   tokenAddress: string,
   chainIndex = CHAIN_SOLANA
 ): Promise<OKXPriceResult | null> {
-  const data = (await okxPost("/api/v6/dex/market/price-info", [
+  const data = (await okxPost("/api/v6/dex/market/price", [
     { chainIndex, tokenContractAddress: tokenAddress },
   ])) as OKXPriceData | OKXPriceData[];
   const d = Array.isArray(data) ? data[0] : data;
