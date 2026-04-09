@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PROJECT_ROOT } from "../config/paths.js";
+import { LESSONS_FILE, PROJECT_ROOT } from "../config/paths.js";
 import { getPerformanceSummary } from "../domain/lessons.js";
 import type {
   LessonsFile,
@@ -12,7 +12,6 @@ import type {
 import { log } from "./logger.js";
 
 const STATE_FILE = path.join(PROJECT_ROOT, "state.json");
-const LESSONS_FILE = path.join(PROJECT_ROOT, "lessons.json");
 
 export async function generateBriefing(): Promise<string> {
   const state = loadJson<StateFile>(STATE_FILE) || { positions: {}, recentEvents: [] };
