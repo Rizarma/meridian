@@ -26,6 +26,8 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 
 **Data files:** `lessons.json`, `pool-memory.json`, etc. are stored in project root by default. Override with `MERIDIAN_ROOT` env var.
 
+**Timezone:** Set `TZ` env var to change log timestamps from UTC (e.g., `TZ=Asia/Jakarta`). File rotation dates remain UTC.
+
 ## Detailed guidelines
 
 - [Architecture](.claude/docs/architecture.md) — source layout, position lifecycle, race conditions
