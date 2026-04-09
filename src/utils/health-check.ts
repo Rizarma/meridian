@@ -102,11 +102,16 @@ async function checkApi(
  * Run full health check
  */
 export async function runHealthCheck(): Promise<HealthStatus> {
+  const heliusKey = process.env.HELIUS_API_KEY;
+  const heliusUrl = heliusKey
+    ? `https://api.helius.xyz/v0/status?api-key=${heliusKey}`
+    : "https://api.helius.xyz/v0/status";
+
   const [rpc, wallet, jupiter, helius, datapi] = await Promise.all([
     checkRpc(),
     Promise.resolve(checkWallet()),
     checkApi("jupiter", "https://api.jup.ag/price/v3"),
-    checkApi("helius", "https://api.helius.xyz/v0/status"),
+    checkApi("helius", heliusUrl),
     checkApi("datapi", "https://api.datapi.xyz/health"),
   ]);
 
