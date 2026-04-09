@@ -49,11 +49,9 @@
   "takeProfitFeePct": 5,
   "minFeePerTvl24h": 7,
   "minAgeBeforeYieldCheck": 60,
-  "trailingTakeProfit": true,
   "trailingTriggerPct": 3,
   "trailingDropPct": 1.5,
   "pnlSanityMaxDiffPct": 5,
-  "solMode": false,
 
   "managementIntervalMin": 10,
   "screeningIntervalMin": 30,
@@ -66,14 +64,21 @@
   "screeningModel": "minimax/minimax-m2.5",
   "generalModel": "minimax/minimax-m2.7",
 
-  "darwinEnabled": true,
-  "darwinWindowDays": 60,
-  "darwinRecalcEvery": 5,
-  "darwinBoost": 1.05,
-  "darwinDecay": 0.95,
-  "darwinFloor": 0.3,
-  "darwinCeiling": 2.5,
-  "darwinMinSamples": 10,
+  "features": {
+    "darwinEvolution": true,
+    "trailingTakeProfit": true,
+    "solMode": false,
+    "hiveMind": false,
+    "okx": false
+  },
+  "darwin": {
+    "windowDays": 60,
+    "minSamples": 10,
+    "boostFactor": 1.5,
+    "decayFactor": 0.95,
+    "weightFloor": 0.5,
+    "weightCeiling": 2.0
+  },
   "telegramChatId": "",
   "hiveMindUrl": "",
   "hiveMindApiKey": ""

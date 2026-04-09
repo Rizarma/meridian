@@ -105,18 +105,15 @@ Runtime mutations go through the `update_config` tool, which:
 
 ## Darwinian signal weights
 
-Flat keys (not dotted).
-
 | Key | Default | Description |
 |-----|---------|-------------|
-| `darwinEnabled` | `true` | Enable signal-weight evolution |
-| `darwinWindowDays` | `60` | Lookback window for performance data |
-| `darwinMinSamples` | `10` | Minimum samples before a signal influences scoring |
-| `darwinRecalcEvery` | `5` | Recalculate weights every N closed positions |
-| `darwinBoost` | `1.05` | Multiplier applied to winning signals |
-| `darwinDecay` | `0.95` | Multiplier applied to losing signals |
-| `darwinFloor` | `0.3` | Minimum allowed weight |
-| `darwinCeiling` | `2.5` | Maximum allowed weight |
+| `features.darwinEvolution` | `false` | Enable signal-weight evolution |
+| `darwin.windowDays` | `30` | Lookback window for performance data (days) |
+| `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwin.boostFactor` | `1.5` | Multiplier applied to winning signals |
+| `darwin.decayFactor` | `0.95` | Multiplier applied to losing signals |
+| `darwin.weightFloor` | `0.5` | Minimum allowed weight |
+| `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
 
 ## LLM
 
