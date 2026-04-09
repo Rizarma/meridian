@@ -133,6 +133,14 @@ cp user-config.example.json user-config.json
 
 **Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
 
+**Data file locations:** By default, Meridian stores data files (`lessons.json`, `pool-memory.json`, `signal-weights.json`, etc.) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
+
+```env
+MERIDIAN_ROOT=/path/to/custom/data/directory
+```
+
+If not set, the project root is auto-detected by locating `package.json`.
+
 See [Config reference](#config-reference) below.
 
 ### 3. Run
