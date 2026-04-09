@@ -6,6 +6,7 @@ import { getWalletBalances } from "../../tools/wallet.js";
 import { agentLoop } from "../agent/agent.js";
 import { computeDeployAmount, config } from "../config/config.js";
 import { recallForPool } from "../domain/pool-memory.js";
+import { loadWeights } from "../domain/signal-weights.js";
 import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
 import { log } from "../infrastructure/logger.js";
 import {
@@ -27,6 +28,87 @@ import { getErrorMessage } from "../utils/errors.js";
 let _screeningBusy = false;
 let _screeningLastTriggered = 0;
 const screeningMutex = new Mutex();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Weighted Candidate Scoring
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ScoredCandidate {
+  candidate: ReconCandidate;
+  score: number;
+  activeBin: number | null;
+}
+
+/**
+ * Compute a weighted composite score for a candidate based on signal weights.
+ * Higher score = better candidate based on historical performance.
+ */
+function computeCandidateScore(candidate: ReconCandidate, weights: Record<string, number>): number {
+  const { pool, sw, n } = candidate;
+  let score = 0;
+
+  // Normalize and weight numeric signals (0-1 scale * weight)
+  // organic_score: 0-100 scale
+  if (pool.organic_score != null) {
+    score += (pool.organic_score / 100) * (weights.organic_score ?? 1.0);
+  }
+
+  // fee_tvl_ratio: typically 0-5%, normalize to 0-1 (cap at 5%)
+  if (pool.fee_active_tvl_ratio != null) {
+    const normalizedFeeTvl = Math.min(pool.fee_active_tvl_ratio / 5, 1);
+    score += normalizedFeeTvl * (weights.fee_tvl_ratio ?? 1.0);
+  }
+
+  // volume: log scale, normalize (cap at $1M)
+  if (pool.volume_window != null && pool.volume_window > 0) {
+    const normalizedVol = Math.min(Math.log10(pool.volume_window) / 6, 1);
+    score += normalizedVol * (weights.volume ?? 1.0);
+  }
+
+  // mcap: log scale, normalize (sweet spot $100K-$10M)
+  if (pool.mcap != null && pool.mcap > 0) {
+    const normalizedMcap = Math.min(Math.max(Math.log10(pool.mcap) / 8, 0), 1);
+    score += normalizedMcap * (weights.mcap ?? 1.0);
+  }
+
+  // holders: normalize (cap at 10K)
+  if (pool.holders != null) {
+    const normalizedHolders = Math.min(pool.holders / 10000, 1);
+    score += normalizedHolders * (weights.holder_count ?? 1.0);
+  }
+
+  // volatility: inverted — moderate volatility is good (2-5 range)
+  if (pool.volatility != null) {
+    // Ideal volatility: 2-5, score peaks at 3.5
+    const volScore = Math.max(0, 1 - Math.abs(pool.volatility - 3.5) / 5);
+    score += volScore * (weights.volatility ?? 1.0);
+  }
+
+  // Boolean signals
+  const smartWalletResult = sw as { in_pool?: Array<{ name: string }> } | null;
+  if (smartWalletResult?.in_pool?.length) {
+    score += (weights.smart_wallets_present ?? 1.0) * 0.5; // bonus for smart wallets
+  }
+
+  // Narrative quality (categorical)
+  const narrative = (n as { narrative?: string; quality?: string } | null)?.narrative;
+  if (narrative && narrative.length > 50) {
+    // Simple heuristic: longer, specific narrative = better
+    score += (weights.narrative_quality ?? 1.0) * 0.3;
+  }
+
+  // Risk penalties (multiplicative)
+  if (pool.is_rugpull) score *= 0.3;
+  if (pool.is_wash) score *= 0.1;
+  if (pool.risk_level != null && pool.risk_level >= 4) score *= 0.7;
+  if (pool.bundle_pct != null && pool.bundle_pct > 40) score *= 0.8;
+
+  // OKX bullish tags bonus
+  if (pool.smart_money_buy) score *= 1.1;
+  if (pool.dev_sold_all) score *= 1.05;
+
+  return Math.round(score * 1000) / 1000;
+}
 
 /** Strip reasoning blocks that some models leak into output */
 function stripThink(text: string | null | undefined): string {
@@ -270,78 +352,103 @@ export async function runScreeningCycle(
         passing.map(({ pool }) => getActiveBin({ pool_address: pool.pool }))
       );
 
-      // Build compact candidate blocks
-      const candidateBlocks = passing.map(({ pool, sw, n, ti, mem }, i) => {
-        const tokenInfo = ti as {
-          results?: Array<{
-            audit?: { bot_holders_pct?: number; top_holders_pct?: number };
-            global_fees_sol?: number;
-            launchpad?: string;
-            stats_1h?: { price_change?: number; net_buyers?: number };
-          }>;
-        } | null;
-        const botPct = tokenInfo?.results?.[0]?.audit?.bot_holders_pct ?? "?";
-        const top10Pct = tokenInfo?.results?.[0]?.audit?.top_holders_pct ?? "?";
-        const feesSol = tokenInfo?.results?.[0]?.global_fees_sol ?? "?";
-        const launchpad = tokenInfo?.results?.[0]?.launchpad ?? null;
-        const priceChange = tokenInfo?.results?.[0]?.stats_1h?.price_change;
-        const netBuyers = tokenInfo?.results?.[0]?.stats_1h?.net_buyers;
-        const activeBinResult = activeBinResults[i];
-        const activeBin =
-          activeBinResult?.status === "fulfilled"
-            ? (activeBinResult.value as { binId?: number } | null)?.binId
-            : null;
+      // ═══════════════════════════════════════════════════════════════════════
+      // WEIGHTED SCORING & RANKING
+      // ═══════════════════════════════════════════════════════════════════════
+      const weights = loadWeights().weights;
 
-        // OKX signals
-        const okxParts = [
-          pool.risk_level != null ? `risk=${pool.risk_level}` : null,
-          pool.bundle_pct != null ? `bundle=${pool.bundle_pct}%` : null,
-          pool.sniper_pct != null ? `sniper=${pool.sniper_pct}%` : null,
-          pool.suspicious_pct != null ? `suspicious=${pool.suspicious_pct}%` : null,
-          pool.new_wallet_pct != null ? `new_wallets=${pool.new_wallet_pct}%` : null,
-          pool.is_rugpull != null ? `rugpull=${pool.is_rugpull ? "YES" : "NO"}` : null,
-          pool.is_wash != null ? `wash=${pool.is_wash ? "YES" : "NO"}` : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
-        const okxUnavailable = !okxParts && pool.price_vs_ath_pct == null;
-
-        const okxTags = [
-          pool.smart_money_buy ? "smart_money_buy" : null,
-          pool.kol_in_clusters ? "kol_in_clusters" : null,
-          pool.dex_boost ? "dex_boost" : null,
-          pool.dex_screener_paid ? "dex_screener_paid" : null,
-          pool.dev_sold_all ? "dev_sold_all(bullish)" : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
-
-        const smartWalletResult = sw as { in_pool?: Array<{ name: string }> } | null;
-
-        const block = [
-          `POOL: ${pool.name} (${pool.pool})`,
-          `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.active_tvl}, volatility=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
-          `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
-          okxParts ? `  okx: ${okxParts}` : okxUnavailable ? `  okx: unavailable` : null,
-          okxTags ? `  tags: ${okxTags}` : null,
-          pool.price_vs_ath_pct != null
-            ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
+      const scoredCandidates: ScoredCandidate[] = passing.map((candidate, i) => ({
+        candidate,
+        score: computeCandidateScore(candidate, weights),
+        activeBin:
+          activeBinResults[i]?.status === "fulfilled"
+            ? ((activeBinResults[i].value as { binId?: number } | null)?.binId ?? null)
             : null,
-          `  smart_wallets: ${smartWalletResult?.in_pool?.length ?? 0} present${smartWalletResult?.in_pool?.length ? ` → CONFIDENCE BOOST (${smartWalletResult.in_pool.map((w) => w.name).join(", ")})` : ""}`,
-          activeBin != null ? `  active_bin: ${activeBin}` : null,
-          priceChange != null
-            ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}`
-            : null,
-          n && (n as { narrative?: string }).narrative
-            ? `  narrative_untrusted: ${sanitizeUntrustedPromptText((n as { narrative?: string }).narrative, 500)}`
-            : `  narrative_untrusted: none`,
-          mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
+      }));
 
-        return block;
-      });
+      // Sort by score descending (highest first)
+      scoredCandidates.sort((a, b) => b.score - a.score);
+
+      // Log ranking for debugging
+      log(
+        "screening",
+        `Candidate ranking: ${scoredCandidates
+          .map((s) => `${s.candidate.pool.name}(${s.score})`)
+          .join(", ")}`
+      );
+
+      // Take top N candidates for LLM evaluation (limit to reduce token usage)
+      const topCandidatesForLLM = scoredCandidates.slice(0, Math.min(5, scoredCandidates.length));
+
+      // Build compact candidate blocks (only top candidates)
+      const candidateBlocks = topCandidatesForLLM.map(
+        ({ candidate: { pool, sw, n, ti, mem }, score, activeBin }) => {
+          const tokenInfo = ti as {
+            results?: Array<{
+              audit?: { bot_holders_pct?: number; top_holders_pct?: number };
+              global_fees_sol?: number;
+              launchpad?: string;
+              stats_1h?: { price_change?: number; net_buyers?: number };
+            }>;
+          } | null;
+          const botPct = tokenInfo?.results?.[0]?.audit?.bot_holders_pct ?? "?";
+          const top10Pct = tokenInfo?.results?.[0]?.audit?.top_holders_pct ?? "?";
+          const feesSol = tokenInfo?.results?.[0]?.global_fees_sol ?? "?";
+          const launchpad = tokenInfo?.results?.[0]?.launchpad ?? null;
+          const priceChange = tokenInfo?.results?.[0]?.stats_1h?.price_change;
+          const netBuyers = tokenInfo?.results?.[0]?.stats_1h?.net_buyers;
+
+          // OKX signals
+          const okxParts = [
+            pool.risk_level != null ? `risk=${pool.risk_level}` : null,
+            pool.bundle_pct != null ? `bundle=${pool.bundle_pct}%` : null,
+            pool.sniper_pct != null ? `sniper=${pool.sniper_pct}%` : null,
+            pool.suspicious_pct != null ? `suspicious=${pool.suspicious_pct}%` : null,
+            pool.new_wallet_pct != null ? `new_wallets=${pool.new_wallet_pct}%` : null,
+            pool.is_rugpull != null ? `rugpull=${pool.is_rugpull ? "YES" : "NO"}` : null,
+            pool.is_wash != null ? `wash=${pool.is_wash ? "YES" : "NO"}` : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+          const okxUnavailable = !okxParts && pool.price_vs_ath_pct == null;
+
+          const okxTags = [
+            pool.smart_money_buy ? "smart_money_buy" : null,
+            pool.kol_in_clusters ? "kol_in_clusters" : null,
+            pool.dex_boost ? "dex_boost" : null,
+            pool.dex_screener_paid ? "dex_screener_paid" : null,
+            pool.dev_sold_all ? "dev_sold_all(bullish)" : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const smartWalletResult = sw as { in_pool?: Array<{ name: string }> } | null;
+
+          const block = [
+            `POOL: ${pool.name} (${pool.pool})`,
+            `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.active_tvl}, volatility=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
+            `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
+            okxParts ? `  okx: ${okxParts}` : okxUnavailable ? `  okx: unavailable` : null,
+            okxTags ? `  tags: ${okxTags}` : null,
+            pool.price_vs_ath_pct != null
+              ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
+              : null,
+            `  smart_wallets: ${smartWalletResult?.in_pool?.length ?? 0} present${smartWalletResult?.in_pool?.length ? ` → CONFIDENCE BOOST (${smartWalletResult.in_pool.map((w) => w.name).join(", ")})` : ""}`,
+            activeBin != null ? `  active_bin: ${activeBin}` : null,
+            priceChange != null
+              ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}`
+              : null,
+            n && (n as { narrative?: string }).narrative
+              ? `  narrative_untrusted: ${sanitizeUntrustedPromptText((n as { narrative?: string }).narrative, 500)}`
+              : `  narrative_untrusted: none`,
+            mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n");
+
+          return block;
+        }
+      );
 
       const { content } = await agentLoop(
         `
@@ -349,11 +456,18 @@ SCREENING CYCLE
 ${strategyBlock}
 Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${currentBalance.sol.toFixed(3)} | Deploy: ${deployAmount} SOL
 
-PRE-LOADED CANDIDATES (${passing.length} pools):
+CANDIDATE RANKING (by weighted score from historical performance):
+${scoredCandidates.map((s, i) => `${i + 1}. ${s.candidate.pool.name}: ${s.score}`).join("\n")}
+
+TOP CANDIDATES FOR EVALUATION (${topCandidatesForLLM.length} of ${passing.length} passing pools):
 ${candidateBlocks.join("\n\n")}
 
 STEPS:
-1. Pick the best candidate based on narrative quality, smart wallets, and pool metrics.
+1. Pick the best candidate from the TOP CANDIDATES above. These are already ranked by weighted signal score based on historical profitability.
+2. Consider the SIGNAL WEIGHTS in your system prompt — signals with higher weights have proven more predictive of success.
+3. Call deploy_position (active_bin is pre-fetched above — no need to call get_active_bin).
+   bins_below = round(35 + (volatility/5)*34) clamped to [35,90]. bins_above = 0.
+4. Report in this exact format (no tables, no extra sections):
 2. Call deploy_position (active_bin is pre-fetched above — no need to call get_active_bin).
    bins_below = round(35 + (volatility/5)*55) clamped to [35,90].
 3. Report in this exact format (no tables, no extra sections):
