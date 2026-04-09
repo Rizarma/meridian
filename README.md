@@ -487,14 +487,13 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 | Field | Default | Description |
 |---|---|---|
-| `darwinEnabled` | `true` | Enable signal-weight evolution |
-| `darwinWindowDays` | `60` | Lookback window for performance data |
-| `darwinMinSamples` | `10` | Minimum samples before a signal influences scoring |
-| `darwinRecalcEvery` | `5` | Recalculate weights every N closed positions |
-| `darwinBoost` | `1.05` | Multiplier applied to winning signals |
-| `darwinDecay` | `0.95` | Multiplier applied to losing signals |
-| `darwinFloor` | `0.3` | Minimum allowed weight |
-| `darwinCeiling` | `2.5` | Maximum allowed weight |
+| `features.darwinEvolution` | `false` | Enable signal-weight evolution |
+| `darwin.windowDays` | `30` | Lookback window for performance data (days) |
+| `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwin.boostFactor` | `1.5` | Multiplier applied to winning signals |
+| `darwin.decayFactor` | `0.95` | Multiplier applied to losing signals |
+| `darwin.weightFloor` | `0.5` | Minimum allowed weight |
+| `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
 
 ---
 
@@ -520,7 +519,7 @@ This analyzes closed position performance (win rate, avg PnL, fee yields) and au
 
 ### Darwinian signal weights
 
-Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under the `darwin*` keys.
+Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
 
 ---
 
