@@ -21,7 +21,7 @@ const BASE = "https://web3.okx.com";
 const CHAIN_SOLANA = "501";
 const PUBLIC_HEADERS = { "Ok-Access-Client-type": "agent-cli" };
 
-function getOKXCredentials() {
+export function getOKXCredentials() {
   return {
     OKX_API_KEY: process.env.OKX_API_KEY || process.env.OK_ACCESS_KEY || "",
     OKX_SECRET_KEY: process.env.OKX_SECRET_KEY || process.env.OK_ACCESS_SECRET || "",
