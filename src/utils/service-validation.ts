@@ -260,8 +260,35 @@ async function checkOKX(): Promise<ServiceCheck> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    // Check OKX public endpoint
-    const res = await fetch("https://web3.okx.com/api/v1/solana/chaininfo", {
+    // Check OKX network list endpoint (lightweight public endpoint)
+    // This endpoint requires authentication but is lightweight
+    const { OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE } =
+      (await import("../../tools/okx.js")).getOKXCredentials?.() || {};
+
+    if (!OKX_API_KEY || !OKX_SECRET_KEY || !OKX_PASSPHRASE) {
+      clearTimeout(timeoutId);
+      return {
+        name: "OKX Web3",
+        enabled: true,
+        healthy: false,
+        error: "Missing credentials",
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+    const path = "/api/v5/defi/explore/network-list";
+    const prehash = `${timestamp}GET${path}`;
+    const crypto = await import("node:crypto");
+    const sign = crypto.createHmac("sha256", OKX_SECRET_KEY).update(prehash).digest("base64");
+
+    const res = await fetch(`https://web3.okx.com${path}`, {
+      method: "GET",
+      headers: {
+        "OK-ACCESS-KEY": OKX_API_KEY,
+        "OK-ACCESS-SIGN": sign,
+        "OK-ACCESS-PASSPHRASE": OKX_PASSPHRASE,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+      },
       signal: controller.signal,
     });
 
@@ -305,20 +332,31 @@ async function checkHelius(): Promise<ServiceCheck> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`https://api.helius.xyz/v0/status?api-key=${heliusKey}`, {
+    // Use Helius RPC getHealth endpoint instead of non-existent /v0/status
+    const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getHealth",
+      }),
       signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
 
     if (res.ok) {
-      return {
-        name: "Helius",
-        enabled: true,
-        healthy: true,
-        latencyMs: Date.now() - start,
-        details: "Enhanced RPC ready",
-      };
+      const data = (await res.json()) as { result?: string };
+      if (data.result === "ok" || data.result === "behind") {
+        return {
+          name: "Helius",
+          enabled: true,
+          healthy: true,
+          latencyMs: Date.now() - start,
+          details: "Enhanced RPC ready",
+        };
+      }
     }
     throw new Error(`HTTP ${res.status}`);
   } catch (error) {
