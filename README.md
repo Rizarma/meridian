@@ -121,6 +121,7 @@ TELEGRAM_ALLOWED_USER_IDS=                      # Access control (optional)
 # DRY_RUN=false                        # uncomment for live trading (default is dry-run if omitted)
 ALLOW_SELF_UPDATE=false                         # Dangerous admin actions
 LOG_LEVEL=info                                  # debug, info, warn, error
+TZ=UTC                                          # Timezone for log timestamps (Asia/Jakarta, America/New_York, etc.)
 ```
 
 > Never put your private key or API keys in `user-config.json` — use `.env` only. Both files are gitignored.
@@ -140,6 +141,14 @@ MERIDIAN_ROOT=/path/to/custom/data/directory
 ```
 
 If not set, the project root is auto-detected by locating `package.json`.
+
+**Timezone support:** Set `TZ` to change log timestamp timezone from the default UTC:
+
+```env
+TZ=Asia/Jakarta
+```
+
+Accepts IANA timezone names (e.g., `America/New_York`, `Asia/Tokyo`). Invalid values fall back to UTC with a warning. File rotation dates remain in UTC for consistency.
 
 See [Config reference](#config-reference) below.
 
