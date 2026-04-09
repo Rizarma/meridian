@@ -76,6 +76,25 @@ let _warnedMissingAllowedUsers = false;
 let _pollingStarted = false;
 let _onMessage: ((msg: TelegramMessage) => Promise<void>) | null = null;
 
+// ─── Management cycle message reuse ───────────────────────────────
+const MESSAGE_EDIT_MAX_AGE_MS = 47 * 60 * 60 * 1000; // 47 hours (Telegram limit is 48h)
+let _lastManagementMessageId: number | null = null;
+let _lastManagementMessageTime: number = 0;
+const FLUSH_DELAY_MS = 300;
+
+export function getLastManagementMessageId(): number | null {
+  // Check if message is too old (Telegram 48h edit limit)
+  if (Date.now() - _lastManagementMessageTime > MESSAGE_EDIT_MAX_AGE_MS) {
+    return null;
+  }
+  return _lastManagementMessageId;
+}
+
+export function setLastManagementMessageId(id: number | null): void {
+  _lastManagementMessageId = id;
+  _lastManagementMessageTime = id ? Date.now() : 0;
+}
+
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
   try {
@@ -435,18 +454,24 @@ export async function createLiveMessage(
     if (!state.messageId) {
       const sent = (await sendMessage(text)) as { message_id?: number } | null;
       state.messageId = sent?.message_id ?? null;
+      // Track this message ID for management cycle reuse
+      if (state.messageId) {
+        setLastManagementMessageId(state.messageId);
+      }
       return;
     }
     await editMessage(text, state.messageId);
   }
 
-  function scheduleFlush(delay = 300): void {
+  function scheduleFlush(delay = FLUSH_DELAY_MS): void {
     if (state.flushTimer) {
       state.flushRequested = true;
       return;
     }
     state.flushTimer = setTimeout((): void => {
-      state.flushPromise = flushNow().catch((): undefined => undefined);
+      state.flushPromise = flushNow().catch((e): undefined => {
+        log("telegram_warn", `Live message update failed: ${getErrorMessage(e)}`);
+      });
     }, delay);
   }
 
@@ -494,6 +519,126 @@ export async function createLiveMessage(
       if (state.flushPromise) await state.flushPromise;
       state.footer = `❌ ${errorText}`;
       await flushNow();
+      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+      typing.stop();
+    },
+  };
+}
+
+// ─── Update existing live message (for management cycle reuse) ──
+export async function updateExistingLiveMessage(
+  title: string,
+  intro: string,
+  existingMessageId: number
+): Promise<LiveMessageAPI | null> {
+  if (!bot || !chatId) return null;
+
+  const typing = createTypingIndicator();
+
+  const state: LiveMessageState = {
+    title,
+    intro,
+    toolLines: [],
+    footer: "",
+    messageId: existingMessageId,
+    flushTimer: null,
+    flushPromise: null,
+    flushRequested: false,
+  };
+
+  function render(): string {
+    const sections: string[] = [state.title];
+    if (state.intro) sections.push(state.intro);
+    if (state.toolLines.length > 0) sections.push(state.toolLines.join("\n"));
+    if (state.footer) sections.push(state.footer);
+    return sections.join("\n\n").slice(0, 4096);
+  }
+
+  async function flushNow(): Promise<void> {
+    state.flushTimer = null;
+    state.flushRequested = false;
+    const text = render();
+    if (!state.messageId) return;
+    try {
+      await editMessage(text, state.messageId);
+    } catch (error) {
+      // If edit fails (message deleted, too old, etc), we can't recover in this cycle
+      // The next cycle will create a new message since messageId won't be saved
+      throw error;
+    }
+  }
+
+  function scheduleFlush(delay = FLUSH_DELAY_MS): void {
+    if (state.flushTimer) {
+      state.flushRequested = true;
+      return;
+    }
+    state.flushTimer = setTimeout((): void => {
+      state.flushPromise = flushNow().catch((e): undefined => {
+        log("telegram_warn", `Live message update failed: ${getErrorMessage(e)}`);
+      });
+    }, delay);
+  }
+
+  async function upsertToolLine(name: string, icon: string, suffix = ""): Promise<void> {
+    const label = toolLabel(name);
+    const line = `${icon} ${label}${suffix ? ` ${suffix}` : ""}`;
+    const idx = state.toolLines.findIndex((entry) => entry.includes(` ${label}`));
+    if (idx >= 0) state.toolLines[idx] = line;
+    else state.toolLines.push(line);
+    scheduleFlush();
+  }
+
+  // Reset live message depth and immediately update the existing message
+  _liveMessageDepth += 1;
+  try {
+    await flushNow();
+  } catch {
+    typing.stop();
+    _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+    return null;
+  }
+
+  return {
+    async toolStart(name: string): Promise<void> {
+      await upsertToolLine(name, "ℹ️", "...");
+    },
+    async toolFinish(name: string, result: unknown, success: boolean): Promise<void> {
+      const icon = success ? "✅" : "❌";
+      const summary = summarizeToolResult(name, result as ToolResult);
+      await upsertToolLine(name, icon, summary ? `— ${summary}` : "");
+    },
+    async note(text: string): Promise<void> {
+      state.intro = text;
+      scheduleFlush();
+    },
+    async finalize(finalText: string): Promise<void> {
+      if (state.flushTimer) {
+        clearTimeout(state.flushTimer);
+        state.flushTimer = null;
+      }
+      if (state.flushPromise) await state.flushPromise;
+      state.footer = finalText;
+      try {
+        await flushNow();
+      } catch {
+        // Edit failed, message might be deleted - will create new next cycle
+      }
+      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+      typing.stop();
+    },
+    async fail(errorText: string): Promise<void> {
+      if (state.flushTimer) {
+        clearTimeout(state.flushTimer);
+        state.flushTimer = null;
+      }
+      if (state.flushPromise) await state.flushPromise;
+      state.footer = `❌ ${errorText}`;
+      try {
+        await flushNow();
+      } catch {
+        // Edit failed
+      }
       _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
       typing.stop();
     },

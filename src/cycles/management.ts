@@ -28,6 +28,9 @@ import {
 } from "../infrastructure/state.js";
 import {
   createLiveMessage,
+  updateExistingLiveMessage,
+  getLastManagementMessageId,
+  setLastManagementMessageId,
   notifyOutOfRange,
   sendMessage,
   isEnabled as telegramEnabled,
@@ -139,7 +142,22 @@ export async function runManagementCycle(
 
   try {
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      const existingMessageId = getLastManagementMessageId();
+      if (existingMessageId) {
+        // Try to update existing message
+        liveMessage = await updateExistingLiveMessage(
+          "🔄 Management Cycle",
+          "Evaluating positions...",
+          existingMessageId
+        );
+        if (!liveMessage) {
+          // Failed to update (message deleted or too old), create new
+          liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+        }
+      } else {
+        // No existing message or too old, create new
+        liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      }
     }
     const livePositions = await getMyPositions({ force: true }).catch((): null => null);
     const rawPositions = livePositions?.positions;
@@ -297,9 +315,12 @@ export async function runManagementCycle(
         : "no action";
 
     const cur = config.features.solMode ? "◎" : "$";
+    const now = new Date();
+    const timestamp = `Last update: ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
     mgmtReport =
       reportLines.join("\n\n") +
-      `\n\nSummary: 💼 ${positions.length} positions | ${cur}${totalValue.toFixed(4)} | fees: ${cur}${totalUnclaimed.toFixed(4)} | ${actionSummary}`;
+      `\n\nSummary: 💼 ${positions.length} positions | ${cur}${totalValue.toFixed(4)} | fees: ${cur}${totalUnclaimed.toFixed(4)} | ${actionSummary}` +
+      `\n\n_${timestamp}_`;
 
     // ── Call LLM only if action needed ──────────────────────────────
     const actionPositions = positionData.filter((p) => {
@@ -393,14 +414,19 @@ After executing, write a brief one-line result per position.
     deps.setManagementBusy(false);
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
-        if (liveMessage)
+        if (liveMessage) {
           await liveMessage
             .finalize(stripThink(mgmtReport))
             .catch((e) => log("telegram_error", getErrorMessage(e)));
-        else
-          sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch((e) =>
-            log("telegram_error", getErrorMessage(e))
-          );
+          // Message ID is already tracked by createLiveMessage
+          // For updateExistingLiveMessage, the ID was already known and remains valid
+        } else {
+          // Fallback: send new message and track it
+          const sent = await sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`);
+          if (sent && typeof sent === "object" && "message_id" in sent) {
+            setLastManagementMessageId((sent as { message_id: number }).message_id);
+          }
+        }
       }
       for (const p of positions) {
         if (
