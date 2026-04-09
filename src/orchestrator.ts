@@ -29,6 +29,7 @@ import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
 import { cache } from "./utils/cache.js";
 import { getErrorMessage } from "./utils/errors.js";
 import { recordActivity } from "./utils/health-check.js";
+import { logStartupValidation, runStartupValidation } from "./utils/service-validation.js";
 import { isArray } from "./utils/validation.js";
 
 // ═══════════════════════════════════════════
@@ -413,6 +414,17 @@ registerCronRestarter(() => {
 });
 
 export async function start(): Promise<void> {
+  // Run service validation first
+  const validationResult = await runStartupValidation();
+  logStartupValidation(validationResult);
+
+  // Warn if critical services are down
+  if (!validationResult.allCriticalHealthy) {
+    log("startup_warn", "Some critical services are unhealthy — agent may not function correctly");
+    // Small delay so user can see the warning
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
   // Start REPL or non-TTY mode
   const isTTY = process.stdin.isTTY;
 
