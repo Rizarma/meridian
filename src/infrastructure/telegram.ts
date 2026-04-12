@@ -250,13 +250,13 @@ export async function sendMessage(text: string): Promise<unknown> {
   if (!bot || !chatId) return null;
   const safeText = String(text).slice(0, 4096);
   try {
-    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "Markdown" });
+    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "MarkdownV2" });
   } catch (error) {
-    // If Markdown parsing fails, retry with escaped text as plain text
+    // If MarkdownV2 parsing fails, retry with escaped text as plain text
     if (error instanceof GrammyError) {
       const errorMessage = error.description || "";
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
-        log("telegram_warn", "Markdown parsing failed, sending with escaped characters");
+        log("telegram_warn", "MarkdownV2 parsing failed, sending as plain text");
         // Re-slice after escaping to ensure we don't exceed Telegram's limit
         return await bot.api.sendMessage(chatId, escapeMarkdown(safeText).slice(0, 4096));
       }
@@ -294,14 +294,14 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
   const safeText = String(text).slice(0, 4096);
   try {
     return await bot.api.editMessageText(chatId, messageId, safeText, {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
     });
   } catch (error) {
-    // If Markdown parsing fails, retry as plain text
+    // If MarkdownV2 parsing fails, retry as plain text
     if (error instanceof GrammyError) {
       const errorMessage = error.description || "";
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
-        log("telegram_warn", "Markdown parsing failed, editing as plain text");
+        log("telegram_warn", "MarkdownV2 parsing failed, editing as plain text");
         // Re-slice after escaping to ensure we don't exceed Telegram's limit
         return await bot.api.editMessageText(
           chatId,
