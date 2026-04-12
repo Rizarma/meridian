@@ -28,9 +28,12 @@ import {
 } from "../infrastructure/state.js";
 import {
   createLiveMessage,
+  getLastManagementMessageId,
   notifyOutOfRange,
   sendMessage,
+  setLastManagementMessageId,
   isEnabled as telegramEnabled,
+  updateExistingLiveMessage,
 } from "../infrastructure/telegram.js";
 import type {
   ActionDecision,
@@ -45,6 +48,48 @@ import { isArray } from "../utils/validation.js";
 function stripThink(text: string | null | undefined): string {
   if (!text) return "";
   return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+/** Format minutes into human-readable duration (e.g., "17h 24m") */
+function formatDuration(minutes: number | null | undefined): string {
+  if (minutes == null) return "?";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
+/** Format currency value with 2 decimal places */
+function formatCurrency(value: number | null | undefined, solMode: boolean): string {
+  if (value == null) return "?";
+  const symbol = solMode ? "◎" : "$";
+  return `${symbol}${value.toFixed(2)}`;
+}
+
+/** Get PnL emoji based on percentage */
+function getPnlEmoji(pnl: number | null | undefined): string {
+  if (pnl == null) return "➖";
+  if (pnl > 5) return "🚀";
+  if (pnl > 0) return "📈";
+  if (pnl > -5) return "📉";
+  return "🔴";
+}
+
+/** Get action status emoji */
+function getActionEmoji(action: string | undefined): string {
+  switch (action) {
+    case "STAY":
+      return "✅";
+    case "CLOSE":
+      return "🔴";
+    case "CLAIM":
+      return "💰";
+    case "INSTRUCTION":
+      return "📋";
+    default:
+      return "➖";
+  }
 }
 
 export function schedulePeakConfirmation(positionAddress: string): void {
@@ -139,7 +184,22 @@ export async function runManagementCycle(
 
   try {
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      const existingMessageId = getLastManagementMessageId();
+      if (existingMessageId) {
+        // Try to update existing message
+        liveMessage = await updateExistingLiveMessage(
+          "🔄 Management Cycle",
+          "Evaluating positions...",
+          existingMessageId
+        );
+        if (!liveMessage) {
+          // Failed to update (message deleted or too old), create new
+          liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+        }
+      } else {
+        // No existing message or too old, create new
+        liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      }
     }
     const livePositions = await getMyPositions({ force: true }).catch((): null => null);
     const rawPositions = livePositions?.positions;
@@ -267,20 +327,31 @@ export async function runManagementCycle(
 
     const reportLines = positionData.map((p) => {
       const act = actionMap.get(p.position);
-      const inRange = p.in_range ? "🟢 IN" : `🔴 OOR ${p.minutes_out_of_range ?? 0}m`;
-      const val = config.features.solMode
-        ? `◎${p.total_value_usd ?? "?"}`
-        : `$${p.total_value_usd ?? "?"}`;
-      const unclaimed = config.features.solMode
-        ? `◎${p.unclaimed_fees_usd ?? "?"}`
-        : `$${p.unclaimed_fees_usd ?? "?"}`;
-      const statusLabel = act?.action === "INSTRUCTION" ? "HOLD (instruction)" : act?.action;
-      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
-      if (p.instruction) line += `\nNote: "${p.instruction}"`;
+      const inRange = p.in_range
+        ? "🟢 IN-RANGE"
+        : `🔴 OOR ${formatDuration(p.minutes_out_of_range)}`;
+      const val = formatCurrency(p.total_value_usd, config.features.solMode);
+      const unclaimed = formatCurrency(p.unclaimed_fees_usd, config.features.solMode);
+      const age = formatDuration(p.age_minutes);
+      const pnlEmoji = getPnlEmoji(p.pnl_pct);
+      const actionEmoji = getActionEmoji(act?.action);
+      const statusLabel =
+        act?.action === "INSTRUCTION"
+          ? "📋 HOLD (instruction)"
+          : `${actionEmoji} ${act?.action ?? "STAY"}`;
+
+      // Build clean position card with better visual hierarchy
+      let line = `📊 **${p.pair}**\n`;
+      line += `💰 Value: ${val} │ 💵 Fees: ${unclaimed}\n`;
+      line += `${pnlEmoji} PnL: ${p.pnl_pct ?? "?"}% │ 📈 Yield: ${p.fee_per_tvl_24h ?? "?"}%/24h\n`;
+      line += `⏰ ${age} │ ${inRange}\n`;
+      line += `→ ${statusLabel}`;
+
+      if (p.instruction) line += `\n📝 "${p.instruction}"`;
       if (act?.action === "CLOSE" && act.rule === "exit") line += `\n⚡ Trailing TP: ${act.reason}`;
       if (act?.action === "CLOSE" && act.rule && act.rule !== "exit")
-        line += `\nRule ${act.rule}: ${act.reason}`;
-      if (act?.action === "CLAIM") line += `\n→ Claiming fees`;
+        line += `\n📋 Rule ${act.rule}: ${act.reason}`;
+      if (act?.action === "CLAIM") line += `\n💵 Claiming fees...`;
       return line;
     });
 
@@ -290,16 +361,24 @@ export async function runManagementCycle(
         ? needsAction
             .map((a) =>
               a.action === "INSTRUCTION"
-                ? "EVAL instruction"
-                : `${a.action}${a.reason ? ` (${a.reason})` : ""}`
+                ? "📋 EVAL instruction"
+                : `${getActionEmoji(a.action)} ${a.action}${a.reason ? ` (${a.reason})` : ""}`
             )
-            .join(", ")
-        : "no action";
+            .join(" | ")
+        : "✅ All positions stable — no action needed";
 
     const cur = config.features.solMode ? "◎" : "$";
+    const now = new Date();
+    const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+    // Build cleaner summary (3 lines)
+    const totalValStr = formatCurrency(totalValue, config.features.solMode);
+    const totalFeesStr = formatCurrency(totalUnclaimed, config.features.solMode);
+    const summaryBlock = `💼 Positions: ${positions.length}\n💰 Total Value: ${totalValStr} │ 💵 Unclaimed: ${totalFeesStr}\n${actionSummary}`;
+
     mgmtReport =
       reportLines.join("\n\n") +
-      `\n\nSummary: 💼 ${positions.length} positions | ${cur}${totalValue.toFixed(4)} | fees: ${cur}${totalUnclaimed.toFixed(4)} | ${actionSummary}`;
+      `\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${summaryBlock}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp}`;
 
     // ── Call LLM only if action needed ──────────────────────────────
     const actionPositions = positionData.filter((p) => {
@@ -370,7 +449,11 @@ After executing, write a brief one-line result per position.
       mgmtReport += `\n\n${content}`;
     } else {
       log("cron", "Management: all positions STAY — skipping LLM");
-      await liveMessage?.note("No tool actions needed.");
+      const statusMsg =
+        positions.length > 0
+          ? `✅ Monitoring ${positions.length} position${positions.length > 1 ? "s" : ""} — all stable`
+          : "⏳ No open positions — waiting for opportunities";
+      await liveMessage?.note(statusMsg);
     }
 
     // Trigger screening after management
@@ -393,14 +476,19 @@ After executing, write a brief one-line result per position.
     deps.setManagementBusy(false);
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
-        if (liveMessage)
+        if (liveMessage) {
           await liveMessage
             .finalize(stripThink(mgmtReport))
             .catch((e) => log("telegram_error", getErrorMessage(e)));
-        else
-          sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch((e) =>
-            log("telegram_error", getErrorMessage(e))
-          );
+          // Message ID is already tracked by createLiveMessage
+          // For updateExistingLiveMessage, the ID was already known and remains valid
+        } else {
+          // Fallback: send new message and track it
+          const sent = await sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`);
+          if (sent && typeof sent === "object" && "message_id" in sent) {
+            setLastManagementMessageId((sent as { message_id: number }).message_id);
+          }
+        }
       }
       for (const p of positions) {
         if (
