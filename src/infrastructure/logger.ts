@@ -6,8 +6,59 @@ import type { LogAction, LogCategory, LogSnapshot } from "../types/index.js";
 const LOG_DIR = "./logs";
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 
+/**
+ * Validate timezone string. Returns the timezone if valid, otherwise falls back to UTC.
+ */
+function validateTimezone(tz: string): string {
+  if (tz === "UTC") return tz;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date());
+    return tz;
+  } catch {
+    console.warn(`[logger] Invalid timezone "${tz}", falling back to UTC`);
+    return "UTC";
+  }
+}
+const LOG_TIMEZONE = validateTimezone(process.env.TZ || "UTC");
+
 const LEVELS: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 const currentLevel = LEVELS[LOG_LEVEL] ?? 1;
+
+// Cache the Intl.DateTimeFormat instance for non-UTC timezones
+const timestampFormatter =
+  LOG_TIMEZONE === "UTC"
+    ? null
+    : new Intl.DateTimeFormat("en-US", {
+        timeZone: LOG_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      });
+
+/**
+ * Format timestamp in ISO-style with configured timezone.
+ * Format: YYYY-MM-DDTHH:mm:ss (no Z suffix for local time)
+ */
+function formatTimestamp(date: Date = new Date()): string {
+  if (LOG_TIMEZONE === "UTC") {
+    return date.toISOString().replace("Z", "");
+  }
+  const parts = timestampFormatter!.formatToParts(date);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
+/**
+ * Get UTC date string for file rotation (consistent across timezones).
+ */
+function getUTCDateString(date: Date = new Date()): string {
+  return date.toISOString().split("T")[0];
+}
 
 // Ensure log directory exists
 if (!fs.existsSync(LOG_DIR)) {
@@ -68,14 +119,15 @@ export function log(category: LogCategory, message: string): void {
 
   if (LEVELS[level] < currentLevel) return;
 
-  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const timestamp = formatTimestamp(now);
   const line = `[${timestamp}] [${category.toUpperCase()}] ${message}`;
 
   // Console output
   console.log(line);
 
-  // File output (daily rotation) - using persistent stream
-  const dateStr = timestamp.split("T")[0];
+  // File output (daily rotation) - using persistent stream (UTC date for consistency)
+  const dateStr = getUTCDateString(now);
   const stream = getLogStream(dateStr, "agent");
   stream.write(`${line}\n`);
 }
@@ -120,7 +172,8 @@ function actionHint(action: LogAction): string {
  * Log a tool action with full details (for audit trail).
  */
 export function logAction(action: LogAction): void {
-  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const timestamp = formatTimestamp(now);
 
   const entry = { timestamp, ...action };
 
@@ -130,8 +183,8 @@ export function logAction(action: LogAction): void {
   const hint = actionHint(action);
   console.log(`[${action.tool}] ${status}${hint}${dur}`);
 
-  // File: full JSON for audit trail - using persistent stream
-  const dateStr = timestamp.split("T")[0];
+  // File: full JSON for audit trail - using persistent stream (UTC date for consistency)
+  const dateStr = getUTCDateString(now);
   const stream = getLogStream(dateStr, "actions");
   stream.write(`${JSON.stringify(entry)}\n`);
 }
@@ -142,15 +195,16 @@ export function logAction(action: LogAction): void {
  * @param snapshot - Portfolio snapshot data
  */
 export function logSnapshot(snapshot: LogSnapshot): void {
-  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const timestamp = formatTimestamp(now);
 
   const entry = {
     timestamp,
     ...snapshot,
   };
 
-  // File output - using persistent stream
-  const dateStr = timestamp.split("T")[0];
+  // File output - using persistent stream (UTC date for consistency)
+  const dateStr = getUTCDateString(now);
   const stream = getLogStream(dateStr, "snapshots");
   stream.write(`${JSON.stringify(entry)}\n`);
 }

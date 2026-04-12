@@ -121,6 +121,7 @@ TELEGRAM_ALLOWED_USER_IDS=                      # Access control (optional)
 # DRY_RUN=false                        # uncomment for live trading (default is dry-run if omitted)
 ALLOW_SELF_UPDATE=false                         # Dangerous admin actions
 LOG_LEVEL=info                                  # debug, info, warn, error
+TZ=UTC                                          # Timezone for log timestamps (Asia/Jakarta, America/New_York, etc.)
 ```
 
 > Never put your private key or API keys in `user-config.json` — use `.env` only. Both files are gitignored.
@@ -132,6 +133,22 @@ cp user-config.example.json user-config.json
 ```
 
 **Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
+
+**Data file locations:** By default, Meridian stores data files (`lessons.json`, `pool-memory.json`, `signal-weights.json`, etc.) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
+
+```env
+MERIDIAN_ROOT=/path/to/custom/data/directory
+```
+
+If not set, the project root is auto-detected by locating `package.json`.
+
+**Timezone support:** Set `TZ` to change log timestamp timezone from the default UTC:
+
+```env
+TZ=Asia/Jakarta
+```
+
+Accepts IANA timezone names (e.g., `America/New_York`, `Asia/Tokyo`). Invalid values fall back to UTC with a warning. File rotation dates remain in UTC for consistency.
 
 See [Config reference](#config-reference) below.
 
@@ -479,14 +496,13 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 | Field | Default | Description |
 |---|---|---|
-| `darwinEnabled` | `true` | Enable signal-weight evolution |
-| `darwinWindowDays` | `60` | Lookback window for performance data |
-| `darwinMinSamples` | `10` | Minimum samples before a signal influences scoring |
-| `darwinRecalcEvery` | `5` | Recalculate weights every N closed positions |
-| `darwinBoost` | `1.05` | Multiplier applied to winning signals |
-| `darwinDecay` | `0.95` | Multiplier applied to losing signals |
-| `darwinFloor` | `0.3` | Minimum allowed weight |
-| `darwinCeiling` | `2.5` | Maximum allowed weight |
+| `features.darwinEvolution` | `false` | Enable signal-weight evolution |
+| `darwin.windowDays` | `30` | Lookback window for performance data (days) |
+| `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwin.boostFactor` | `1.5` | Multiplier applied to winning signals |
+| `darwin.decayFactor` | `0.95` | Multiplier applied to losing signals |
+| `darwin.weightFloor` | `0.5` | Minimum allowed weight |
+| `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
 
 ---
 
@@ -512,7 +528,7 @@ This analyzes closed position performance (win rate, avg PnL, fee yields) and au
 
 ### Darwinian signal weights
 
-Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under the `darwin*` keys.
+Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
 
 ---
 

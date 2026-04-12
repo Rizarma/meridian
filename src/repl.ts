@@ -11,6 +11,7 @@ import { getWalletBalances } from "../tools/wallet.js";
 import { agentLoop } from "./agent/agent.js";
 import { colors } from "./cli/colors.js";
 import { config } from "./config/config.js";
+import { LESSONS_FILE } from "./config/paths.js";
 import { isScreeningBusy, sanitizeUntrustedPromptText } from "./cycles/screening.js";
 import { getPerformanceSummary } from "./domain/lessons.js";
 import { evolveThresholds } from "./domain/threshold-evolution.js";
@@ -783,7 +784,7 @@ const cmdEvolve: Command = {
         return;
       }
       const fs = await import("node:fs");
-      const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
+      const lessonsData = JSON.parse(fs.default.readFileSync(LESSONS_FILE, "utf8"));
       const result = evolveThresholds(lessonsData.performance, config);
       if (!result || Object.keys(result.changes).length === 0) {
         console.log(

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
+import { LESSONS_FILE } from "../config/paths.js";
 
 import type {
   BlacklistAddOutput,
@@ -660,14 +661,13 @@ switch (subcommand as CLISubcommand) {
     const { config } = await import("../config/config.js");
     const { evolveThresholds } = await import("../domain/threshold-evolution.js");
     const fs2: typeof fs = await import("node:fs");
-    const lessonsFile: string = "./lessons.json";
     interface LessonsData {
       performance?: Array<Record<string, unknown>>;
     }
     let perfData: Array<Record<string, unknown>> = [];
-    if (fs2.existsSync(lessonsFile)) {
+    if (fs2.existsSync(LESSONS_FILE)) {
       try {
-        const data: LessonsData = JSON.parse(fs2.readFileSync(lessonsFile, "utf8")) as LessonsData;
+        const data: LessonsData = JSON.parse(fs2.readFileSync(LESSONS_FILE, "utf8")) as LessonsData;
         perfData = data.performance || [];
       } catch {
         /* no data */
