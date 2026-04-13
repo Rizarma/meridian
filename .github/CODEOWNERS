@@ -1,0 +1,16 @@
+# Global fallback - require review from Riz for all changes
+* @Rizarma
+
+# Critical paths - require additional scrutiny
+src/cycles/screening.ts @Rizarma
+src/cycles/management.ts @Rizarma
+src/agent/agent.ts @Rizarma
+src/domain/exit-rules.ts @Rizarma
+
+# Configuration changes
+*.json @Rizarma
+.env.example @Rizarma
+
+# CI/CD and automation
+.github/workflows/ @Rizarma
+scripts/ @Rizarma
