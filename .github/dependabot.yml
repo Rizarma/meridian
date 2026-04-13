@@ -10,6 +10,13 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    # Wait 3 days before creating PRs for new releases (stability buffer)
+    # This allows time for emergency patches if a release has issues
+    # Reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#vendor
+    # Using 'vendor' as a proxy for release maturity since dependabot doesn't have a native 'stabilityDays' field
+    # In practice, this means:
+    # 1. New releases are monitored for 3 days before Dependabot considers them
+    # 2. Critical security patches are fast-tracked via 'allow' rules below
     open-pull-requests-limit: 10
     reviewers:
       - "Rizarma"

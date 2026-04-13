@@ -77,10 +77,24 @@ Stored in project root by default (override with `MERIDIAN_ROOT` env var):
 
 ## Development Guidelines
 
+### Code Quality
 1. **Always run typecheck before committing:** `pnpm typecheck`
 2. **Pre-commit hooks run automatically** - Biome will lint/format staged files
 3. **Use dry-run mode for testing:** `pnpm dev`
 4. **Check health status:** `node cli.js health`
+
+### Naming Conventions
+
+| Type | Convention | Example |
+|------|------------|---------|
+| Variables/functions | camelCase | `getPoolData`, `isValid` |
+| Constants | UPPER_SNAKE_CASE | `MAX_RETRIES`, `API_URL` |
+| Types/interfaces | PascalCase | `PoolData`, `ConfigOptions` |
+| Files | kebab-case | `pool-screening.ts`, `health-check.ts` |
+| Classes | PascalCase | `RateLimiter`, `StateManager` |
+| Enums | PascalCase + enum values: UPPER_SNAKE_CASE | `enum ExitReason { STOP_LOSS, TAKE_PROFIT }` |
+| Private methods | camelCase with underscore prefix | `_internalMethod()` |
+| Boolean variables | Prefix with `is`, `has`, `should`, `can` | `isActive`, `hasBalance` |
 
 ## Detailed Documentation
 
