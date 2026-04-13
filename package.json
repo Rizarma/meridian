@@ -28,7 +28,7 @@
     "duplicates": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters console",
     "duplicates:ci": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters json",
     "arch-check": "depcruise src --config .dependency-cruiser.js",
-    "prepare": "pnpm run build",
+    "prepare": "pnpm run build && husky",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",
     "typecheck": "tsc --noEmit",
@@ -75,12 +75,19 @@
     "cross-env": "^10.1.0",
     "depcheck": "^1.4.7",
     "dependency-cruiser": "^16.9.0",
+    "husky": "^9.0.11",
     "jscpd": "^4.0.5",
     "knip": "^5.50.5",
     "leasot": "^14.4.0",
+    "lint-staged": "^15.2.2",
     "typescript": "^6.0.2"
   },
   "workspaces": [
     "."
-  ]
+  ],
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
+  }
 }
