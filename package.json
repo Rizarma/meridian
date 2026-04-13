@@ -23,6 +23,11 @@
     "test:coverage:check": "c8 --reporter=text --check-coverage pnpm test:phase0:all",
     "unused-deps": "depcheck --ignores='@types/*,cross-env,husky,lint-staged,c8,depcheck,knip'",
     "dead-code": "knip --no-exit-code",
+    "tech-debt": "leasot src/**/*.ts test/**/*.ts tools/**/*.ts --reporter json --skip-unsupported",
+    "tech-debt:ci": "leasot src/**/*.ts test/**/*.ts tools/**/*.ts --reporter markdown --skip-unsupported",
+    "duplicates": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters console",
+    "duplicates:ci": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters json",
+    "arch-check": "depcruise src --config .dependency-cruiser.js",
     "prepare": "pnpm run build",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",
@@ -69,7 +74,10 @@
     "c8": "^10.1.2",
     "cross-env": "^10.1.0",
     "depcheck": "^1.4.7",
+    "dependency-cruiser": "^16.9.0",
+    "jscpd": "^4.0.5",
     "knip": "^5.50.5",
+    "leasot": "^14.4.0",
     "typescript": "^6.0.2"
   },
   "workspaces": [
