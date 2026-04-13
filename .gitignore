@@ -57,6 +57,8 @@ discord-signals.json
 
 # CI-generated files
 audit-results.json
+violations.json
+violations.txt
 
 # Coverage reports
 coverage/
