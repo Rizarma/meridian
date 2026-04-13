@@ -21,7 +21,8 @@
     "test:agent": "pnpm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
     "test:coverage": "c8 --reporter=text --reporter=html --reporter=json pnpm test:phase0:all",
     "test:coverage:check": "c8 --reporter=text --check-coverage pnpm test:phase0:all",
-    "unused-deps": "depcheck --ignores='@types/*,cross-env,husky,lint-staged,c8,depcheck'",
+    "unused-deps": "depcheck --ignores='@types/*,cross-env,husky,lint-staged,c8,depcheck,knip'",
+    "dead-code": "knip --no-exit-code",
     "prepare": "pnpm run build",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",
@@ -68,6 +69,7 @@
     "c8": "^10.1.2",
     "cross-env": "^10.1.0",
     "depcheck": "^1.4.7",
+    "knip": "^5.50.5",
     "typescript": "^6.0.2"
   },
   "workspaces": [
