@@ -33,15 +33,6 @@ meridian.db-wal
 # Auto-generated backups
 backups/
 
-# SQLite database (migrated from JSON files)
-meridian.db
-meridian.db-shm
-meridian.db-wal
-*.db-journal
-
-# Auto-generated backups
-backups/
-
 # Logs
 logs/
 
@@ -66,3 +57,9 @@ discord-signals.json
 
 # CI-generated files
 audit-results.json
+
+# Coverage reports
+coverage/
+
+# Husky internal files
+.husky/_

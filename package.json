@@ -19,6 +19,9 @@
     "test:phase0:all": "pnpm run build && node dist/test/phase-0-exit-rules.test.js && node dist/test/phase-0-trailing-tp.test.js && node dist/test/phase-0-config-mutation.test.js && node dist/test/phase-0-tool-safety.test.js",
     "test:screen": "pnpm run build && node dist/test/test-screening.js",
     "test:agent": "pnpm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
+    "test:coverage": "c8 --reporter=text --reporter=html --reporter=json pnpm test:phase0:all",
+    "test:coverage:check": "c8 --reporter=text --check-coverage pnpm test:phase0:all",
+    "unused-deps": "depcheck --ignores='@types/*,cross-env,husky,lint-staged,c8,depcheck'",
     "prepare": "pnpm run build",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",
@@ -62,7 +65,9 @@
     "@types/bn.js": "^5.2.0",
     "@types/node": "^25.5.2",
     "@types/node-cron": "^3.0.11",
+    "c8": "^10.1.2",
     "cross-env": "^10.1.0",
+    "depcheck": "^1.4.7",
     "typescript": "^6.0.2"
   },
   "workspaces": [
