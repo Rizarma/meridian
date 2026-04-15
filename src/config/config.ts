@@ -9,6 +9,7 @@ import type {
   UserConfigPartial,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
+import { LLM, RISK, SCREENING } from "./constants.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
 /**
@@ -329,15 +330,19 @@ registerTool({
       maxMcap: ["screening", "maxMcap"],
       minBinStep: ["screening", "minBinStep"],
       maxBinStep: ["screening", "maxBinStep"],
+      maxVolatility: ["screening", "maxVolatility"],
       timeframe: ["screening", "timeframe"],
       category: ["screening", "category"],
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
       maxBundlePct: ["screening", "maxBundlePct"],
       maxBotHoldersPct: ["screening", "maxBotHoldersPct"],
       maxTop10Pct: ["screening", "maxTop10Pct"],
+      blockedLaunchpads: ["screening", "blockedLaunchpads"],
+      allowedLaunchpads: ["screening", "allowedLaunchpads"],
       minTokenAgeHours: ["screening", "minTokenAgeHours"],
       maxTokenAgeHours: ["screening", "maxTokenAgeHours"],
       athFilterPct: ["screening", "athFilterPct"],
+      maxCandidatesEnriched: ["screening", "maxCandidatesEnriched"],
       minFeePerTvl24h: ["management", "minFeePerTvl24h"],
       // management
       minClaimAmount: ["management", "minClaimAmount"],
@@ -361,6 +366,7 @@ registerTool({
       // schedule
       managementIntervalMin: ["schedule", "managementIntervalMin"],
       screeningIntervalMin: ["schedule", "screeningIntervalMin"],
+      healthCheckIntervalMin: ["schedule", "healthCheckIntervalMin"],
       // models
       managementModel: ["llm", "managementModel"],
       screeningModel: ["llm", "screeningModel"],
