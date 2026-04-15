@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/cli/*.ts",
+    "tools/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.js"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "tools/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.js"
+  ],
+  "ignore": [
+    "dist/**",
+    "coverage/**",
+    "logs/**",
+    "node_modules/**"
+  ],
+  "ignoreDependencies": [
+    "cross-env",
+    "husky",
+    "lint-staged",
+    "c8",
+    "depcheck",
+    "knip",
+    "typescript"
+  ],
+  "ignoreBinaries": [
+    "gh",
+    "git"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "ignores": [
+    "@types/*",
+    "cross-env",
+    "husky",
+    "lint-staged",
+    "c8",
+    "depcheck",
+    "typescript"
+  ],
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "logs/**",
+    "node_modules/**"
+  ],
+  "parsers": {
+    "**/*.ts": "typescript"
+  },
+  "detectors": [
+    "requireCallExpression",
+    "importDeclaration",
+    "exportDeclaration",
+    "importCallExpression"
+  ]
+}

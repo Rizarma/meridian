@@ -6,6 +6,25 @@ import type { LogAction, LogCategory, LogSnapshot } from "../types/index.js";
 const LOG_DIR = "./logs";
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 
+// Patterns to redact from logs (PII/secrets)
+const SENSITIVE_PATTERNS = [
+  { pattern: /[1-9A-HJ-NP-Za-km-z]{32,44}/g, replacement: "[REDACTED_KEY]" }, // Solana private keys (base58)
+  { pattern: /sk-[a-zA-Z0-9]{20,}/g, replacement: "[REDACTED_API_KEY]" }, // API keys (OpenAI format)
+  { pattern: /[a-f0-9]{32,64}/gi, replacement: "[REDACTED_HASH]" }, // Hex secrets
+  { pattern: /\b\d{10,}\b/g, replacement: "[REDACTED_NUMBER]" }, // Long numbers (potentially IDs)
+];
+
+/**
+ * Sanitize log message by redacting sensitive patterns.
+ */
+function sanitizeMessage(message: string): string {
+  let sanitized = message;
+  for (const { pattern, replacement } of SENSITIVE_PATTERNS) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+  return sanitized;
+}
+
 /**
  * Validate timezone string. Returns the timezone if valid, otherwise falls back to UTC.
  */
@@ -121,7 +140,8 @@ export function log(category: LogCategory, message: string): void {
 
   const now = new Date();
   const timestamp = formatTimestamp(now);
-  const line = `[${timestamp}] [${category.toUpperCase()}] ${message}`;
+  const sanitizedMessage = sanitizeMessage(message);
+  const line = `[${timestamp}] [${category.toUpperCase()}] ${sanitizedMessage}`;
 
   // Console output
   console.log(line);
@@ -169,13 +189,34 @@ function actionHint(action: LogAction): string {
 }
 
 /**
+ * Deep sanitize an object by redacting sensitive patterns in all string values.
+ */
+function sanitizeObject<T>(obj: T): T {
+  if (typeof obj === "string") {
+    return sanitizeMessage(obj) as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeObject) as unknown as T;
+  }
+  if (obj !== null && typeof obj === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeObject(value);
+    }
+    return sanitized as T;
+  }
+  return obj;
+}
+
+/**
  * Log a tool action with full details (for audit trail).
  */
 export function logAction(action: LogAction): void {
   const now = new Date();
   const timestamp = formatTimestamp(now);
 
-  const entry = { timestamp, ...action };
+  // Sanitize any sensitive data in the action entry
+  const entry = sanitizeObject({ timestamp, ...action });
 
   // Console: single clean line, no raw JSON
   const status = action.success ? "✓" : "✗";

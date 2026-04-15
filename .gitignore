@@ -24,6 +24,19 @@ strategy-library.json
 signal-weights.json
 .repl_history
 
+# SQLite database (migrated from JSON files)
+meridian.db
+meridian.db-shm
+meridian.db-wal
+*.db-journal
+
+# Auto-generated backups
+backups/
+
+# Generated reports
+report/
+
+
 # Logs
 logs/
 
@@ -48,3 +61,11 @@ discord-signals.json
 
 # CI-generated files
 audit-results.json
+violations.json
+violations.txt
+
+# Coverage reports
+coverage/
+
+# Husky internal files
+.husky/_
