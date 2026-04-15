@@ -483,12 +483,17 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 | Field | Default | Description |
 |---|---|---|
-| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
-| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
-| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles (user-config tuning) |
+| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles (user-config tuning) |
+| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat (user-config tuning) |
 | `temperature` | `0.373` | Sampling temperature for agent calls |
 | `maxTokens` | `4096` | Max tokens per LLM response |
 | `maxSteps` | `20` | Max tool-call iterations per ReAct loop |
+
+**Precedence:** `LLM_MODEL` (env) > role-specific models (user-config) > defaults
+
+- Use `managementModel`/`screeningModel`/`generalModel` in `user-config.json` for per-role tuning
+- Set `LLM_MODEL` in `.env` to override all roles globally (e.g., for testing a new model)
 
 > Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-6`
 
@@ -562,15 +567,7 @@ Opt-in collective intelligence — share lessons and pool outcomes, receive crow
 
 ### Setup
 
-Configure via `user-config.json` (recommended):
-```json
-{
-  "hiveMindUrl": "https://meridian-hive-api-production.up.railway.app",
-  "hiveMindApiKey": "YOUR_TOKEN"
-}
-```
-
-Or via environment variables:
+Configure via environment variables in `.env`:
 ```env
 HIVE_MIND_URL=https://meridian-hive-api-production.up.railway.app
 HIVE_MIND_API_KEY=YOUR_TOKEN
@@ -581,15 +578,14 @@ Or register via CLI:
 npx tsx -e "import('./hive-mind.ts').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
 ```
 
-Get `YOUR_TOKEN` from the private Telegram discussion. Credentials are saved to `user-config.json` automatically when using the CLI register method.
+Get `YOUR_TOKEN` from the private Telegram discussion. After registration, you must manually add `HIVE_MIND_URL`, `HIVE_MIND_API_KEY`, and `HIVE_MIND_AGENT_ID` to your `.env` file.
 
 ### Disable
 
-```json
-{
-  "hiveMindUrl": "",
-  "hiveMindApiKey": ""
-}
+Clear the environment variables in `.env`:
+```env
+HIVE_MIND_URL=
+HIVE_MIND_API_KEY=
 ```
 
 ### Self-hosting

@@ -9,7 +9,6 @@ import type {
   UserConfigPartial,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
-import { LLM, RISK, SCREENING } from "./constants.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
 /**
@@ -71,14 +70,14 @@ if (fs.existsSync(USER_CONFIG_PATH)) {
 // This follows 12-Factor App best practices:
 //   - .env = secrets + environment-specific settings (never committed)
 //   - user-config.json = user preferences (portable, can be shared)
+//
+// SECURITY: Secrets (walletKey, llmApiKey, hiveMindApiKey) are ONLY stored in .env
+// Never store secrets in user-config.json - they are not read from there.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Copy user-config values to process.env if not already set (maintains precedence)
 // These are needed by code that reads directly from process.env (agent.ts, tools/)
 if (u.rpcUrl) process.env.RPC_URL ||= u.rpcUrl;
-if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
-if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
-if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
 
 // Helper to check if env value is meaningfully set
 function hasEnvValue(value: string | undefined): value is string {
@@ -204,13 +203,11 @@ export const config: Config = {
     temperature: u.temperature ?? 0.373,
     maxTokens: u.maxTokens ?? 4096,
     maxSteps: u.maxSteps ?? 20,
-    // Precedence: .env LLM_MODEL > user-config role-specific > user-config llmModel > defaults
+    // Precedence: .env LLM_MODEL (global override) > user-config role-specific (tuning) > defaults
     // Default models updated after healer-alpha/hunter-alpha were removed from OpenRouter
-    managementModel:
-      process.env.LLM_MODEL ?? u.managementModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
-    screeningModel:
-      process.env.LLM_MODEL ?? u.screeningModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
-    generalModel: process.env.LLM_MODEL ?? u.generalModel ?? u.llmModel ?? "xiaomi/mimo-v2-omni",
+    managementModel: process.env.LLM_MODEL ?? u.managementModel ?? "xiaomi/mimo-v2-omni",
+    screeningModel: process.env.LLM_MODEL ?? u.screeningModel ?? "xiaomi/mimo-v2-omni",
+    generalModel: process.env.LLM_MODEL ?? u.generalModel ?? "xiaomi/mimo-v2-omni",
   },
 
   // ─── Common Token Mints ────────────────

@@ -49,13 +49,11 @@ export interface UserConfig {
   managementIntervalMin: number;
   screeningIntervalMin: number;
   llmProvider: string;
-  llmBaseUrl: string;
-  llmModel: string;
-  llmApiKey?: string;
   telegramChatId: string;
   dryRun: boolean;
-  // Legacy fields that may exist in existing configs
+  // Legacy fields that may exist in existing configs (secrets now only in .env)
   walletKey?: string;
+  llmApiKey?: string;
   [key: string]: unknown;
 }
 
@@ -117,8 +115,6 @@ export interface SetupSummary {
   managementIntervalMin: number;
   screeningIntervalMin: number;
   providerLabel: string;
-  llmModel: string;
-  llmBaseUrl: string;
   telegramEnabled: boolean;
   envPath: string;
   configPath: string;
