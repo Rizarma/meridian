@@ -33,6 +33,10 @@ meridian.db-wal
 # Auto-generated backups
 backups/
 
+# Generated reports
+report/
+
+
 # Logs
 logs/
 
