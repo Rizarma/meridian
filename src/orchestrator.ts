@@ -419,6 +419,7 @@ export async function start(): Promise<void> {
   const dbSetup = setupDatabase();
   if (!dbSetup.success) {
     log("startup_error", `Database setup failed: ${dbSetup.message}`);
+    throw new Error(dbSetup.message);
   } else {
     log("startup", dbSetup.message);
   }
