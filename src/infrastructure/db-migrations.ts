@@ -58,7 +58,7 @@ export function initSchema(): void {
     )
   `);
 
-  // Position snapshots - periodic state captures
+  // Position snapshots - periodic state captures for active positions
   db.exec(`
     CREATE TABLE IF NOT EXISTS position_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +71,7 @@ export function initSchema(): void {
       minutes_out_of_range INTEGER,
       age_minutes INTEGER,
       data_json TEXT,
-      FOREIGN KEY (position_address) REFERENCES positions(address) ON DELETE CASCADE
+      FOREIGN KEY (position_address) REFERENCES position_state(position) ON DELETE CASCADE
     )
   `);
 
@@ -83,7 +83,7 @@ export function initSchema(): void {
       event_type TEXT NOT NULL,
       ts TEXT NOT NULL DEFAULT (datetime('now')),
       data_json TEXT,
-      FOREIGN KEY (position_address) REFERENCES positions(address) ON DELETE CASCADE
+      FOREIGN KEY (position_address) REFERENCES position_state(position) ON DELETE CASCADE
     )
   `);
 
