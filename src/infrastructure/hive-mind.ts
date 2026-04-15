@@ -22,7 +22,9 @@
 
 import fs from "node:fs";
 import { config } from "../config/config.js";
-import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
+import { USER_CONFIG_PATH } from "../config/paths.js";
+import { listLessons } from "../domain/lessons.js";
+import { getAllPoolDeploys } from "../domain/pool-memory.js";
 import type {
   HiveMindConfig,
   HivePulse,
@@ -66,14 +68,6 @@ function writeConfig(patch: Record<string, unknown>): void {
   const current = readConfig();
   const merged = { ...current, ...patch };
   fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
-}
-
-function readJsonFile(filePath: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch {
-    return null;
-  }
 }
 
 async function fetchWithTimeout(
@@ -157,49 +151,36 @@ export async function syncToHive(): Promise<void> {
     // Debounce
     const now = Date.now();
     if (now - _lastSyncTime < SYNC_DEBOUNCE_MS) return;
-    _lastSyncTime = now;
 
     // ── Collect local data ──────────────────────────
 
-    // Lessons
-    const lessonsData = readJsonFile(LESSONS_FILE) || { lessons: [], performance: [] };
-    const lessons = (lessonsData.lessons || []) as Array<{
-      id: number;
-      rule: string;
-      tags: string[];
-      outcome: string;
-      created_at: string;
-      pinned?: boolean;
-      role?: string | null;
-    }>;
+    // Lessons from SQLite
+    const lessonsResult = listLessons({ limit: 1000, fullData: true });
+    const lessons = lessonsResult.lessons.map((lesson) => ({
+      id: lesson.id,
+      rule: lesson.rule,
+      tags: lesson.tags,
+      outcome: lesson.outcome,
+      created_at: lesson.created_at,
+      pinned: lesson.pinned,
+      role: lesson.role,
+    }));
 
-    // Pool deploys — flatten all pools' deploy arrays
-    const poolMemory = readJsonFile(POOL_MEMORY_FILE) || {};
-    const deploys: Array<{
-      pool_address: string;
-      pool_name?: string;
-      deployed_at?: string;
-      closed_at?: string;
-      pnl_pct?: number;
-      pnl_usd?: number;
-      range_efficiency?: number;
-      minutes_held?: number;
-      close_reason?: string;
-      strategy?: string;
-      volatility?: number;
-      base_mint?: string;
-    }> = [];
-    for (const poolAddr of Object.keys(poolMemory)) {
-      const pool = poolMemory[poolAddr] as {
-        name?: string;
-        deploys?: Array<Record<string, unknown>>;
-      };
-      if (Array.isArray(pool.deploys)) {
-        for (const d of pool.deploys) {
-          deploys.push({ pool_address: poolAddr, pool_name: pool.name, ...d });
-        }
-      }
-    }
+    // Pool deploys from SQLite (convert null to undefined for API compatibility)
+    const deploys = getAllPoolDeploys().map((d) => ({
+      pool_address: d.pool_address,
+      pool_name: d.pool_name ?? undefined,
+      deployed_at: d.deployed_at ?? undefined,
+      closed_at: d.closed_at ?? undefined,
+      pnl_pct: d.pnl_pct ?? undefined,
+      pnl_usd: d.pnl_usd ?? undefined,
+      range_efficiency: d.range_efficiency ?? undefined,
+      minutes_held: d.minutes_held ?? undefined,
+      close_reason: d.close_reason ?? undefined,
+      strategy: d.strategy ?? undefined,
+      volatility: d.volatility ?? undefined,
+      base_mint: d.base_mint ?? undefined,
+    }));
 
     // Screening thresholds from config
     const thresholds = {
@@ -224,6 +205,9 @@ export async function syncToHive(): Promise<void> {
     } catch (e) {
       console.log("[hive]", `Could not load agent stats: ${getErrorMessage(e)}`);
     }
+
+    // Update debounce timer after successful data collection
+    _lastSyncTime = now;
 
     // ── POST to /api/sync ───────────────────────────
 

@@ -7,8 +7,8 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
+import { get, parseJson, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
-import { query, run, transaction, get, stringifyJson, parseJson } from "../infrastructure/db.js";
 import type {
   LessonContext,
   LessonEntry,
@@ -436,6 +436,7 @@ export function listLessons({
   pinned = null,
   tag = null,
   limit = 30,
+  fullData = false,
 }: ListLessonsOptions = {}): ListLessonsResult {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
@@ -473,12 +474,12 @@ export function listLessons({
 
   const lessons: ListedLesson[] = rows.map((row) => ({
     id: row.id,
-    rule: row.rule.slice(0, 120),
+    rule: fullData ? row.rule : row.rule.slice(0, 120),
     tags: parseJson<string[]>(row.tags) ?? [],
     outcome: row.outcome as LessonOutcome,
     pinned: Boolean(row.pinned),
     role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
-    created_at: row.created_at?.slice(0, 10) || "unknown",
+    created_at: fullData ? row.created_at : row.created_at?.slice(0, 10) || "unknown",
   }));
 
   return { total, lessons };

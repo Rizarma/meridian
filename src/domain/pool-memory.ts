@@ -8,16 +8,16 @@
 import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { config } from "../config/config.js";
+import { get, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
-import { run, query, get, transaction, stringifyJson } from "../infrastructure/db.js";
 import type {
   PoolMemoryDB,
   PoolMemoryEntry,
   PoolMemoryInput,
   PoolMemoryResult,
   PoolNoteResult,
-  PositionSnapshotInput,
   PoolSnapshot,
+  PositionSnapshotInput,
 } from "../types/pool-memory.js";
 
 // Optional: Enable dual-write to JSON for safety during transition
@@ -140,7 +140,7 @@ function getOrCreatePool(poolAddress: string, name?: string): PoolRow {
       poolAddress,
       name || poolAddress.slice(0, 8)
     );
-    pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress)!;
+    pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress) as PoolRow;
   }
 
   return pool;
@@ -175,9 +175,12 @@ function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
  * Record a closed deploy into the database.
  * Called automatically from recordPerformance() in lessons.js.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: large transaction block
 export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): void {
   if (!poolAddress) return;
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: large transaction block
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: large transaction block
   transaction(() => {
     // Get or create pool
     const pool = getOrCreatePool(poolAddress, deployData.pool_name);
@@ -304,7 +307,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
         );
         log(
           "pool-memory",
-          `Base mint cooldown set for ${baseMint!.slice(0, 8)} until ${cooldownUntil} (${reason})`
+          `Base mint cooldown set for ${baseMint?.slice(0, 8)} until ${cooldownUntil} (${reason})`
         );
       }
     }
@@ -503,9 +506,76 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
 }
 
 /**
+ * Get all pool deploys across all pools — used for hive-mind sync.
+ * Returns flattened deploy history with pool metadata.
+ */
+export function getAllPoolDeploys(): Array<{
+  pool_address: string;
+  pool_name: string | null;
+  deployed_at: string | null;
+  closed_at: string | null;
+  pnl_pct: number | null;
+  pnl_usd: number | null;
+  range_efficiency: number | null;
+  minutes_held: number | null;
+  close_reason: string | null;
+  strategy: string | null;
+  volatility: number | null;
+  base_mint: string | null;
+}> {
+  const rows = query<{
+    pool_address: string;
+    name: string | null;
+    base_mint: string | null;
+    deployed_at: string | null;
+    closed_at: string | null;
+    pnl_pct: number | null;
+    pnl_usd: number | null;
+    range_efficiency: number | null;
+    minutes_held: number | null;
+    close_reason: string | null;
+    strategy: string | null;
+    volatility_at_deploy: number | null;
+  }>(
+    `SELECT
+      pd.pool_address,
+      p.name,
+      p.base_mint,
+      pd.deployed_at,
+      pd.closed_at,
+      pd.pnl_pct,
+      pd.pnl_usd,
+      pd.range_efficiency,
+      pd.minutes_held,
+      pd.close_reason,
+      pd.strategy,
+      pd.volatility_at_deploy
+    FROM pool_deploys pd
+    JOIN pools p ON pd.pool_address = p.address
+    ORDER BY pd.closed_at DESC`
+  );
+
+  return rows.map((row) => ({
+    pool_address: row.pool_address,
+    pool_name: row.name,
+    base_mint: row.base_mint,
+    deployed_at: row.deployed_at,
+    closed_at: row.closed_at,
+    pnl_pct: row.pnl_pct,
+    pnl_usd: row.pnl_usd,
+    range_efficiency: row.range_efficiency,
+    minutes_held: row.minutes_held,
+    close_reason: row.close_reason,
+    strategy: row.strategy,
+    volatility: row.volatility_at_deploy,
+  }));
+}
+
+/**
  * Recall focused context for a specific pool — used before screening or management.
  * Returns a short formatted string ready for injection into the agent goal.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pool recall aggregates multiple data sources
 export function recallForPool(poolAddress: string): string | null {
   if (!poolAddress) return null;
 
