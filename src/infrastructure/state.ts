@@ -39,7 +39,7 @@ import type {
 import type { Strategy } from "../types/strategy.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
-import { get, getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
+import { get, parseJson, query, run, stringifyJson, transaction } from "./db.js";
 import { log } from "./logger.js";
 
 // Legacy JSON export path for debugging
@@ -65,93 +65,18 @@ export interface TrackPositionParams {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Database Schema Helpers
+// Database Schema
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Initialize database tables if they don't exist.
- * NOTE: This is now called after setupDatabase() to avoid schema conflicts.
- * The position_state table is separate from the positions table in db-migrations.ts
- * which tracks position history/records.
+ * NOTE: Tables are created by initSchema() in db-migrations.ts:
+ * - position_state: Active position metadata for management
+ * - position_state_events: Events for active positions
+ * - state_metadata: Singleton values (last briefing date, etc.)
+ *
+ * These are separate from the positions/position_events tables which store
+ * historical records with a different schema.
  */
-function initTables(): void {
-  const db = getDb();
-
-  // Position state table - tracks active position metadata for management
-  // NOTE: This is DIFFERENT from the positions table in db-migrations.ts
-  // which stores position history with a different schema.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS position_state (
-      position TEXT PRIMARY KEY,
-      pool TEXT NOT NULL,
-      pool_name TEXT NOT NULL,
-      strategy TEXT NOT NULL,
-      strategy_config TEXT,
-      bin_range TEXT,
-      amount_sol REAL NOT NULL,
-      amount_x REAL NOT NULL DEFAULT 0,
-      active_bin_at_deploy INTEGER NOT NULL,
-      bin_step INTEGER NOT NULL,
-      volatility REAL NOT NULL,
-      fee_tvl_ratio REAL NOT NULL,
-      initial_fee_tvl_24h REAL NOT NULL,
-      organic_score REAL NOT NULL,
-      initial_value_usd REAL NOT NULL,
-      signal_snapshot TEXT,
-      deployed_at TEXT NOT NULL,
-      out_of_range_since TEXT,
-      last_claim_at TEXT,
-      total_fees_claimed_usd REAL NOT NULL DEFAULT 0,
-      rebalance_count INTEGER NOT NULL DEFAULT 0,
-      closed INTEGER NOT NULL DEFAULT 0,
-      closed_at TEXT,
-      notes TEXT,
-      peak_pnl_pct REAL NOT NULL DEFAULT 0,
-      pending_peak_pnl_pct REAL,
-      pending_peak_started_at TEXT,
-      trailing_active INTEGER NOT NULL DEFAULT 0,
-      instruction TEXT,
-      pending_trailing_current_pnl_pct REAL,
-      pending_trailing_peak_pnl_pct REAL,
-      pending_trailing_drop_pct REAL,
-      pending_trailing_started_at TEXT,
-      confirmed_trailing_exit_reason TEXT,
-      confirmed_trailing_exit_until TEXT,
-      last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Position events table (for state tracking events)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS position_state_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      action TEXT NOT NULL,
-      position TEXT,
-      pool_name TEXT,
-      reason TEXT
-    )
-  `);
-
-  // Metadata table for singleton values
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS state_metadata (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    )
-  `);
-
-  // Index for faster queries
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_position_state_closed ON position_state(closed);
-    CREATE INDEX IF NOT EXISTS idx_position_state_events_ts ON position_state_events(ts);
-    CREATE INDEX IF NOT EXISTS idx_position_state_events_position ON position_state_events(position);
-  `);
-}
-
-// Initialize tables on module load (safe because CREATE TABLE IF NOT EXISTS)
-// NOTE: setupDatabase() in orchestrator.ts should be called before any queries
-initTables();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Row Mapping Helpers

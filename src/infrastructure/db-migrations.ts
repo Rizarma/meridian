@@ -6,6 +6,8 @@ import { getDb, parseJson, query, run, stringifyJson, transaction } from "./db.j
 // Legacy blacklist files for migration
 const TOKEN_BLACKLIST_FILE = path.join(PROJECT_ROOT, "token-blacklist.json");
 const DEV_BLOCKLIST_FILE = path.join(PROJECT_ROOT, "dev-blocklist.json");
+const SMART_WALLETS_FILE = path.join(PROJECT_ROOT, "smart-wallets.json");
+const STRATEGY_LIBRARY_FILE = path.join(PROJECT_ROOT, "strategy-library.json");
 
 import { log } from "./logger.js";
 
@@ -218,6 +220,106 @@ export function initSchema(): void {
     )
   `);
 
+  // Smart wallets table - tracked KOL/alpha wallets
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS smart_wallets (
+      address TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'alpha',
+      type TEXT NOT NULL DEFAULT 'lp',
+      added_at TEXT NOT NULL
+    )
+  `);
+
+  // Strategies table - LP strategies library
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS strategies (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      author TEXT NOT NULL,
+      lp_strategy TEXT NOT NULL,
+      token_criteria_json TEXT NOT NULL DEFAULT '{}',
+      entry_criteria_json TEXT NOT NULL DEFAULT '{}',
+      range_criteria_json TEXT NOT NULL DEFAULT '{}',
+      exit_criteria_json TEXT NOT NULL DEFAULT '{}',
+      best_for TEXT NOT NULL DEFAULT '',
+      raw TEXT NOT NULL DEFAULT '',
+      added_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  // Active strategy tracking (singleton table)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS active_strategy (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      active_id TEXT
+    )
+  `);
+
+  // Position state table - tracks active position metadata for management
+  // NOTE: This is DIFFERENT from the positions table above which stores position history
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS position_state (
+      position TEXT PRIMARY KEY,
+      pool TEXT NOT NULL,
+      pool_name TEXT NOT NULL,
+      strategy TEXT NOT NULL,
+      strategy_config TEXT,
+      bin_range TEXT,
+      amount_sol REAL NOT NULL,
+      amount_x REAL NOT NULL DEFAULT 0,
+      active_bin_at_deploy INTEGER NOT NULL,
+      bin_step INTEGER NOT NULL,
+      volatility REAL NOT NULL,
+      fee_tvl_ratio REAL NOT NULL,
+      initial_fee_tvl_24h REAL NOT NULL,
+      organic_score REAL NOT NULL,
+      initial_value_usd REAL NOT NULL,
+      signal_snapshot TEXT,
+      deployed_at TEXT NOT NULL,
+      out_of_range_since TEXT,
+      last_claim_at TEXT,
+      total_fees_claimed_usd REAL NOT NULL DEFAULT 0,
+      rebalance_count INTEGER NOT NULL DEFAULT 0,
+      closed INTEGER NOT NULL DEFAULT 0,
+      closed_at TEXT,
+      notes TEXT,
+      peak_pnl_pct REAL NOT NULL DEFAULT 0,
+      pending_peak_pnl_pct REAL,
+      pending_peak_started_at TEXT,
+      trailing_active INTEGER NOT NULL DEFAULT 0,
+      instruction TEXT,
+      pending_trailing_current_pnl_pct REAL,
+      pending_trailing_peak_pnl_pct REAL,
+      pending_trailing_drop_pct REAL,
+      pending_trailing_started_at TEXT,
+      confirmed_trailing_exit_reason TEXT,
+      confirmed_trailing_exit_until TEXT,
+      last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Position state events table - tracks events for active positions
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS position_state_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      action TEXT NOT NULL,
+      position TEXT,
+      pool_name TEXT,
+      reason TEXT
+    )
+  `);
+
+  // State metadata table - singleton values like last briefing date
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS state_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
+
   // Create indexes for common queries
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_positions_pool ON positions(pool);
@@ -236,6 +338,15 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_signal_weight_history_signal ON signal_weight_history(signal);
     CREATE INDEX IF NOT EXISTS idx_token_blacklist_added_at ON token_blacklist(added_at);
     CREATE INDEX IF NOT EXISTS idx_dev_blocklist_added_at ON dev_blocklist(added_at);
+    CREATE INDEX IF NOT EXISTS idx_smart_wallets_category ON smart_wallets(category);
+    CREATE INDEX IF NOT EXISTS idx_smart_wallets_added_at ON smart_wallets(added_at);
+    CREATE INDEX IF NOT EXISTS idx_strategies_author ON strategies(author);
+    CREATE INDEX IF NOT EXISTS idx_strategies_added_at ON strategies(added_at);
+    CREATE INDEX IF NOT EXISTS idx_position_state_closed ON position_state(closed);
+    CREATE INDEX IF NOT EXISTS idx_position_state_pool ON position_state(pool);
+    CREATE INDEX IF NOT EXISTS idx_position_state_deployed_at ON position_state(deployed_at);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_ts ON position_state_events(ts);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_position ON position_state_events(position);
   `);
 
   // Migration log - track migration attempts for rollback
@@ -322,277 +433,353 @@ export function migrateFromJson(): { success: boolean; message: string } {
 
       // Migrate lessons.json
       if (fs.existsSync(LESSONS_FILE)) {
-        const lessonsData = JSON.parse(fs.readFileSync(LESSONS_FILE, "utf-8")) as {
-          lessons?: unknown[];
-          performance?: unknown[];
-        };
+        try {
+          const lessonsData = JSON.parse(fs.readFileSync(LESSONS_FILE, "utf-8")) as {
+            lessons?: unknown[];
+            performance?: unknown[];
+          };
 
-        // Migrate lessons
-        if (Array.isArray(lessonsData.lessons)) {
-          for (const lesson of lessonsData.lessons) {
-            const l = lesson as Record<string, unknown>;
-            run(
-              `INSERT INTO lessons (id, rule, tags, outcome, context, pool, pnl_pct, range_efficiency, created_at, pinned, role, data_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              l.id ?? Date.now(),
-              l.rule ?? "",
-              stringifyJson(l.tags ?? []),
-              l.outcome ?? "neutral",
-              l.context ?? null,
-              l.pool ?? null,
-              l.pnl_pct ?? null,
-              l.range_efficiency ?? null,
-              l.created_at ?? new Date().toISOString(),
-              l.pinned ?? 0,
-              l.role ?? "rule",
-              stringifyJson(l)
-            );
-            migratedLessons++;
+          // Migrate lessons
+          if (Array.isArray(lessonsData.lessons)) {
+            for (const lesson of lessonsData.lessons) {
+              const l = lesson as Record<string, unknown>;
+              run(
+                `INSERT INTO lessons (id, rule, tags, outcome, context, pool, pnl_pct, range_efficiency, created_at, pinned, role, data_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                l.id ?? Date.now(),
+                l.rule ?? "",
+                stringifyJson(l.tags ?? []),
+                l.outcome ?? "neutral",
+                l.context ?? null,
+                l.pool ?? null,
+                l.pnl_pct ?? null,
+                l.range_efficiency ?? null,
+                l.created_at ?? new Date().toISOString(),
+                l.pinned ?? 0,
+                l.role ?? "rule",
+                stringifyJson(l)
+              );
+              migratedLessons++;
+            }
           }
-        }
 
-        // Migrate performance records
-        if (Array.isArray(lessonsData.performance)) {
-          for (const perf of lessonsData.performance) {
-            const p = perf as Record<string, unknown>;
-            run(
-              `INSERT INTO performance (position, pool, pool_name, strategy, amount_sol, pnl_pct, pnl_usd, 
-                fees_earned_usd, initial_value_usd, final_value_usd, minutes_held, minutes_in_range,
-                range_efficiency, close_reason, base_mint, bin_step, volatility, fee_tvl_ratio, 
-                organic_score, bin_range, recorded_at, data_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              p.position ?? null,
-              p.pool ?? null,
-              p.pool_name ?? null,
-              p.strategy ?? null,
-              p.amount_sol ?? null,
-              p.pnl_pct ?? null,
-              p.pnl_usd ?? null,
-              p.fees_earned_usd ?? null,
-              p.initial_value_usd ?? null,
-              p.final_value_usd ?? null,
-              p.minutes_held ?? null,
-              p.minutes_in_range ?? null,
-              p.range_efficiency ?? null,
-              p.close_reason ?? null,
-              p.base_mint ?? null,
-              p.bin_step ?? null,
-              p.volatility ?? null,
-              p.fee_tvl_ratio ?? null,
-              p.organic_score ?? null,
-              stringifyJson(p.bin_range ?? null),
-              p.recorded_at ?? new Date().toISOString(),
-              stringifyJson(p)
-            );
-            migratedPerformance++;
+          // Migrate performance records
+          if (Array.isArray(lessonsData.performance)) {
+            for (const perf of lessonsData.performance) {
+              const p = perf as Record<string, unknown>;
+              run(
+                `INSERT INTO performance (position, pool, pool_name, strategy, amount_sol, pnl_pct, pnl_usd, 
+                  fees_earned_usd, initial_value_usd, final_value_usd, minutes_held, minutes_in_range,
+                  range_efficiency, close_reason, base_mint, bin_step, volatility, fee_tvl_ratio, 
+                  organic_score, bin_range, recorded_at, data_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                p.position ?? null,
+                p.pool ?? null,
+                p.pool_name ?? null,
+                p.strategy ?? null,
+                p.amount_sol ?? null,
+                p.pnl_pct ?? null,
+                p.pnl_usd ?? null,
+                p.fees_earned_usd ?? null,
+                p.initial_value_usd ?? null,
+                p.final_value_usd ?? null,
+                p.minutes_held ?? null,
+                p.minutes_in_range ?? null,
+                p.range_efficiency ?? null,
+                p.close_reason ?? null,
+                p.base_mint ?? null,
+                p.bin_step ?? null,
+                p.volatility ?? null,
+                p.fee_tvl_ratio ?? null,
+                p.organic_score ?? null,
+                stringifyJson(p.bin_range ?? null),
+                p.recorded_at ?? new Date().toISOString(),
+                stringifyJson(p)
+              );
+              migratedPerformance++;
+            }
           }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to parse ${LESSONS_FILE}: ${errorMessage}`);
+          // Continue with other files, don't fail entire migration
         }
       }
 
       // Migrate pool-memory.json
       if (fs.existsSync(POOL_MEMORY_FILE)) {
-        const poolData = JSON.parse(fs.readFileSync(POOL_MEMORY_FILE, "utf-8")) as Record<
-          string,
-          unknown
-        >;
+        try {
+          const poolData = JSON.parse(fs.readFileSync(POOL_MEMORY_FILE, "utf-8")) as Record<
+            string,
+            unknown
+          >;
 
-        for (const [poolAddress, poolInfo] of Object.entries(poolData)) {
-          const p = poolInfo as Record<string, unknown>;
+          for (const [poolAddress, poolInfo] of Object.entries(poolData)) {
+            const p = poolInfo as Record<string, unknown>;
 
-          // Insert pool
-          run(
-            `INSERT INTO pools (address, name, base_mint, total_deploys, avg_pnl_pct, win_rate, 
-              adjusted_win_rate, cooldown_until, cooldown_reason, base_mint_cooldown_until, 
-              base_mint_cooldown_reason, data_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            poolAddress,
-            p.name ?? null,
-            p.base_mint ?? null,
-            p.total_deploys ?? 0,
-            p.avg_pnl_pct ?? null,
-            p.win_rate ?? null,
-            p.adjusted_win_rate ?? null,
-            p.cooldown_until ?? null,
-            p.cooldown_reason ?? null,
-            p.base_mint_cooldown_until ?? null,
-            p.base_mint_cooldown_reason ?? null,
-            stringifyJson(p)
-          );
-          migratedPools++;
+            // Insert pool
+            run(
+              `INSERT INTO pools (address, name, base_mint, total_deploys, avg_pnl_pct, win_rate, 
+                adjusted_win_rate, cooldown_until, cooldown_reason, base_mint_cooldown_until, 
+                base_mint_cooldown_reason, data_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              poolAddress,
+              p.name ?? null,
+              p.base_mint ?? null,
+              p.total_deploys ?? 0,
+              p.avg_pnl_pct ?? null,
+              p.win_rate ?? null,
+              p.adjusted_win_rate ?? null,
+              p.cooldown_until ?? null,
+              p.cooldown_reason ?? null,
+              p.base_mint_cooldown_until ?? null,
+              p.base_mint_cooldown_reason ?? null,
+              stringifyJson(p)
+            );
+            migratedPools++;
 
-          // Migrate deploys
-          if (Array.isArray(p.deploys)) {
-            for (const deploy of p.deploys) {
-              const d = deploy as Record<string, unknown>;
-              run(
-                `INSERT INTO pool_deploys (pool_address, deployed_at, closed_at, pnl_pct, pnl_usd,
-                  range_efficiency, minutes_held, close_reason, strategy, volatility_at_deploy, data_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                poolAddress,
-                d.deployed_at ?? null,
-                d.closed_at ?? null,
-                d.pnl_pct ?? null,
-                d.pnl_usd ?? null,
-                d.range_efficiency ?? null,
-                d.minutes_held ?? null,
-                d.close_reason ?? null,
-                d.strategy ?? null,
-                d.volatility_at_deploy ?? null,
-                stringifyJson(d)
-              );
-              migratedDeploys++;
-            }
-          }
-
-          // Migrate snapshots - skip if no position reference since FK constraint requires valid position
-          if (Array.isArray(p.snapshots)) {
-            for (const snapshot of p.snapshots) {
-              const s = snapshot as Record<string, unknown>;
-              // Only migrate snapshots that have a valid position reference
-              const positionAddr = s.position as string | undefined;
-              if (!positionAddr) {
-                // Log warning and collect orphaned snapshot for backup
-                console.warn(
-                  `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`
+            // Migrate deploys
+            if (Array.isArray(p.deploys)) {
+              for (const deploy of p.deploys) {
+                const d = deploy as Record<string, unknown>;
+                run(
+                  `INSERT INTO pool_deploys (pool_address, deployed_at, closed_at, pnl_pct, pnl_usd,
+                    range_efficiency, minutes_held, close_reason, strategy, volatility_at_deploy, data_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  poolAddress,
+                  d.deployed_at ?? null,
+                  d.closed_at ?? null,
+                  d.pnl_pct ?? null,
+                  d.pnl_usd ?? null,
+                  d.range_efficiency ?? null,
+                  d.minutes_held ?? null,
+                  d.close_reason ?? null,
+                  d.strategy ?? null,
+                  d.volatility_at_deploy ?? null,
+                  stringifyJson(d)
                 );
-                orphanedSnapshots.push({ ...s, _poolAddress: poolAddress });
-                continue;
+                migratedDeploys++;
               }
+            }
 
-              run(
-                `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
-                  unclaimed_fees_usd, minutes_out_of_range, age_minutes, data_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                positionAddr,
-                s.ts ?? new Date().toISOString(),
-                s.pnl_pct ?? null,
-                s.pnl_usd ?? null,
-                s.in_range ? 1 : 0,
-                s.unclaimed_fees_usd ?? null,
-                s.minutes_out_of_range ?? null,
-                s.age_minutes ?? null,
-                stringifyJson(s)
-              );
-              migratedSnapshots++;
+            // Migrate snapshots - skip if no position reference since FK constraint requires valid position
+            if (Array.isArray(p.snapshots)) {
+              for (const snapshot of p.snapshots) {
+                const s = snapshot as Record<string, unknown>;
+                // Only migrate snapshots that have a valid position reference
+                const positionAddr = s.position as string | undefined;
+                if (!positionAddr) {
+                  // Log warning and collect orphaned snapshot for backup
+                  console.warn(
+                    `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`
+                  );
+                  orphanedSnapshots.push({ ...s, _poolAddress: poolAddress });
+                  continue;
+                }
+
+                run(
+                  `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
+                    unclaimed_fees_usd, minutes_out_of_range, age_minutes, data_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  positionAddr,
+                  s.ts ?? new Date().toISOString(),
+                  s.pnl_pct ?? null,
+                  s.pnl_usd ?? null,
+                  s.in_range ? 1 : 0,
+                  s.unclaimed_fees_usd ?? null,
+                  s.minutes_out_of_range ?? null,
+                  s.age_minutes ?? null,
+                  stringifyJson(s)
+                );
+                migratedSnapshots++;
+              }
+            }
+
+            // Migrate notes as position events or store in pool data
+            if (Array.isArray(p.notes)) {
+              for (const note of p.notes) {
+                const n = note as Record<string, unknown>;
+                // Store as a pool event in position_events with special type
+                run(
+                  `INSERT INTO position_events (position_address, event_type, ts, data_json)
+                   VALUES (?, ?, ?, ?)`,
+                  poolAddress,
+                  "pool_note",
+                  n.added_at ?? new Date().toISOString(),
+                  stringifyJson(n)
+                );
+              }
             }
           }
-
-          // Migrate notes as position events or store in pool data
-          if (Array.isArray(p.notes)) {
-            for (const note of p.notes) {
-              const n = note as Record<string, unknown>;
-              // Store as a pool event in position_events with special type
-              run(
-                `INSERT INTO position_events (position_address, event_type, ts, data_json)
-                 VALUES (?, ?, ?, ?)`,
-                poolAddress,
-                "pool_note",
-                n.added_at ?? new Date().toISOString(),
-                stringifyJson(n)
-              );
-            }
-          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to parse ${POOL_MEMORY_FILE}: ${errorMessage}`);
+          // Continue with other files, don't fail entire migration
         }
       }
 
       // Migrate state.json positions if exists
       const stateFile = path.join(PROJECT_ROOT, "state.json");
       if (fs.existsSync(stateFile)) {
-        const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
-          positions?: Record<string, unknown>;
-        };
+        try {
+          const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
+            positions?: Record<string, unknown>;
+          };
 
-        if (stateData.positions) {
-          for (const [positionAddress, posData] of Object.entries(stateData.positions)) {
-            const pos = posData as Record<string, unknown>;
+          if (stateData.positions) {
+            for (const [positionAddress, posData] of Object.entries(stateData.positions)) {
+              const pos = posData as Record<string, unknown>;
 
-            // Build trailing_state JSON
-            const trailingState = {
-              peak_pnl_pct: pos.peak_pnl_pct,
-              pending_peak_pnl_pct: pos.pending_peak_pnl_pct,
-              pending_peak_started_at: pos.pending_peak_started_at,
-              trailing_active: pos.trailing_active,
-              pending_trailing_current_pnl_pct: pos.pending_trailing_current_pnl_pct,
-              pending_trailing_peak_pnl_pct: pos.pending_trailing_peak_pnl_pct,
-              pending_trailing_drop_pct: pos.pending_trailing_drop_pct,
-              pending_trailing_started_at: pos.pending_trailing_started_at,
-              confirmed_trailing_exit_reason: pos.confirmed_trailing_exit_reason,
-              confirmed_trailing_exit_until: pos.confirmed_trailing_exit_until,
-            };
+              // Build trailing_state JSON
+              const trailingState = {
+                peak_pnl_pct: pos.peak_pnl_pct,
+                pending_peak_pnl_pct: pos.pending_peak_pnl_pct,
+                pending_peak_started_at: pos.pending_peak_started_at,
+                trailing_active: pos.trailing_active,
+                pending_trailing_current_pnl_pct: pos.pending_trailing_current_pnl_pct,
+                pending_trailing_peak_pnl_pct: pos.pending_trailing_peak_pnl_pct,
+                pending_trailing_drop_pct: pos.pending_trailing_drop_pct,
+                pending_trailing_started_at: pos.pending_trailing_started_at,
+                confirmed_trailing_exit_reason: pos.confirmed_trailing_exit_reason,
+                confirmed_trailing_exit_until: pos.confirmed_trailing_exit_until,
+              };
 
-            run(
-              `INSERT OR REPLACE INTO positions (address, pool, pool_name, strategy, deployed_at, 
-                closed_at, closed, amount_sol, pnl_pct, pnl_usd, fees_earned_usd, initial_value_usd,
-                final_value_usd, minutes_held, close_reason, trailing_state, notes, data_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              positionAddress,
-              pos.pool ?? null,
-              pos.pool_name ?? null,
-              pos.strategy ?? null,
-              pos.deployed_at ?? new Date().toISOString(),
-              pos.closed_at ?? null,
-              pos.closed ? 1 : 0,
-              pos.amount_sol ?? null,
-              pos.pnl_pct ?? null,
-              pos.pnl_usd ?? null,
-              pos.total_fees_claimed_usd ?? null,
-              pos.initial_value_usd ?? null,
-              pos.final_value_usd ?? null,
-              pos.minutes_held ?? null,
-              pos.close_reason ?? null,
-              stringifyJson(trailingState),
-              stringifyJson(pos.notes ?? []),
-              stringifyJson(pos)
-            );
-            migratedPositions++;
+              run(
+                `INSERT OR REPLACE INTO positions (address, pool, pool_name, strategy, deployed_at,
+                  closed_at, closed, amount_sol, pnl_pct, pnl_usd, fees_earned_usd, initial_value_usd,
+                  final_value_usd, minutes_held, close_reason, trailing_state, notes, data_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                positionAddress,
+                pos.pool ?? null,
+                pos.pool_name ?? null,
+                pos.strategy ?? null,
+                pos.deployed_at ?? new Date().toISOString(),
+                pos.closed_at ?? null,
+                pos.closed ? 1 : 0,
+                pos.amount_sol ?? null,
+                pos.pnl_pct ?? null,
+                pos.pnl_usd ?? null,
+                pos.total_fees_claimed_usd ?? null,
+                pos.initial_value_usd ?? null,
+                pos.final_value_usd ?? null,
+                pos.minutes_held ?? null,
+                pos.close_reason ?? null,
+                stringifyJson(trailingState),
+                stringifyJson(pos.notes ?? []),
+                stringifyJson(pos)
+              );
+              migratedPositions++;
+
+              // Also migrate to position_state table for open positions (active management)
+              if (!pos.closed) {
+                run(
+                  `INSERT OR REPLACE INTO position_state (
+                    position, pool, pool_name, strategy, strategy_config, bin_range, amount_sol, amount_x,
+                    active_bin_at_deploy, bin_step, volatility, fee_tvl_ratio, initial_fee_tvl_24h,
+                    organic_score, initial_value_usd, signal_snapshot, deployed_at, out_of_range_since,
+                    last_claim_at, total_fees_claimed_usd, rebalance_count, closed, closed_at, notes,
+                    peak_pnl_pct, pending_peak_pnl_pct, pending_peak_started_at, trailing_active,
+                    instruction, pending_trailing_current_pnl_pct, pending_trailing_peak_pnl_pct,
+                    pending_trailing_drop_pct, pending_trailing_started_at, confirmed_trailing_exit_reason,
+                    confirmed_trailing_exit_until, last_updated
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  positionAddress,
+                  pos.pool ?? "",
+                  pos.pool_name ?? "",
+                  pos.strategy ?? "",
+                  stringifyJson(pos.strategy_config ?? null),
+                  stringifyJson(pos.bin_range ?? null),
+                  pos.amount_sol ?? 0,
+                  pos.amount_x ?? 0,
+                  pos.active_bin_at_deploy ?? 0,
+                  pos.bin_step ?? 0,
+                  pos.volatility ?? 0,
+                  pos.fee_tvl_ratio ?? 0,
+                  pos.initial_fee_tvl_24h ?? 0,
+                  pos.organic_score ?? 0,
+                  pos.initial_value_usd ?? 0,
+                  stringifyJson(pos.signal_snapshot ?? null),
+                  pos.deployed_at ?? new Date().toISOString(),
+                  pos.out_of_range_since ?? null,
+                  pos.last_claim_at ?? null,
+                  pos.total_fees_claimed_usd ?? 0,
+                  pos.rebalance_count ?? 0,
+                  0, // closed = false
+                  null, // closed_at
+                  stringifyJson(pos.notes ?? []),
+                  pos.peak_pnl_pct ?? 0,
+                  pos.pending_peak_pnl_pct ?? null,
+                  pos.pending_peak_started_at ?? null,
+                  pos.trailing_active ? 1 : 0,
+                  pos.instruction ?? null,
+                  pos.pending_trailing_current_pnl_pct ?? null,
+                  pos.pending_trailing_peak_pnl_pct ?? null,
+                  pos.pending_trailing_drop_pct ?? null,
+                  pos.pending_trailing_started_at ?? null,
+                  pos.confirmed_trailing_exit_reason ?? null,
+                  pos.confirmed_trailing_exit_until ?? null,
+                  new Date().toISOString()
+                );
+              }
+            }
           }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to parse ${stateFile}: ${errorMessage}`);
+          // Continue with other files, don't fail entire migration
         }
       }
 
       // Migrate signal-weights.json if exists
       const signalWeightsFile = path.join(PROJECT_ROOT, "signal-weights.json");
       if (fs.existsSync(signalWeightsFile)) {
-        const signalData = JSON.parse(fs.readFileSync(signalWeightsFile, "utf-8")) as {
-          weights?: Record<string, number>;
-          history?: unknown[];
-        };
+        try {
+          const signalData = JSON.parse(fs.readFileSync(signalWeightsFile, "utf-8")) as {
+            weights?: Record<string, number>;
+            history?: unknown[];
+          };
 
-        if (signalData.weights) {
-          for (const [signal, weight] of Object.entries(signalData.weights)) {
-            run(
-              `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
-               VALUES (?, ?, ?)`,
-              signal,
-              weight,
-              new Date().toISOString()
-            );
+          if (signalData.weights) {
+            for (const [signal, weight] of Object.entries(signalData.weights)) {
+              run(
+                `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
+                 VALUES (?, ?, ?)`,
+                signal,
+                weight,
+                new Date().toISOString()
+              );
+            }
           }
-        }
 
-        // Migrate history
-        if (Array.isArray(signalData.history)) {
-          for (const entry of signalData.history) {
-            const h = entry as Record<string, unknown>;
-            if (Array.isArray(h.changes)) {
-              for (const change of h.changes) {
-                const c = change as Record<string, unknown>;
-                run(
-                  `INSERT INTO signal_weight_history (signal, weight_from, weight_to, lift, action,
-                    window_size, win_count, loss_count, changed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  c.signal ?? null,
-                  c.from ?? null,
-                  c.to ?? null,
-                  c.lift ?? null,
-                  c.action ?? null,
-                  h.window_size ?? null,
-                  h.win_count ?? null,
-                  h.loss_count ?? null,
-                  h.timestamp ?? new Date().toISOString()
-                );
+          // Migrate history
+          if (Array.isArray(signalData.history)) {
+            for (const entry of signalData.history) {
+              const h = entry as Record<string, unknown>;
+              if (Array.isArray(h.changes)) {
+                for (const change of h.changes) {
+                  const c = change as Record<string, unknown>;
+                  run(
+                    `INSERT INTO signal_weight_history (signal, weight_from, weight_to, lift, action,
+                      window_size, win_count, loss_count, changed_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    c.signal ?? null,
+                    c.from ?? null,
+                    c.to ?? null,
+                    c.lift ?? null,
+                    c.action ?? null,
+                    h.window_size ?? null,
+                    h.win_count ?? null,
+                    h.loss_count ?? null,
+                    h.timestamp ?? new Date().toISOString()
+                  );
+                }
               }
             }
           }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to parse ${signalWeightsFile}: ${errorMessage}`);
+          // Continue with other files, don't fail entire migration
         }
       }
 
@@ -661,6 +848,113 @@ export function migrateFromJson(): { success: boolean; message: string } {
         }
       }
 
+      // Migrate smart-wallets.json if exists
+      if (fs.existsSync(SMART_WALLETS_FILE)) {
+        try {
+          const walletsData = JSON.parse(fs.readFileSync(SMART_WALLETS_FILE, "utf-8")) as {
+            wallets?: Array<{
+              address: string;
+              name: string;
+              category?: string;
+              type?: string;
+              addedAt?: string;
+            }>;
+          };
+
+          if (Array.isArray(walletsData.wallets)) {
+            let migratedCount = 0;
+            for (const wallet of walletsData.wallets) {
+              try {
+                run(
+                  `INSERT OR IGNORE INTO smart_wallets (address, name, category, type, added_at)
+                   VALUES (?, ?, ?, ?, ?)`,
+                  wallet.address,
+                  wallet.name || "Unknown",
+                  wallet.category || "alpha",
+                  wallet.type || "lp",
+                  wallet.addedAt || new Date().toISOString()
+                );
+                migratedCount++;
+              } catch (err) {
+                log("migration_warn", `Failed to migrate smart wallet ${wallet.address}: ${err}`);
+              }
+            }
+            log("migration", `Migrated ${migratedCount} smart wallets from JSON`);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to migrate smart wallets: ${errorMessage}`);
+        }
+      }
+
+      // Migrate strategy-library.json if exists
+      if (fs.existsSync(STRATEGY_LIBRARY_FILE)) {
+        try {
+          const strategyData = JSON.parse(fs.readFileSync(STRATEGY_LIBRARY_FILE, "utf-8")) as {
+            active?: string | null;
+            strategies?: Record<
+              string,
+              {
+                id: string;
+                name: string;
+                author?: string;
+                lp_strategy?: string;
+                token_criteria?: unknown;
+                entry?: unknown;
+                range?: unknown;
+                exit?: unknown;
+                best_for?: string;
+                raw?: string;
+                added_at?: string;
+                updated_at?: string;
+              }
+            >;
+          };
+
+          // Migrate strategies
+          if (strategyData.strategies && typeof strategyData.strategies === "object") {
+            let migratedCount = 0;
+            for (const [id, strategy] of Object.entries(strategyData.strategies)) {
+              try {
+                run(
+                  `INSERT OR REPLACE INTO strategies (id, name, author, lp_strategy, token_criteria_json,
+                    entry_criteria_json, range_criteria_json, exit_criteria_json, best_for, raw, added_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  id,
+                  strategy.name || id,
+                  strategy.author || "unknown",
+                  strategy.lp_strategy || "bid_ask",
+                  JSON.stringify(strategy.token_criteria || {}),
+                  JSON.stringify(strategy.entry || {}),
+                  JSON.stringify(strategy.range || {}),
+                  JSON.stringify(strategy.exit || {}),
+                  strategy.best_for || "",
+                  strategy.raw || "",
+                  strategy.added_at || new Date().toISOString(),
+                  strategy.updated_at || new Date().toISOString()
+                );
+                migratedCount++;
+              } catch (err) {
+                log("migration_warn", `Failed to migrate strategy ${id}: ${err}`);
+              }
+            }
+            log("migration", `Migrated ${migratedCount} strategies from JSON`);
+          }
+
+          // Set active strategy if specified
+          if (strategyData.active) {
+            run(
+              "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+              strategyData.active
+            );
+            log("migration", `Set active strategy to: ${strategyData.active}`);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to migrate strategy library: ${errorMessage}`);
+        }
+      }
+
       // Save orphaned snapshots to backup file if any were found
       let orphanedMessage = "";
       if (orphanedSnapshots.length > 0) {
@@ -703,16 +997,12 @@ export function migrateFromJson(): { success: boolean; message: string } {
     const errorMessage = error instanceof Error ? error.message : String(error);
     // Update migration log to failed
     if (migrationLogId) {
-      try {
-        run(
-          `UPDATE migration_log SET status = ?, completed_at = datetime('now'), error_message = ? WHERE id = ?`,
-          "failed",
-          errorMessage,
-          migrationLogId
-        );
-      } catch {
-        // Ignore log update failure
-      }
+      run(
+        `UPDATE migration_log SET status = ?, completed_at = datetime('now'), error_message = ? WHERE id = ?`,
+        "failed",
+        errorMessage,
+        migrationLogId
+      );
     }
     return {
       success: false,
@@ -822,6 +1112,66 @@ export function createJsonBackups(): { success: boolean; message: string } {
     return {
       success: false,
       message: `Backup creation failed: ${errorMessage}`,
+    };
+  }
+}
+
+/**
+ * Rollback a failed or partial migration.
+ * Finds the most recent failed or started migration and restores from backup.
+ */
+export function rollbackMigration(): { success: boolean; message: string } {
+  try {
+    // Find the most recent failed or started migration
+    const migrationRow = query<{ id: number; backup_path: string; status: string }>(
+      `SELECT id, backup_path, status FROM migration_log
+       WHERE status IN ('failed', 'started')
+       ORDER BY started_at DESC LIMIT 1`
+    )[0];
+
+    if (!migrationRow) {
+      return {
+        success: false,
+        message: "No failed or incomplete migration found to rollback",
+      };
+    }
+
+    // Clear any partially migrated data
+    // Delete data that may have been partially inserted during the failed migration
+    run("DELETE FROM signal_weight_history");
+    run("DELETE FROM signal_weights");
+    run("DELETE FROM position_events");
+    run("DELETE FROM position_snapshots");
+    run("DELETE FROM pool_deploys");
+    run("DELETE FROM performance");
+    run("DELETE FROM lessons");
+    run("DELETE FROM positions");
+    run("DELETE FROM pools");
+    run("DELETE FROM position_state_events");
+    run("DELETE FROM position_state");
+    run("DELETE FROM state_metadata");
+    run("DELETE FROM token_blacklist");
+    run("DELETE FROM dev_blocklist");
+    run("DELETE FROM smart_wallets");
+    run("DELETE FROM strategies");
+    run("DELETE FROM active_strategy");
+
+    // Update migration log status to rolled_back
+    run(
+      `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
+      "rolled_back",
+      migrationRow.id
+    );
+
+    return {
+      success: true,
+      message: `Migration rolled back successfully. Backup was at: ${migrationRow.backup_path}. Database tables have been cleared - you can retry migration or restore from the JSON backup files manually.`,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `Rollback failed: ${errorMessage}`,
     };
   }
 }

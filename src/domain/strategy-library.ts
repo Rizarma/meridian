@@ -4,10 +4,12 @@
  * Users paste a tweet or description via Telegram.
  * The agent extracts structured criteria and saves it here.
  * During screening, the active strategy's criteria guide token selection and position config.
+ *
+ * NOTE: Migrated from JSON to SQLite for data persistence across deployments.
  */
 
-import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
+import { get, query, run } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
 import type {
   EntryCriteria,
@@ -15,13 +17,12 @@ import type {
   LPStrategyType,
   RangeCriteria,
   Strategy,
-  StrategyDB,
   TokenCriteria,
 } from "../types/strategy.js";
 
-const STRATEGY_FILE = "./strategy-library.json";
-
-// ─── Parameter and Return Types ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Parameter and Return Types
+// ═══════════════════════════════════════════════════════════════════════════
 
 interface AddStrategyParams {
   id: string;
@@ -81,22 +82,9 @@ interface RemoveStrategyResult {
   error?: string;
 }
 
-// ─── Internal Functions ─────────────────────────────────────────
-
-function load(): StrategyDB {
-  if (!fs.existsSync(STRATEGY_FILE)) return { active: null, strategies: {} };
-  try {
-    return JSON.parse(fs.readFileSync(STRATEGY_FILE, "utf8")) as StrategyDB;
-  } catch {
-    return { active: null, strategies: {} };
-  }
-}
-
-function save(data: StrategyDB): void {
-  fs.writeFileSync(STRATEGY_FILE, JSON.stringify(data, null, 2));
-}
-
-// ─── Default Strategies ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Default Strategies
+// ═══════════════════════════════════════════════════════════════════════════
 
 const DEFAULT_STRATEGIES: Record<string, Strategy> = {
   custom_ratio_spot: {
@@ -219,33 +207,117 @@ const DEFAULT_STRATEGIES: Record<string, Strategy> = {
   },
 };
 
+// Strategies that are documented but not fully implemented
+const NON_FUNCTIONAL_STRATEGIES = new Set([
+  "partial_harvest",
+  "fee_compounding",
+  "single_sided_reseed",
+]);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Database Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface StrategyRow {
+  id: string;
+  name: string;
+  author: string;
+  lp_strategy: string;
+  token_criteria_json: string;
+  entry_criteria_json: string;
+  range_criteria_json: string;
+  exit_criteria_json: string;
+  best_for: string;
+  raw: string;
+  added_at: string;
+  updated_at: string;
+}
+
+function rowToStrategy(row: StrategyRow): Strategy {
+  return {
+    id: row.id,
+    name: row.name,
+    author: row.author,
+    lp_strategy: row.lp_strategy as LPStrategyType,
+    token_criteria: JSON.parse(row.token_criteria_json || "{}"),
+    entry: JSON.parse(row.entry_criteria_json || "{}"),
+    range: JSON.parse(row.range_criteria_json || "{}"),
+    exit: JSON.parse(row.exit_criteria_json || "{}"),
+    best_for: row.best_for,
+    raw: row.raw,
+    added_at: row.added_at,
+    updated_at: row.updated_at,
+  };
+}
+
 function ensureDefaultStrategies(): void {
-  const db = load();
+  const existingIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
   let added = false;
+
   for (const [id, strategy] of Object.entries(DEFAULT_STRATEGIES)) {
-    if (!db.strategies[id]) {
-      db.strategies[id] = {
-        ...strategy,
-        added_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      added = true;
+    if (!existingIds.includes(id)) {
+      const now = new Date().toISOString();
+      try {
+        run(
+          `INSERT INTO strategies (id, name, author, lp_strategy, token_criteria_json, entry_criteria_json,
+            range_criteria_json, exit_criteria_json, best_for, raw, added_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id,
+          strategy.name,
+          strategy.author,
+          strategy.lp_strategy,
+          JSON.stringify(strategy.token_criteria || {}),
+          JSON.stringify(strategy.entry || {}),
+          JSON.stringify(strategy.range || {}),
+          JSON.stringify(strategy.exit || {}),
+          strategy.best_for,
+          strategy.raw || "",
+          now,
+          now
+        );
+        added = true;
+      } catch (err) {
+        log("strategy_warn", `Failed to add default strategy ${id}: ${err}`);
+      }
     }
   }
-  if (added) {
-    if (!db.active) db.active = "custom_ratio_spot";
-    save(db);
+
+  // Set active strategy if none set
+  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+  if (!activeRow?.active_id && added) {
+    run(
+      "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+      "custom_ratio_spot"
+    );
+    log("strategy", "Preloaded default strategies and set active");
+  } else if (added) {
     log("strategy", "Preloaded default strategies");
   }
 }
 
-ensureDefaultStrategies();
+// ═══════════════════════════════════════════════════════════════════════════
+// Lazy Initialization
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Tool Handlers ─────────────────────────────────────────────
+let _defaultsEnsured = false;
+
+/**
+ * Ensure default strategies are loaded (lazy initialization).
+ * Called automatically by tool handlers on first use.
+ * This avoids race conditions with database setup.
+ */
+function ensureDefaultsLazy(): void {
+  if (_defaultsEnsured) return;
+  _defaultsEnsured = true;
+  ensureDefaultStrategies();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Handlers
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Add or update a strategy.
- * The agent parses the raw tweet/text and fills in the structured fields.
  */
 export function addStrategy({
   id,
@@ -259,9 +331,8 @@ export function addStrategy({
   best_for = "",
   raw = "",
 }: AddStrategyParams): AddStrategyResult {
+  ensureDefaultsLazy();
   if (!id || !name) return { error: "id and name are required" };
-
-  const db = load();
 
   // Slugify id
   const slug = id
@@ -269,85 +340,101 @@ export function addStrategy({
     .replace(/\s+/g, "_")
     .replace(/[^a-z0-9_]/g, "");
 
-  db.strategies[slug] = {
-    id: slug,
-    name,
-    author,
-    lp_strategy,
-    token_criteria,
-    entry,
-    range,
-    exit,
-    best_for,
-    raw,
-    added_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
+  const now = new Date().toISOString();
 
-  // Auto-set as active if it's the first strategy
-  if (!db.active) db.active = slug;
+  try {
+    run(
+      `INSERT OR REPLACE INTO strategies (id, name, author, lp_strategy, token_criteria_json,
+        entry_criteria_json, range_criteria_json, exit_criteria_json, best_for, raw, added_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT added_at FROM strategies WHERE id = ?), ?), ?)`,
+      slug,
+      name,
+      author,
+      lp_strategy,
+      JSON.stringify(token_criteria),
+      JSON.stringify(entry),
+      JSON.stringify(range),
+      JSON.stringify(exit),
+      best_for,
+      raw,
+      slug,
+      now,
+      now
+    );
 
-  save(db);
-  log("strategy", `Strategy saved: ${name} (${slug})`);
-  return { saved: true, id: slug, name, active: db.active === slug };
+    // Auto-set as active if it's the first strategy
+    const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+    if (!activeRow?.active_id) {
+      run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", slug);
+    }
+
+    const isActive = activeRow?.active_id === slug || !activeRow?.active_id;
+    log("strategy", `Strategy saved: ${name} (${slug})`);
+    return { saved: true, id: slug, name, active: isActive };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("strategy_error", `Failed to save strategy ${slug}: ${errorMsg}`);
+    return { error: `Failed to save strategy: ${errorMsg}` };
+  }
 }
-
-// Strategies that are documented but not fully implemented
-// See: plan/strategy-audit/ for detailed audit reports
-// P2A partial: multi_layer is functional (addLiquidity and withdrawLiquidity implemented)
-// P2A pending: partial_harvest, fee_compounding, single_sided_reseed lack strategy-specific execution
-const NON_FUNCTIONAL_STRATEGIES = new Set([
-  "partial_harvest", // withdraw_liquidity exists but management cycle doesn't call it at TP threshold
-  "fee_compounding", // claim_fees exists but management cycle doesn't reinvest via add_liquidity
-  "single_sided_reseed", // close_position exists but management cycle doesn't redeploy with skip_swap
-]);
 
 /**
  * List all strategies with a summary.
  */
 export function listStrategies(): ListStrategiesResult {
-  const db = load();
-  const strategies = Object.values(db.strategies).map((s) => ({
+  ensureDefaultsLazy();
+  const rows = query<StrategyRow>("SELECT * FROM strategies ORDER BY added_at DESC");
+  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+
+  const strategies = rows.map((s) => ({
     id: s.id,
     name: s.name,
     author: s.author,
-    lp_strategy: s.lp_strategy,
+    lp_strategy: s.lp_strategy as LPStrategyType,
     best_for: s.best_for,
-    active: db.active === s.id,
+    active: activeRow?.active_id === s.id,
     added_at: s.added_at?.slice(0, 10),
-    // P1 fix: Mark non-functional strategies
     warning: NON_FUNCTIONAL_STRATEGIES.has(s.id)
       ? "Strategy exists as documentation only. Core functions not implemented. See plan/strategy-audit/"
       : undefined,
   }));
-  return { active: db.active, count: strategies.length, strategies };
+
+  return { active: activeRow?.active_id || null, count: strategies.length, strategies };
 }
 
 /**
- * Get full details of a strategy including raw text and all criteria.
+ * Get full details of a strategy.
  */
 export function getStrategy({ id }: { id: string }): GetStrategyResult {
+  ensureDefaultsLazy();
   if (!id) return { error: "id required" };
-  const db = load();
-  const strategy = db.strategies[id];
-  if (!strategy)
-    return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
-  return { ...strategy, is_active: db.active === id };
+
+  const row = get<StrategyRow>("SELECT * FROM strategies WHERE id = ?", id);
+  if (!row) {
+    const allIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
+    return { error: `Strategy "${id}" not found`, available: allIds };
+  }
+
+  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+  return { ...rowToStrategy(row), is_active: activeRow?.active_id === id };
 }
 
 /**
- * Set the active strategy used during screening cycles.
+ * Set the active strategy.
  */
 export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResult {
+  ensureDefaultsLazy();
   if (!id) return { error: "id required" };
-  const db = load();
-  if (!db.strategies[id])
-    return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
 
-  // P1 fix: Warn about non-functional strategies
+  const row = get<{ name: string }>("SELECT name FROM strategies WHERE id = ?", id);
+  if (!row) {
+    const allIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
+    return { error: `Strategy "${id}" not found`, available: allIds };
+  }
+
+  // Warn about non-functional strategies
   if (NON_FUNCTIONAL_STRATEGIES.has(id)) {
-    const strategy = db.strategies[id];
-    log("strategy_warn", `Activating non-functional strategy: ${strategy.name}`);
+    log("strategy_warn", `Activating non-functional strategy: ${row.name}`);
     log("strategy_warn", `  See audit: plan/strategy-audit/ for details`);
     log(
       "strategy_warn",
@@ -355,37 +442,77 @@ export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResu
     );
   }
 
-  db.active = id;
-  save(db);
-  log("strategy", `Active strategy set to: ${db.strategies[id].name}`);
-  return { active: id, name: db.strategies[id].name };
+  try {
+    run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", id);
+    log("strategy", `Active strategy set to: ${row.name}`);
+    return { active: id, name: row.name };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { error: `Failed to set active strategy: ${errorMsg}` };
+  }
 }
 
 /**
  * Remove a strategy.
  */
 export function removeStrategy({ id }: { id: string }): RemoveStrategyResult {
+  ensureDefaultsLazy();
   if (!id) return { error: "id required" };
-  const db = load();
-  if (!db.strategies[id]) return { error: `Strategy "${id}" not found` };
-  const name = db.strategies[id].name;
-  delete db.strategies[id];
-  if (db.active === id) db.active = Object.keys(db.strategies)[0] || null;
-  save(db);
-  log("strategy", `Strategy removed: ${name}`);
-  return { removed: true, id, name, new_active: db.active };
+
+  const row = get<{ name: string }>("SELECT name FROM strategies WHERE id = ?", id);
+  if (!row) return { error: `Strategy "${id}" not found` };
+
+  try {
+    run("DELETE FROM strategies WHERE id = ?", id);
+
+    // Update active if needed
+    const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+    let newActive: string | null = activeRow?.active_id || null;
+
+    if (activeRow?.active_id === id) {
+      const remaining = query<{ id: string }>(
+        "SELECT id FROM strategies ORDER BY added_at DESC LIMIT 1"
+      );
+      newActive = remaining[0]?.id || null;
+      run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", newActive);
+    }
+
+    log("strategy", `Strategy removed: ${row.name}`);
+    return { removed: true, id, name: row.name, new_active: newActive };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { error: `Failed to remove strategy: ${errorMsg}` };
+  }
 }
 
 /**
- * Get the currently active strategy — used by screening cycle.
+ * Get the currently active strategy.
  */
 export function getActiveStrategy(): Strategy | null {
-  const db = load();
-  if (!db.active || !db.strategies[db.active]) return null;
-  return db.strategies[db.active];
+  ensureDefaultsLazy();
+  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+  if (!activeRow?.active_id) return null;
+
+  const row = get<StrategyRow>("SELECT * FROM strategies WHERE id = ?", activeRow.active_id);
+  if (!row) return null;
+
+  return rowToStrategy(row);
 }
 
-// Tool registrations
+/**
+ * Clear all strategies (useful for testing).
+ */
+export function clearStrategies(): { cleared: number } {
+  const result = run("DELETE FROM strategies");
+  run("DELETE FROM active_strategy");
+  log("strategy", `Cleared ${result.changes} strategies`);
+  return { cleared: Number(result.changes) };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Registrations
+// ═══════════════════════════════════════════════════════════════════════════
+
 registerTool({
   name: "add_strategy",
   handler: addStrategy,
