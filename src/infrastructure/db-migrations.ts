@@ -563,6 +563,8 @@ export function migrateFromJson(): { success: boolean; message: string } {
             }
 
             // Migrate snapshots - skip if no position reference since FK constraint requires valid position
+            // Note: Snapshots are migrated BEFORE positions from state.json, so we must check
+            // if the position exists in position_state or defer to a second pass
             if (Array.isArray(p.snapshots)) {
               for (const snapshot of p.snapshots) {
                 const s = snapshot as Record<string, unknown>;
@@ -574,6 +576,18 @@ export function migrateFromJson(): { success: boolean; message: string } {
                     `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`
                   );
                   orphanedSnapshots.push({ ...s, _poolAddress: poolAddress });
+                  continue;
+                }
+
+                // Check if position exists in position_state (FK constraint requires it)
+                // If not, defer to second pass after state.json migration
+                const positionExists = query<{ cnt: number }>(
+                  "SELECT COUNT(*) as cnt FROM position_state WHERE position = ?",
+                  positionAddr
+                );
+                if (!positionExists.length || positionExists[0]?.cnt === 0) {
+                  // Position not yet migrated — defer to second pass
+                  orphanedSnapshots.push({ ...s, _poolAddress: poolAddress, _defer: true });
                   continue;
                 }
 
@@ -955,17 +969,68 @@ export function migrateFromJson(): { success: boolean; message: string } {
         }
       }
 
+      // Second pass: migrate deferred snapshots now that positions exist
+      const deferredSnapshots = orphanedSnapshots.filter((s) => s._defer);
+      if (deferredSnapshots.length > 0) {
+        log(
+          "migration",
+          `Second pass: attempting ${deferredSnapshots.length} deferred snapshots...`
+        );
+        for (const s of deferredSnapshots) {
+          const positionAddr = s.position as string | undefined;
+          if (!positionAddr) continue;
+
+          // Check if position now exists (after state.json migration)
+          const positionExists = query<{ cnt: number }>(
+            "SELECT COUNT(*) as cnt FROM position_state WHERE position = ?",
+            positionAddr
+          );
+          if (!positionExists.length || positionExists[0]?.cnt === 0) {
+            // Position still doesn't exist — keep as orphaned
+            continue;
+          }
+
+          try {
+            run(
+              `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
+                unclaimed_fees_usd, minutes_out_of_range, age_minutes, data_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              positionAddr,
+              s.ts ?? new Date().toISOString(),
+              s.pnl_pct ?? null,
+              s.pnl_usd ?? null,
+              s.in_range ? 1 : 0,
+              s.unclaimed_fees_usd ?? null,
+              s.minutes_out_of_range ?? null,
+              s.age_minutes ?? null,
+              stringifyJson(s)
+            );
+            migratedSnapshots++;
+            // Remove from orphaned list since it was successfully migrated
+            const idx = orphanedSnapshots.indexOf(s);
+            if (idx > -1) orphanedSnapshots.splice(idx, 1);
+          } catch (err) {
+            // Keep as orphaned if insert fails
+            log(
+              "migration_warn",
+              `Failed to migrate deferred snapshot for ${positionAddr}: ${err}`
+            );
+          }
+        }
+      }
+
       // Save orphaned snapshots to backup file if any were found
       let orphanedMessage = "";
-      if (orphanedSnapshots.length > 0) {
+      const trulyOrphaned = orphanedSnapshots.filter((s) => !s._defer);
+      if (trulyOrphaned.length > 0) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const backupFile = path.join(PROJECT_ROOT, `orphaned-snapshots-backup-${timestamp}.json`);
         fs.writeFileSync(
           backupFile,
           JSON.stringify(
             {
-              orphanedSnapshots,
-              count: orphanedSnapshots.length,
+              orphanedSnapshots: trulyOrphaned,
+              count: trulyOrphaned.length,
               exported_at: new Date().toISOString(),
               note: "These snapshots were skipped during migration because they lack a position reference. Manual recovery may be needed.",
             },
@@ -973,9 +1038,9 @@ export function migrateFromJson(): { success: boolean; message: string } {
             2
           )
         );
-        orphanedMessage = `, ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile}`;
+        orphanedMessage = `, ${trulyOrphaned.length} orphaned snapshots saved to ${backupFile}`;
         console.warn(
-          `[migrateFromJson] ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile} for manual recovery`
+          `[migrateFromJson] ${trulyOrphaned.length} orphaned snapshots saved to ${backupFile} for manual recovery`
         );
       }
 
