@@ -658,41 +658,60 @@ switch (subcommand as CLISubcommand) {
 
   // ── evolve ───────────────────────────────────────────────────────
   case "evolve": {
-    const { config } = await import("../config/config.js");
-    const { evolveThresholds } = await import("../domain/threshold-evolution.js");
-    const fs2: typeof fs = await import("node:fs");
-    interface LessonsData {
-      performance?: Array<Record<string, unknown>>;
-    }
-    let perfData: Array<Record<string, unknown>> = [];
-    if (fs2.existsSync(LESSONS_FILE)) {
-      try {
-        const data: LessonsData = JSON.parse(fs2.readFileSync(LESSONS_FILE, "utf8")) as LessonsData;
-        perfData = data.performance || [];
-      } catch {
-        /* no data */
-      }
-    }
-    const result = evolveThresholds(
-      perfData as unknown as import("../types/lessons.js").PerformanceRecord[],
-      config
-    );
-    if (!result) {
-      const output: EvolveOutput = {
-        evolved: false,
-        reason: `Need at least 5 closed positions (have ${perfData.length})`,
-      };
-      out(output);
+    const { getEvolutionReport, getSuggestionsForReview, applySuggestion, dismissSuggestion } =
+      await import("../domain/threshold-evolution-v2.js");
+
+    if (sub2 === "review") {
+      const suggestions = getSuggestionsForReview();
+      out({ pending: suggestions.length, suggestions });
+    } else if (sub2 === "apply" && argv[3]) {
+      const result = applySuggestion(Number(argv[3]), "cli");
+      out(result);
+    } else if (sub2 === "reject" && argv[3]) {
+      const result = dismissSuggestion(Number(argv[3]), "cli");
+      out(result);
+    } else if (sub2 === "report") {
+      out(getEvolutionReport());
     } else {
-      const rationaleStr = Object.entries(result.rationale)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("; ");
-      const output: EvolveOutput = {
-        evolved: Object.keys(result.changes).length > 0,
-        changes: result.changes,
-        rationale: rationaleStr,
-      };
-      out(output);
+      // Default: run evolution analysis
+      const { config } = await import("../config/config.js");
+      const { evolveThresholds } = await import("../domain/threshold-evolution.js");
+      const fs2: typeof fs = await import("node:fs");
+      interface LessonsData {
+        performance?: Array<Record<string, unknown>>;
+      }
+      let perfData: Array<Record<string, unknown>> = [];
+      if (fs2.existsSync(LESSONS_FILE)) {
+        try {
+          const data: LessonsData = JSON.parse(
+            fs2.readFileSync(LESSONS_FILE, "utf8")
+          ) as LessonsData;
+          perfData = data.performance || [];
+        } catch {
+          /* no data */
+        }
+      }
+      const result = evolveThresholds(
+        perfData as unknown as import("../types/lessons.js").PerformanceRecord[],
+        config
+      );
+      if (!result) {
+        const output: EvolveOutput = {
+          evolved: false,
+          reason: `Need at least 5 closed positions (have ${perfData.length})`,
+        };
+        out(output);
+      } else {
+        const rationaleStr = Object.entries(result.rationale)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("; ");
+        const output: EvolveOutput = {
+          evolved: Object.keys(result.changes).length > 0,
+          changes: result.changes,
+          rationale: rationaleStr,
+        };
+        out(output);
+      }
     }
     break;
   }
