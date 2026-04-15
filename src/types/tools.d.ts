@@ -73,4 +73,5 @@ export type ToolName =
   | "list_blacklist"
   | "block_deployer"
   | "unblock_deployer"
-  | "list_blocked_deployers";
+  | "list_blocked_deployers"
+  | "search_lessons";

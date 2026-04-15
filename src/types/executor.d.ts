@@ -48,7 +48,8 @@ export type ToolName =
   | "unpin_lesson"
   | "list_lessons"
   | "clear_lessons"
-  | "update_config";
+  | "update_config"
+  | "search_lessons";
 
 export type WriteTool =
   | "deploy_position"
