@@ -4,6 +4,7 @@ dist/
 *.tsbuildinfo
 package-lock.json
 yarn.lock
+bun.lock
 
 # Environment & secrets
 .env
