@@ -19,7 +19,16 @@
     "test:phase0:all": "pnpm run build && node dist/test/phase-0-exit-rules.test.js && node dist/test/phase-0-trailing-tp.test.js && node dist/test/phase-0-config-mutation.test.js && node dist/test/phase-0-tool-safety.test.js",
     "test:screen": "pnpm run build && node dist/test/test-screening.js",
     "test:agent": "pnpm run build && cross-env DRY_RUN=true node dist/test/test-agent.js",
-    "prepare": "pnpm run build",
+    "test:coverage": "c8 --reporter=text --reporter=html --reporter=json pnpm test:phase0:all",
+    "test:coverage:check": "c8 --reporter=text --check-coverage pnpm test:phase0:all",
+    "unused-deps": "depcheck --ignores='@types/*,cross-env,husky,lint-staged,c8,depcheck,knip'",
+    "dead-code": "knip --no-exit-code",
+    "tech-debt": "leasot src/**/*.ts test/**/*.ts tools/**/*.ts --reporter json --skip-unsupported",
+    "tech-debt:ci": "leasot src/**/*.ts test/**/*.ts tools/**/*.ts --reporter markdown --skip-unsupported",
+    "duplicates": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters console",
+    "duplicates:ci": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters json",
+    "arch-check": "depcruise src --config .dependency-cruiser.js",
+    "prepare": "pnpm run build && husky",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",
     "typecheck": "tsc --noEmit",
@@ -62,10 +71,23 @@
     "@types/bn.js": "^5.2.0",
     "@types/node": "^25.5.2",
     "@types/node-cron": "^3.0.11",
+    "c8": "^10.1.2",
     "cross-env": "^10.1.0",
+    "depcheck": "^1.4.7",
+    "dependency-cruiser": "^16.9.0",
+    "husky": "^9.0.11",
+    "jscpd": "^4.0.5",
+    "knip": "^5.50.5",
+    "leasot": "^14.4.0",
+    "lint-staged": "^15.2.2",
     "typescript": "^6.0.2"
   },
   "workspaces": [
     "."
-  ]
+  ],
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
+  }
 }

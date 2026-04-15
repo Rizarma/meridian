@@ -1,0 +1,17 @@
+{
+  "all": true,
+  "src": ["dist/src"],
+  "exclude": [
+    "dist/test/**",
+    "dist/scripts/**",
+    "dist/src/cli/**",
+    "**/node_modules/**"
+  ],
+  "reporter": ["text", "html", "json"],
+  "branches": 60,
+  "functions": 70,
+  "lines": 70,
+  "statements": 70,
+  "checkCoverage": false,
+  "reportDir": "./coverage"
+}
