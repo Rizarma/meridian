@@ -39,7 +39,7 @@ import type {
 import type { Strategy } from "../types/strategy.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
-import { getDb, query, get, run, transaction, parseJson, stringifyJson } from "./db.js";
+import { get, getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
 import { log } from "./logger.js";
 
 // Legacy JSON export path for debugging
@@ -70,14 +70,18 @@ export interface TrackPositionParams {
 
 /**
  * Initialize database tables if they don't exist.
- * Called automatically on first database access.
+ * NOTE: This is now called after setupDatabase() to avoid schema conflicts.
+ * The position_state table is separate from the positions table in db-migrations.ts
+ * which tracks position history/records.
  */
 function initTables(): void {
   const db = getDb();
 
-  // Positions table
+  // Position state table - tracks active position metadata for management
+  // NOTE: This is DIFFERENT from the positions table in db-migrations.ts
+  // which stores position history with a different schema.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS positions (
+    CREATE TABLE IF NOT EXISTS position_state (
       position TEXT PRIMARY KEY,
       pool TEXT NOT NULL,
       pool_name TEXT NOT NULL,
@@ -117,9 +121,9 @@ function initTables(): void {
     )
   `);
 
-  // Position events table
+  // Position events table (for state tracking events)
   db.exec(`
-    CREATE TABLE IF NOT EXISTS position_events (
+    CREATE TABLE IF NOT EXISTS position_state_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       action TEXT NOT NULL,
@@ -139,13 +143,14 @@ function initTables(): void {
 
   // Index for faster queries
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_positions_closed ON positions(closed);
-    CREATE INDEX IF NOT EXISTS idx_position_events_ts ON position_events(ts);
-    CREATE INDEX IF NOT EXISTS idx_position_events_position ON position_events(position);
+    CREATE INDEX IF NOT EXISTS idx_position_state_closed ON position_state(closed);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_ts ON position_state_events(ts);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_position ON position_state_events(position);
   `);
 }
 
-// Initialize tables on module load
+// Initialize tables on module load (safe because CREATE TABLE IF NOT EXISTS)
+// NOTE: setupDatabase() in orchestrator.ts should be called before any queries
 initTables();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -255,14 +260,14 @@ function rowToStateEvent(row: Record<string, unknown>): StateEvent {
 function load(): PositionState {
   try {
     const positions: Record<string, TrackedPosition> = {};
-    const positionRows = query<Record<string, unknown>>("SELECT * FROM positions");
+    const positionRows = query<Record<string, unknown>>("SELECT * FROM position_state");
     for (const row of positionRows) {
       const pos = rowToTrackedPosition(row);
       positions[pos.position] = pos;
     }
 
     const recentEvents = query<Record<string, unknown>>(
-      "SELECT * FROM position_events ORDER BY ts DESC LIMIT ?",
+      "SELECT * FROM position_state_events ORDER BY ts DESC LIMIT ?",
       MAX_RECENT_EVENTS
     ).map(rowToStateEvent);
 
@@ -306,7 +311,7 @@ function exportToJson(): void {
 function pushEvent(event: Omit<StateEvent, "ts">): void {
   transaction(() => {
     run(
-      "INSERT INTO position_events (ts, action, position, pool_name, reason) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO position_state_events (ts, action, position, pool_name, reason) VALUES (?, ?, ?, ?, ?)",
       new Date().toISOString(),
       event.action,
       event.position ?? null,
@@ -316,8 +321,8 @@ function pushEvent(event: Omit<StateEvent, "ts">): void {
 
     // Prune old events to maintain limit
     run(
-      `DELETE FROM position_events WHERE id NOT IN (
-        SELECT id FROM position_events ORDER BY ts DESC LIMIT ?
+      `DELETE FROM position_state_events WHERE id NOT IN (
+        SELECT id FROM position_state_events ORDER BY ts DESC LIMIT ?
       )`,
       MAX_RECENT_EVENTS
     );
@@ -348,8 +353,8 @@ function sanitizeStoredText(text: unknown, maxLen: number = MAX_INSTRUCTION_LENG
  */
 export function clearPositions(): void {
   transaction(() => {
-    run("DELETE FROM positions");
-    run("DELETE FROM position_events");
+    run("DELETE FROM position_state");
+    run("DELETE FROM position_state_events");
   });
   log("state", "Cleared all positions");
 }
@@ -430,7 +435,7 @@ export function trackPosition({
 
   transaction(() => {
     run(
-      `INSERT INTO positions (
+      `INSERT INTO position_state (
         position, pool, pool_name, strategy, strategy_config, bin_range, amount_sol, amount_x,
         active_bin_at_deploy, bin_step, volatility, fee_tvl_ratio, initial_fee_tvl_24h,
         organic_score, initial_value_usd, signal_snapshot, deployed_at, out_of_range_since,
@@ -490,7 +495,7 @@ export function trackPosition({
  */
 export function markOutOfRange(position_address: string): void {
   const pos = get<Record<string, unknown>>(
-    "SELECT out_of_range_since FROM positions WHERE position = ?",
+    "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
   if (!pos) return;
@@ -498,7 +503,7 @@ export function markOutOfRange(position_address: string): void {
   if (!pos.out_of_range_since) {
     const now = new Date().toISOString();
     run(
-      "UPDATE positions SET out_of_range_since = ?, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET out_of_range_since = ?, last_updated = ? WHERE position = ?",
       now,
       now,
       position_address
@@ -512,7 +517,7 @@ export function markOutOfRange(position_address: string): void {
  */
 export function markInRange(position_address: string): void {
   const pos = get<Record<string, unknown>>(
-    "SELECT out_of_range_since FROM positions WHERE position = ?",
+    "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
   if (!pos) return;
@@ -520,7 +525,7 @@ export function markInRange(position_address: string): void {
   if (pos.out_of_range_since) {
     const now = new Date().toISOString();
     run(
-      "UPDATE positions SET out_of_range_since = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET out_of_range_since = NULL, last_updated = ? WHERE position = ?",
       now,
       position_address
     );
@@ -534,7 +539,7 @@ export function markInRange(position_address: string): void {
  */
 export function minutesOutOfRange(position_address: string): number {
   const pos = get<{ out_of_range_since: string | null }>(
-    "SELECT out_of_range_since FROM positions WHERE position = ?",
+    "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
   if (!pos?.out_of_range_since) return 0;
@@ -555,7 +560,7 @@ export function recordClaim(position_address: string, fees_usd: number): void {
   const newTotalFees = (pos.total_fees_claimed_usd || 0) + (fees_usd || 0);
 
   run(
-    "UPDATE positions SET last_claim_at = ?, total_fees_claimed_usd = ?, notes = ?, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET last_claim_at = ?, total_fees_claimed_usd = ?, notes = ?, last_updated = ? WHERE position = ?",
     now,
     newTotalFees,
     stringifyJson(newNotes),
@@ -577,7 +582,7 @@ export function recordClose(position_address: string, reason: string): void {
 
   transaction(() => {
     run(
-      "UPDATE positions SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
       now,
       stringifyJson(newNotes),
       now,
@@ -612,7 +617,7 @@ export function recordRebalance(old_position: string, new_position: string): voi
     if (oldPos) {
       const oldNote = `Rebalanced into ${new_position} at ${now}`;
       run(
-        "UPDATE positions SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
+        "UPDATE position_state SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
         now,
         stringifyJson([...oldPos.notes, oldNote]),
         now,
@@ -625,7 +630,7 @@ export function recordRebalance(old_position: string, new_position: string): voi
       const newRebalanceCount = (oldPos?.rebalance_count || 0) + 1;
       const newNote = `Rebalanced from ${old_position}`;
       run(
-        "UPDATE positions SET rebalance_count = ?, notes = ?, last_updated = ? WHERE position = ?",
+        "UPDATE position_state SET rebalance_count = ?, notes = ?, last_updated = ? WHERE position = ?",
         newRebalanceCount,
         stringifyJson([...newPos.notes, newNote]),
         now,
@@ -650,7 +655,7 @@ export function setPositionInstruction(
   const now = new Date().toISOString();
 
   run(
-    "UPDATE positions SET instruction = ?, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET instruction = ?, last_updated = ? WHERE position = ?",
     sanitized,
     now,
     position_address
@@ -680,7 +685,7 @@ export function queuePeakConfirmation(
 
   const now = new Date().toISOString();
   run(
-    "UPDATE positions SET pending_peak_pnl_pct = ?, pending_peak_started_at = ?, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET pending_peak_pnl_pct = ?, pending_peak_started_at = ?, last_updated = ? WHERE position = ?",
     candidatePnlPct,
     now,
     now,
@@ -713,7 +718,7 @@ export function resolvePendingPeak(
   if (currentPnlPct != null && currentPnlPct >= pendingPeak * toleranceRatio) {
     const newPeak = Math.max(pos.peak_pnl_pct ?? 0, pendingPeak, currentPnlPct);
     run(
-      "UPDATE positions SET peak_pnl_pct = ?, pending_peak_pnl_pct = NULL, pending_peak_started_at = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET peak_pnl_pct = ?, pending_peak_pnl_pct = NULL, pending_peak_started_at = NULL, last_updated = ? WHERE position = ?",
       newPeak,
       now,
       position_address
@@ -727,7 +732,7 @@ export function resolvePendingPeak(
 
   // Rejected - clear pending
   run(
-    "UPDATE positions SET pending_peak_pnl_pct = NULL, pending_peak_started_at = NULL, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET pending_peak_pnl_pct = NULL, pending_peak_started_at = NULL, last_updated = ? WHERE position = ?",
     now,
     position_address
   );
@@ -762,7 +767,7 @@ export function queueTrailingDropConfirmation(
 
   const now = new Date().toISOString();
   run(
-    "UPDATE positions SET pending_trailing_peak_pnl_pct = ?, pending_trailing_current_pnl_pct = ?, pending_trailing_drop_pct = ?, pending_trailing_started_at = ?, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET pending_trailing_peak_pnl_pct = ?, pending_trailing_current_pnl_pct = ?, pending_trailing_drop_pct = ?, pending_trailing_started_at = ?, last_updated = ? WHERE position = ?",
     peakPnlPct,
     currentPnlPct,
     trailingDropPct,
@@ -800,7 +805,7 @@ export function resolvePendingTrailingDrop(
   if (currentPnlPct == null) {
     // Clear pending state
     run(
-      "UPDATE positions SET pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
       now,
       position_address
     );
@@ -819,7 +824,7 @@ export function resolvePendingTrailingDrop(
     const exitUntil = new Date(Date.now() + TRAILING_EXIT_COOLDOWN_MS).toISOString();
 
     run(
-      "UPDATE positions SET confirmed_trailing_exit_reason = ?, confirmed_trailing_exit_until = ?, pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET confirmed_trailing_exit_reason = ?, confirmed_trailing_exit_until = ?, pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
       exitReason,
       exitUntil,
       now,
@@ -835,7 +840,7 @@ export function resolvePendingTrailingDrop(
 
   // Rejected - clear pending
   run(
-    "UPDATE positions SET pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
+    "UPDATE position_state SET pending_trailing_peak_pnl_pct = NULL, pending_trailing_current_pnl_pct = NULL, pending_trailing_drop_pct = NULL, pending_trailing_started_at = NULL, last_updated = ? WHERE position = ?",
     now,
     position_address
   );
@@ -851,7 +856,7 @@ export function resolvePendingTrailingDrop(
  * Get all tracked positions (optionally filter open-only).
  */
 export function getTrackedPositions(openOnly: boolean = false): TrackedPosition[] {
-  let sql = "SELECT * FROM positions";
+  let sql = "SELECT * FROM position_state";
   const params: unknown[] = [];
 
   if (openOnly) {
@@ -867,7 +872,7 @@ export function getTrackedPositions(openOnly: boolean = false): TrackedPosition[
  */
 export function getTrackedPosition(position_address: string): TrackedPosition | null {
   const row = get<Record<string, unknown>>(
-    "SELECT * FROM positions WHERE position = ?",
+    "SELECT * FROM position_state WHERE position = ?",
     position_address
   );
   if (!row) return null;
@@ -883,15 +888,15 @@ export function getStateSummary(): StateSummary {
       SUM(CASE WHEN closed = 0 THEN 1 ELSE 0 END) as open_count,
       SUM(CASE WHEN closed = 1 THEN 1 ELSE 0 END) as closed_count,
       COALESCE(SUM(total_fees_claimed_usd), 0) as total_fees
-    FROM positions
+    FROM position_state
   `);
 
   const openPositions = query<Record<string, unknown>>(
-    "SELECT * FROM positions WHERE closed = 0 ORDER BY deployed_at DESC"
+    "SELECT * FROM position_state WHERE closed = 0 ORDER BY deployed_at DESC"
   );
 
   const recentEvents = query<Record<string, unknown>>(
-    "SELECT * FROM position_events ORDER BY ts DESC LIMIT 10"
+    "SELECT * FROM position_state_events ORDER BY ts DESC LIMIT 10"
   ).map(rowToStateEvent);
 
   // Reverse to get chronological order
@@ -949,7 +954,7 @@ export function updatePnlAndCheckExits(
     // Clear expired cooldown
     const now = new Date().toISOString();
     run(
-      "UPDATE positions SET confirmed_trailing_exit_until = NULL, confirmed_trailing_exit_reason = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET confirmed_trailing_exit_until = NULL, confirmed_trailing_exit_reason = NULL, last_updated = ? WHERE position = ?",
       now,
       position_address
     );
@@ -961,7 +966,7 @@ export function updatePnlAndCheckExits(
   // Activate trailing TP once trigger threshold is reached
   if (shouldActivateTrailingTP(pos, mgmtConfig)) {
     run(
-      "UPDATE positions SET trailing_active = 1, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET trailing_active = 1, last_updated = ? WHERE position = ?",
       now,
       position_address
     );
@@ -975,7 +980,7 @@ export function updatePnlAndCheckExits(
   // Update OOR state
   if (in_range === false && !pos.out_of_range_since) {
     run(
-      "UPDATE positions SET out_of_range_since = ?, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET out_of_range_since = ?, last_updated = ? WHERE position = ?",
       now,
       now,
       position_address
@@ -984,7 +989,7 @@ export function updatePnlAndCheckExits(
     log("state", `Position ${position_address} marked out of range`);
   } else if (in_range === true && pos.out_of_range_since) {
     run(
-      "UPDATE positions SET out_of_range_since = NULL, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET out_of_range_since = NULL, last_updated = ? WHERE position = ?",
       now,
       position_address
     );
@@ -1056,7 +1061,7 @@ export function syncOpenPositions(active_addresses: string[]): void {
 
     const note = `Auto-closed during state sync (not found on-chain)`;
     run(
-      "UPDATE positions SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
+      "UPDATE position_state SET closed = 1, closed_at = ?, notes = ?, last_updated = ? WHERE position = ?",
       now,
       stringifyJson([...pos.notes, note]),
       now,
