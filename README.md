@@ -134,7 +134,7 @@ cp user-config.example.json user-config.json
 
 **Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
 
-**Data file locations:** By default, Meridian stores data files (`lessons.json`, `pool-memory.json`, `signal-weights.json`, etc.) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
+**Data storage:** By default, Meridian stores all data in a SQLite database (`meridian.db`) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
 
 ```env
 MERIDIAN_ROOT=/path/to/custom/data/directory
@@ -569,7 +569,7 @@ This is safe for VPS deployment — the bot runs 100% autonomously and suggestio
 
 ### Darwinian signal weights
 
-Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
+Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to SQLite (`signal_weights` table) and used by `getTopCandidates()` to score and rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
 
 ---
 

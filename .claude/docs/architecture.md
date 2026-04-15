@@ -22,15 +22,15 @@ src/
     lessons.ts             Records closed-position performance, derives lessons
     threshold-evolution.ts Auto-tunes screening thresholds from performance
     exit-rules.ts          Stop-loss / trailing TP / OOR exit logic
-    signal-weights.ts      Darwinian signal weighting (signal-weights.json)
+    signal-weights.ts      Darwinian signal weighting (SQLite table)
     signal-tracker.ts      Records signal outcomes per position
-    pool-memory.ts         Per-pool deploy history + snapshots (pool-memory.json)
-    strategy-library.ts    Saved LP strategies (strategy-library.json)
-    smart-wallets.ts       KOL / alpha wallet tracker (smart-wallets.json)
-    token-blacklist.ts     Permanent token blacklist (token-blacklist.json)
-    dev-blocklist.ts       Deployer wallet blocklist (deployer-blacklist.json)
+    pool-memory.ts         Per-pool deploy history + snapshots (SQLite table)
+    strategy-library.ts    Saved LP strategies (SQLite table)
+    smart-wallets.ts       KOL / alpha wallet tracker (SQLite table)
+    token-blacklist.ts     Permanent token blacklist (SQLite table)
+    dev-blocklist.ts       Deployer wallet blocklist (SQLite table)
   infrastructure/
-    state.ts               Position registry (state.json): bin ranges, OOR timestamps, notes
+    state.ts               Position registry (SQLite table): bin ranges, OOR timestamps, notes
     telegram.ts            Bot polling + notifications
     briefing.ts            Daily HTML briefing
     logger.ts              Daily-rotating logs + action audit trail
