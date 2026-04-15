@@ -214,7 +214,7 @@ const openrouterKey = await ask(
 
 const walletKey = await ask(
   "Wallet private key (base58)",
-  alreadySet(ev("WALLET_PRIVATE_KEY", (existingConfig.walletKey as string) || ""))
+  alreadySet(ev("WALLET_PRIVATE_KEY", ""))
 );
 
 const rpcUrl = await ask(
@@ -389,24 +389,19 @@ let llmBaseUrl = provider.baseUrl;
 if (provider.key === "local" || provider.key === "custom") {
   llmBaseUrl = await ask(
     "Base URL",
-    e("llmBaseUrl", provider.baseUrl || "http://localhost:1234/v1") as string
+    ev("LLM_BASE_URL", provider.baseUrl || "http://localhost:1234/v1")
   );
 }
 
-const llmApiKeyExisting = e(
-  "llmApiKey",
-  existingEnv.LLM_API_KEY || existingEnv.OPENROUTER_API_KEY || ""
-) as string;
 const llmApiKeyRaw = await ask(
   "API Key",
-  llmApiKeyExisting ? "*** (already set)" : provider.keyHint || ""
+  existingEnv.LLM_API_KEY || existingEnv.OPENROUTER_API_KEY
+    ? "*** (already set)"
+    : provider.keyHint || ""
 );
-const llmApiKey = llmApiKeyRaw.startsWith("***") ? llmApiKeyExisting : llmApiKeyRaw;
+const llmApiKey = llmApiKeyRaw.startsWith("***") ? "" : llmApiKeyRaw;
 
-const llmModel = await ask(
-  "Model name",
-  e("llmModel", process.env.LLM_MODEL || provider.modelDefault) as string
-);
+const llmModel = await ask("Model name", ev("LLM_MODEL", provider.modelDefault));
 
 rl.close();
 
@@ -421,6 +416,9 @@ const envMap: EnvMap = {
   ...(isKept(heliusKey) ? {} : { HELIUS_API_KEY: heliusKey }),
   ...(isKept(telegramToken) ? {} : { TELEGRAM_BOT_TOKEN: telegramToken }),
   ...(telegramChatId ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
+  ...(llmApiKey ? { LLM_API_KEY: llmApiKey } : {}),
+  ...(llmBaseUrl ? { LLM_BASE_URL: llmBaseUrl } : {}),
+  ...(llmModel ? { LLM_MODEL: llmModel } : {}),
   DRY_RUN: dryRun ? "true" : "false",
 };
 fs.writeFileSync(ENV_PATH, buildEnv(envMap));
@@ -443,9 +441,6 @@ const userConfig: UserConfig = {
   managementIntervalMin,
   screeningIntervalMin,
   llmProvider: provider.key,
-  llmBaseUrl,
-  llmModel,
-  ...(llmApiKey ? { llmApiKey } : {}),
   telegramChatId: telegramChatId || "",
   dryRun,
 };

@@ -55,8 +55,11 @@ The executor is a **thin dispatcher**. Tools self-register at module load time v
 
 ## Model configuration
 
-- **Default model:** `process.env.LLM_MODEL` or `minimax/minimax-m2.5`
+**Precedence:** `LLM_MODEL` (env) > per-role models (user-config) > defaults
+
+- **Global override:** `LLM_MODEL` in `.env` — overrides all roles (screening, management, general)
+- **Per-role tuning:** `managementModel`, `screeningModel`, `generalModel` in `user-config.json`
+- **Endpoint:** `LLM_BASE_URL` in `.env` for local/custom providers (e.g., LM Studio)
 - **Fallback on 502 / 503 / 529:** `stepfun/step-3.5-flash:free` (second attempt), then retry with the primary
-- **Per-role models:** `managementModel`, `screeningModel`, `generalModel` in `user-config.json`
 - **LM Studio / local:** set `LLM_BASE_URL=http://localhost:1234/v1` and `LLM_API_KEY=lm-studio`
 - **`maxOutputTokens` minimum:** 2048 — free models often have lower limits, causing empty responses

@@ -9,9 +9,10 @@
  * Setup:
  *   1. Run: node -e "import('./hive-mind.js').then(m => m.register('https://your-hive-url'))"
  *   2. Save the API key shown — it won't be shown again.
- *   3. Agent auto-syncs on each position close and queries during screening.
+ *   3. Add HIVE_MIND_URL and HIVE_MIND_API_KEY to your .env file.
+ *   4. Agent auto-syncs on each position close and queries during screening.
  *
- * Disable: clear hiveMindUrl and hiveMindApiKey in user-config.json.
+ * Disable: clear HIVE_MIND_URL and HIVE_MIND_API_KEY in .env.
  *
  * Privacy: NO wallet addresses or private keys are ever sent.
  *          Only pool addresses (public on-chain data), performance stats,
@@ -20,9 +21,7 @@
  * Zero dependencies — uses only Node.js stdlib + native fetch().
  */
 
-import fs from "node:fs";
 import { config } from "../config/config.js";
-import { USER_CONFIG_PATH } from "../config/paths.js";
 import { listLessons } from "../domain/lessons.js";
 import { getAllPoolDeploys } from "../domain/pool-memory.js";
 import type {
@@ -49,25 +48,13 @@ let _lastSyncTime = 0;
 // ─── Helpers ────────────────────────────────────────────────────
 
 function readConfig(): HiveMindConfig {
-  try {
-    const fileConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
-    return {
-      hiveMindUrl: process.env.HIVE_MIND_URL || fileConfig.hiveMindUrl || "",
-      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || fileConfig.hiveMindApiKey || "",
-      hiveMindAgentId: fileConfig.hiveMindAgentId || "",
-    };
-  } catch {
-    return {
-      hiveMindUrl: process.env.HIVE_MIND_URL || "",
-      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
-    };
-  }
-}
-
-function writeConfig(patch: Record<string, unknown>): void {
-  const current = readConfig();
-  const merged = { ...current, ...patch };
-  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
+  // SECURITY: All Hive Mind config is ONLY read from environment variables.
+  // Never from user-config.json. This prevents accidental secret leakage.
+  return {
+    hiveMindUrl: process.env.HIVE_MIND_URL || "",
+    hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
+    hiveMindAgentId: process.env.HIVE_MIND_AGENT_ID || "",
+  };
 }
 
 async function fetchWithTimeout(
@@ -97,10 +84,10 @@ export function isEnabled(): boolean {
 
 /**
  * One-time registration with a Hive Mind server.
- * Stores hiveMindUrl and hiveMindApiKey in user-config.json.
+ * IMPORTANT: You must manually add HIVE_MIND_URL, HIVE_MIND_API_KEY, and HIVE_MIND_AGENT_ID to your .env file.
  * @param url - Base URL of the hive server (e.g. "https://hive.example.com")
  * @param registrationToken - Token provided by the hive operator
- * @returns The raw API key (shown once, save it!)
+ * @returns The raw API key (shown once, save it to .env!)
  */
 export async function register(url: string, registrationToken: string): Promise<string> {
   if (!registrationToken) {
@@ -129,12 +116,14 @@ export async function register(url: string, registrationToken: string): Promise<
   }
 
   const { agent_id, api_key } = (await res.json()) as RegistrationResult;
-  writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
   console.log(
     "[hive]",
-    "API key saved to user-config.json — view it there (will NOT be shown again)"
+    "IMPORTANT: Add the following to your .env file — these will NOT be shown again:"
   );
+  console.log("[hive]", `  HIVE_MIND_URL=${baseUrl}`);
+  console.log("[hive]", `  HIVE_MIND_API_KEY=${api_key}`);
+  console.log("[hive]", `  HIVE_MIND_AGENT_ID=${agent_id}`);
 
   return api_key;
 }

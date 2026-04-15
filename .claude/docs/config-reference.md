@@ -19,7 +19,8 @@ Runtime mutations go through the `update_config` tool, which:
 |-------------|------|----------|
 | Secrets | `.env` | `WALLET_PRIVATE_KEY`, `OPENROUTER_API_KEY`, `HELIUS_API_KEY` |
 | Environment overrides | `.env` | `RPC_URL` (for staging/prod), `DRY_RUN` |
-| Models | `user-config.json` | `managementModel`, `screeningModel`, `generalModel`, `llmModel` |
+| LLM Endpoint | `.env` | `LLM_BASE_URL`, `LLM_MODEL` (endpoint URL and global model override) |
+| Per-role Models | `user-config.json` | `managementModel`, `screeningModel`, `generalModel` (tuning) |
 | Thresholds | `user-config.json` | `minTvl`, `maxTvl`, `stopLossPct`, `minOrganic` |
 | Strategy | `user-config.json` | `strategy`, `binsBelow`, `deployAmountSol` |
 | Intervals | `user-config.json` | `managementIntervalMin`, `screeningIntervalMin` |
@@ -30,18 +31,19 @@ Runtime mutations go through the `update_config` tool, which:
 |-----|----------|---------|
 | `WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array private key |
 | `RPC_URL` | Yes* | Solana RPC endpoint (*can be set in user-config.json) |
-| `OPENROUTER_API_KEY` | Yes* | LLM API key (*or set `llmBaseUrl`+`llmApiKey` in user-config.json for local LLM) |
+| `OPENROUTER_API_KEY` | Yes* | LLM API key (*or set `LLM_BASE_URL` + `LLM_API_KEY` in .env for local LLM) |
 | `HELIUS_API_KEY` | No | Enhanced wallet balance data |
 | `LPAGENT_API_KEY` | No | LP Agent API access |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram notifications |
 | `TELEGRAM_CHAT_ID` | No | Telegram chat target (auto-filled on first message) |
 | `TELEGRAM_ALLOWED_USER_IDS` | No | Comma-separated list of user IDs allowed to send commands |
-| `LLM_BASE_URL` | No | Override for local LLM (e.g. LM Studio) |
+| `LLM_BASE_URL` | No | Override LLM endpoint URL (e.g. LM Studio, local providers) |
 | `LLM_API_KEY` | No | Override LLM auth (local endpoints) |
-| `LLM_MODEL` | No | Override all models (takes precedence over user-config.json) |
+| `LLM_MODEL` | No | Override ALL models globally (takes precedence over role-specific models in user-config.json) |
 | `DRY_RUN` | No | Skip all on-chain transactions |
 | `HIVE_MIND_URL` | No | Collective intelligence server |
 | `HIVE_MIND_API_KEY` | No | Hive mind auth token |
+| `HIVE_MIND_AGENT_ID` | No | Hive mind agent ID (from registration) |
 | `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` / `OKX_PROJECT_ID` | No | OKX OnchainOS risk data |
 | `ALLOW_SELF_UPDATE` | No | Enable dangerous admin actions (default: false) |
 | `LOG_LEVEL` | No | Log verbosity: `debug`, `info`, `warn`, `error` (default: info) |
@@ -119,12 +121,17 @@ Runtime mutations go through the `update_config` tool, which:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
-| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
-| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles (user-config tuning) |
+| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles (user-config tuning) |
+| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat (user-config tuning) |
 | `temperature` | `0.373` | Sampling temperature |
 | `maxTokens` | `4096` | Max output tokens per call (minimum 2048 for free models) |
 | `maxSteps` | `20` | Max ReAct iterations per cycle |
+
+**Model Precedence:**
+1. `LLM_MODEL` env var (if set) — overrides all roles globally
+2. `managementModel`/`screeningModel`/`generalModel` in `user-config.json` — per-role tuning
+3. Hardcoded defaults (`xiaomi/mimo-v2-omni`)
 
 ## computeDeployAmount
 
@@ -144,10 +151,11 @@ clamp(deployable × positionSizePct, floor = deployAmountSol, ceil = maxDeployAm
 | `HELIUS_API_KEY` | No | Enhanced wallet balance data |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram notifications |
 | `TELEGRAM_CHAT_ID` | No | Telegram chat target (auto-filled on first message) |
-| `LLM_BASE_URL` | No | Override for local LLM (e.g. LM Studio) |
+| `LLM_BASE_URL` | No | Override LLM endpoint URL (e.g. LM Studio, local providers) |
 | `LLM_API_KEY` | No | Override LLM auth (local endpoints) |
-| `LLM_MODEL` | No | Override default model |
+| `LLM_MODEL` | No | Override ALL models globally (takes precedence over role-specific models) |
 | `DRY_RUN` | No | Skip all on-chain transactions |
 | `HIVE_MIND_URL` | No | Collective intelligence server |
 | `HIVE_MIND_API_KEY` | No | Hive mind auth token |
+| `HIVE_MIND_AGENT_ID` | No | Hive mind agent ID (from registration) |
 | `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` | No | OKX OnchainOS risk data |

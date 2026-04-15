@@ -109,10 +109,6 @@ export interface Config {
 
 export interface UserConfigPartial {
   rpcUrl?: string;
-  walletKey?: string;
-  llmModel?: string;
-  llmBaseUrl?: string;
-  llmApiKey?: string;
   dryRun?: boolean;
   maxPositions?: number;
   maxDeployAmount?: number;

@@ -1,8 +1,5 @@
 {
   "rpcUrl": "https://pump.helius-rpc.com",
-  "llmBaseUrl": "",
-  "llmApiKey": "",
-  "llmModel": "minimax/minimax-m2.7",
   "dryRun": true,
 
   "deployAmountSol": 0.5,
@@ -61,6 +58,7 @@
   "temperature": 0.373,
   "maxTokens": 4096,
   "maxSteps": 20,
+  "_comment_models": "Per-role model tuning. Set LLM_MODEL in .env to override all roles globally",
   "managementModel": "minimax/minimax-m2.5",
   "screeningModel": "minimax/minimax-m2.5",
   "generalModel": "minimax/minimax-m2.7",
@@ -80,7 +78,5 @@
     "weightFloor": 0.5,
     "weightCeiling": 2.0
   },
-  "telegramChatId": "",
-  "hiveMindUrl": "",
-  "hiveMindApiKey": ""
+  "telegramChatId": ""
 }
