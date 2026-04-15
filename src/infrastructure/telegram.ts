@@ -12,6 +12,32 @@ import type {
 import { getErrorMessage } from "../utils/errors.js";
 import { log } from "./logger.js";
 
+/**
+ * Escape special characters for Telegram MarkdownV2 format.
+ * Characters that must be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+ */
+function escapeMarkdownV2(text: string): string {
+  return text
+    .replace(/_/g, "\\_")
+    .replace(/\*/g, "\\*")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/~/g, "\\~")
+    .replace(/`/g, "\\`")
+    .replace(/>/g, "\\>")
+    .replace(/#/g, "\\#")
+    .replace(/\+/g, "\\+")
+    .replace(/-/g, "\\-")
+    .replace(/=/g, "\\=")
+    .replace(/\|/g, "\\|")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\./g, "\\.")
+    .replace(/!/g, "\\!");
+}
+
 // Local types for live messages
 interface LiveMessageState {
   title: string;
@@ -250,9 +276,11 @@ export async function sendMessage(text: string): Promise<unknown> {
   if (!bot || !chatId) return null;
   const safeText = String(text).slice(0, 4096);
   try {
-    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "MarkdownV2" });
+    // Escape special characters for MarkdownV2
+    const escapedText = escapeMarkdownV2(safeText);
+    return await bot.api.sendMessage(chatId, escapedText, { parse_mode: "MarkdownV2" });
   } catch (error) {
-    // If MarkdownV2 parsing fails, retry with escaped text as plain text
+    // If MarkdownV2 parsing fails, retry as plain text
     if (error instanceof GrammyError) {
       const errorMessage = error.description || "";
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
@@ -293,7 +321,9 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
   if (!bot || !chatId || !messageId) return null;
   const safeText = String(text).slice(0, 4096);
   try {
-    return await bot.api.editMessageText(chatId, messageId, safeText, {
+    // Escape special characters for MarkdownV2
+    const escapedText = escapeMarkdownV2(safeText);
+    return await bot.api.editMessageText(chatId, messageId, escapedText, {
       parse_mode: "MarkdownV2",
     });
   } catch (error) {
