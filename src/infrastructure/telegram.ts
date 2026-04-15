@@ -14,10 +14,14 @@ import { log } from "./logger.js";
 
 /**
  * Escape special characters for Telegram MarkdownV2 format.
- * Characters that must be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+ * Characters that must be escaped: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
+ *
+ * Backslash MUST be escaped first to avoid double-escaping the backslashes
+ * introduced by subsequent replacements.
  */
-function escapeMarkdownV2(text: string): string {
+export function escapeMarkdownV2(text: string): string {
   return text
+    .replace(/\\/g, "\\\\")
     .replace(/_/g, "\\_")
     .replace(/\*/g, "\\*")
     .replace(/\[/g, "\\[")
