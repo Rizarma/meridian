@@ -366,6 +366,7 @@ registerTool({
       screeningModel: ["llm", "screeningModel"],
       generalModel: ["llm", "generalModel"],
       // strategy
+      strategy: ["strategy", "strategy"],
       binsBelow: ["strategy", "binsBelow"],
       // features
       trailingTakeProfit: ["features", "trailingTakeProfit"],
