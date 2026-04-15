@@ -2,20 +2,146 @@ import fs from "node:fs";
 import path from "node:path";
 import { LESSONS_FILE, POOL_MEMORY_FILE, PROJECT_ROOT } from "../config/paths.js";
 import { getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
+import { log } from "./logger.js";
 
 // Legacy blacklist files for migration
 const TOKEN_BLACKLIST_FILE = path.join(PROJECT_ROOT, "token-blacklist.json");
 const DEV_BLOCKLIST_FILE = path.join(PROJECT_ROOT, "dev-blocklist.json");
 const SMART_WALLETS_FILE = path.join(PROJECT_ROOT, "smart-wallets.json");
 const STRATEGY_LIBRARY_FILE = path.join(PROJECT_ROOT, "strategy-library.json");
+const STATE_FILE = path.join(PROJECT_ROOT, "state.json");
+const SIGNAL_WEIGHTS_FILE = path.join(PROJECT_ROOT, "signal-weights.json");
 
-import { log } from "./logger.js";
+const MIGRATION_JSON_FILES = [
+  { source: LESSONS_FILE, name: "lessons.json" },
+  { source: POOL_MEMORY_FILE, name: "pool-memory.json" },
+  { source: STATE_FILE, name: "state.json" },
+  { source: SIGNAL_WEIGHTS_FILE, name: "signal-weights.json" },
+  { source: TOKEN_BLACKLIST_FILE, name: "token-blacklist.json" },
+  { source: DEV_BLOCKLIST_FILE, name: "dev-blocklist.json" },
+  { source: SMART_WALLETS_FILE, name: "smart-wallets.json" },
+  { source: STRATEGY_LIBRARY_FILE, name: "strategy-library.json" },
+] as const;
+
+function createMigrationRollbackBackup(): {
+  success: boolean;
+  message: string;
+  backupPath?: string;
+} {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupDir = path.join(PROJECT_ROOT, "backups", `migration-rollback-${timestamp}`);
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const manifest: Array<{ source: string; backupFile: string }> = [];
+
+    for (const file of MIGRATION_JSON_FILES) {
+      if (!fs.existsSync(file.source)) continue;
+
+      const backupFile = path.join(backupDir, file.name);
+      fs.copyFileSync(file.source, backupFile);
+      manifest.push({ source: file.source, backupFile: file.name });
+    }
+
+    fs.writeFileSync(
+      path.join(backupDir, "manifest.json"),
+      JSON.stringify({ created_at: new Date().toISOString(), files: manifest }, null, 2)
+    );
+
+    return {
+      success: true,
+      message: `Rollback backup created at ${backupDir}`,
+      backupPath: backupDir,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return { success: false, message: `Rollback backup failed: ${errorMessage}` };
+  }
+}
+
+function restoreJsonBackups(backupPath: string): { success: boolean; message: string } {
+  try {
+    if (!fs.existsSync(backupPath)) {
+      return { success: false, message: `Backup directory not found: ${backupPath}` };
+    }
+
+    const manifestPath = path.join(backupPath, "manifest.json");
+    const manifest = fs.existsSync(manifestPath)
+      ? (JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
+          files?: Array<{ source: string; backupFile: string }>;
+        })
+      : null;
+
+    const filesToRestore =
+      manifest?.files ??
+      MIGRATION_JSON_FILES.map((file) => ({
+        source: file.source,
+        backupFile: file.name,
+      }));
+
+    for (const file of filesToRestore) {
+      const backupFile = path.join(backupPath, file.backupFile);
+      if (!fs.existsSync(backupFile)) continue;
+      fs.copyFileSync(backupFile, file.source);
+    }
+
+    return { success: true, message: `Restored JSON files from ${backupPath}` };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return { success: false, message: `Restore failed: ${errorMessage}` };
+  }
+}
 
 /**
  * Current schema version.
  * Increment this when making schema changes.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = Number.parseInt(process.env.MERIDIAN_SCHEMA_VERSION ?? "1", 10) || 1;
+
+function getCurrentSchemaVersion(): number {
+  try {
+    const rows = query<{ version: number }>(
+      "SELECT COALESCE(MAX(version), 0) AS version FROM schema_version"
+    );
+
+    return rows[0]?.version ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+function upgradeV1ToV2(): void {
+  // Keep idempotent; add future v2 schema changes here.
+  getDb().exec("SELECT 1");
+}
+
+function upgradeV2ToV3(): void {
+  // Keep idempotent; add future v3 schema changes here.
+  getDb().exec("SELECT 1");
+}
+
+export function runMigrations(): void {
+  const currentVersion = getCurrentSchemaVersion();
+
+  if (currentVersion >= SCHEMA_VERSION) {
+    return;
+  }
+
+  for (let version = currentVersion + 1; version <= SCHEMA_VERSION; version++) {
+    switch (version) {
+      case 2:
+        upgradeV1ToV2();
+        break;
+      case 3:
+        upgradeV2ToV3();
+        break;
+      default:
+        throw new Error(`No migration defined for schema version ${version}`);
+    }
+
+    run("INSERT INTO schema_version (version) VALUES (?)", version);
+  }
+}
 
 /**
  * Initialize the database schema.
@@ -366,8 +492,10 @@ export function initSchema(): void {
     "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
   );
   if (!versionRow.length) {
-    run("INSERT INTO schema_version (version) VALUES (?)", SCHEMA_VERSION);
+    run("INSERT INTO schema_version (version) VALUES (?)", 1);
   }
+
+  runMigrations();
 }
 
 /**
@@ -401,8 +529,16 @@ export function needsMigration(): boolean {
  * Keeps JSON files as backups.
  */
 export function migrateFromJson(): { success: boolean; message: string } {
-  // Create pre-migration backup
-  const backupResult = createJsonBackups();
+  if (!needsMigration()) {
+    return {
+      success: true,
+      message:
+        "Migration skipped: database already contains data or no legacy JSON files were found",
+    };
+  }
+
+  // Create rollback backup of original JSON state before touching the database
+  const backupResult = createMigrationRollbackBackup();
   if (!backupResult.success) {
     return {
       success: false,
@@ -410,8 +546,13 @@ export function migrateFromJson(): { success: boolean; message: string } {
     };
   }
 
-  // Extract backup path from message (format: "Backups created in <dir>: <file1>, <file2>")
-  const backupPath = backupResult.message.match(/backups[/][^:]+/)?.[0] || backupResult.message;
+  const backupPath = backupResult.backupPath;
+  if (!backupPath) {
+    return {
+      success: false,
+      message: "Pre-migration backup failed: missing backup path",
+    };
+  }
 
   // Insert migration log entry
   run(`INSERT INTO migration_log (status, backup_path) VALUES (?, ?)`, "started", backupPath);
@@ -421,6 +562,23 @@ export function migrateFromJson(): { success: boolean; message: string } {
 
   try {
     return transaction(() => {
+      const criticalErrors: string[] = [];
+      const nonCriticalErrors: string[] = [];
+
+      const recordNonCriticalError = (context: string, error: unknown): void => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const message = `${context}: ${errorMessage}`;
+        nonCriticalErrors.push(message);
+        log("migration_warn", message);
+      };
+
+      const recordCriticalError = (context: string, error: unknown): void => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const message = `${context}: ${errorMessage}`;
+        criticalErrors.push(message);
+        log("migration_error", message);
+      };
+
       let migratedLessons = 0;
       let migratedPools = 0;
       let migratedDeploys = 0;
@@ -500,9 +658,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
             }
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${LESSONS_FILE}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+          recordCriticalError(`Failed to parse ${LESSONS_FILE}`, error);
         }
       }
 
@@ -626,17 +782,14 @@ export function migrateFromJson(): { success: boolean; message: string } {
             }
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${POOL_MEMORY_FILE}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+          recordCriticalError(`Failed to parse ${POOL_MEMORY_FILE}`, error);
         }
       }
 
       // Migrate state.json positions if exists
-      const stateFile = path.join(PROJECT_ROOT, "state.json");
-      if (fs.existsSync(stateFile)) {
+      if (fs.existsSync(STATE_FILE)) {
         try {
-          const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
+          const stateData = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8")) as {
             positions?: Record<string, unknown>;
           };
 
@@ -738,17 +891,15 @@ export function migrateFromJson(): { success: boolean; message: string } {
             }
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${stateFile}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+          recordCriticalError(`Failed to parse ${STATE_FILE}`, error);
+          throw error;
         }
       }
 
       // Migrate signal-weights.json if exists
-      const signalWeightsFile = path.join(PROJECT_ROOT, "signal-weights.json");
-      if (fs.existsSync(signalWeightsFile)) {
+      if (fs.existsSync(SIGNAL_WEIGHTS_FILE)) {
         try {
-          const signalData = JSON.parse(fs.readFileSync(signalWeightsFile, "utf-8")) as {
+          const signalData = JSON.parse(fs.readFileSync(SIGNAL_WEIGHTS_FILE, "utf-8")) as {
             weights?: Record<string, number>;
             history?: unknown[];
           };
@@ -791,9 +942,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
             }
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${signalWeightsFile}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+          recordNonCriticalError(`Failed to parse ${SIGNAL_WEIGHTS_FILE}`, error);
         }
       }
 
@@ -826,8 +975,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
           }
           log("migration", `Migrated ${migratedCount} token blacklist entries from JSON`);
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to migrate token blacklist: ${errorMessage}`);
+          recordNonCriticalError("Failed to migrate token blacklist", error);
         }
       }
 
@@ -857,8 +1005,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
           }
           log("migration", `Migrated ${migratedCount} dev blocklist entries from JSON`);
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to migrate dev blocklist: ${errorMessage}`);
+          recordNonCriticalError("Failed to migrate dev blocklist", error);
         }
       }
 
@@ -896,8 +1043,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
             log("migration", `Migrated ${migratedCount} smart wallets from JSON`);
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to migrate smart wallets: ${errorMessage}`);
+          recordNonCriticalError("Failed to migrate smart wallets", error);
         }
       }
 
@@ -964,8 +1110,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
             log("migration", `Set active strategy to: ${strategyData.active}`);
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to migrate strategy library: ${errorMessage}`);
+          recordNonCriticalError("Failed to migrate strategy library", error);
         }
       }
 
@@ -1044,6 +1189,10 @@ export function migrateFromJson(): { success: boolean; message: string } {
         );
       }
 
+      if (criticalErrors.length > 0) {
+        throw new Error(criticalErrors.join("; "));
+      }
+
       // Update migration log to completed
       if (migrationLogId) {
         run(
@@ -1055,7 +1204,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
 
       return {
         success: true,
-        message: `Migration complete: ${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions${orphanedMessage}`,
+        message: `Migration complete: ${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions${orphanedMessage}${nonCriticalErrors.length ? `; warnings: ${nonCriticalErrors.length}` : ""}`,
       };
     });
   } catch (error) {
@@ -1201,36 +1350,45 @@ export function rollbackMigration(): { success: boolean; message: string } {
       };
     }
 
-    // Clear any partially migrated data
-    // Delete data that may have been partially inserted during the failed migration
-    run("DELETE FROM signal_weight_history");
-    run("DELETE FROM signal_weights");
-    run("DELETE FROM position_events");
-    run("DELETE FROM position_snapshots");
-    run("DELETE FROM pool_deploys");
-    run("DELETE FROM performance");
-    run("DELETE FROM lessons");
-    run("DELETE FROM positions");
-    run("DELETE FROM pools");
-    run("DELETE FROM position_state_events");
-    run("DELETE FROM position_state");
-    run("DELETE FROM state_metadata");
-    run("DELETE FROM token_blacklist");
-    run("DELETE FROM dev_blocklist");
-    run("DELETE FROM smart_wallets");
-    run("DELETE FROM strategies");
-    run("DELETE FROM active_strategy");
+    const restoreResult = restoreJsonBackups(migrationRow.backup_path);
+    if (!restoreResult.success) {
+      return {
+        success: false,
+        message: `Rollback failed while restoring JSON files: ${restoreResult.message}`,
+      };
+    }
 
-    // Update migration log status to rolled_back
-    run(
-      `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
-      "rolled_back",
-      migrationRow.id
-    );
+    transaction(() => {
+      // Clear any partially migrated data
+      run("DELETE FROM signal_weight_history");
+      run("DELETE FROM signal_weights");
+      run("DELETE FROM position_events");
+      run("DELETE FROM position_snapshots");
+      run("DELETE FROM pool_deploys");
+      run("DELETE FROM performance");
+      run("DELETE FROM lessons");
+      run("DELETE FROM positions");
+      run("DELETE FROM pools");
+      run("DELETE FROM position_state_events");
+      run("DELETE FROM position_state");
+      run("DELETE FROM state_metadata");
+      run("DELETE FROM token_blacklist");
+      run("DELETE FROM dev_blocklist");
+      run("DELETE FROM smart_wallets");
+      run("DELETE FROM strategies");
+      run("DELETE FROM active_strategy");
+
+      // Update migration log status to rolled_back
+      run(
+        `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
+        "rolled_back",
+        migrationRow.id
+      );
+    });
 
     return {
       success: true,
-      message: `Migration rolled back successfully. Backup was at: ${migrationRow.backup_path}. Database tables have been cleared - you can retry migration or restore from the JSON backup files manually.`,
+      message: `Migration rolled back successfully. JSON files restored from ${migrationRow.backup_path} and SQLite tables cleared.`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1246,11 +1404,31 @@ export function rollbackMigration(): { success: boolean; message: string } {
  */
 export function setupDatabase(): { success: boolean; message: string } {
   try {
+    const versionBeforeInit = getCurrentSchemaVersion();
     initSchema();
+    const versionAfterInit = getCurrentSchemaVersion();
 
     if (needsMigration()) {
       const result = migrateFromJson();
+      if (!result.success) {
+        return {
+          success: false,
+          message: `Database setup failed: ${result.message}`,
+        };
+      }
+
       return result;
+    }
+
+    if (
+      versionBeforeInit > 0 &&
+      versionBeforeInit < SCHEMA_VERSION &&
+      versionAfterInit >= SCHEMA_VERSION
+    ) {
+      return {
+        success: true,
+        message: `Database upgraded to schema version ${SCHEMA_VERSION}`,
+      };
     }
 
     return {
