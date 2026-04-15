@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, run, query, transaction, parseJson, stringifyJson } from "./db.js";
-import { PROJECT_ROOT, LESSONS_FILE, POOL_MEMORY_FILE } from "../config/paths.js";
+import { LESSONS_FILE, POOL_MEMORY_FILE, PROJECT_ROOT } from "../config/paths.js";
+import { getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
+
+// Legacy blacklist files for migration
+const TOKEN_BLACKLIST_FILE = path.join(PROJECT_ROOT, "token-blacklist.json");
+const DEV_BLOCKLIST_FILE = path.join(PROJECT_ROOT, "dev-blocklist.json");
+
+import { log } from "./logger.js";
 
 /**
  * Current schema version.
@@ -191,6 +197,27 @@ export function initSchema(): void {
     )
   `);
 
+  // Token blacklist table - mints the agent should never deploy into
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS token_blacklist (
+      mint TEXT PRIMARY KEY,
+      symbol TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      added_by TEXT NOT NULL DEFAULT 'agent'
+    )
+  `);
+
+  // Dev blocklist table - deployer wallets to avoid
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dev_blocklist (
+      wallet TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      added_at TEXT NOT NULL
+    )
+  `);
+
   // Create indexes for common queries
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_positions_pool ON positions(pool);
@@ -206,6 +233,21 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lessons_pool ON lessons(pool);
     CREATE INDEX IF NOT EXISTS idx_lessons_outcome ON lessons(outcome);
     CREATE INDEX IF NOT EXISTS idx_lessons_created_at ON lessons(created_at);
+    CREATE INDEX IF NOT EXISTS idx_signal_weight_history_signal ON signal_weight_history(signal);
+    CREATE INDEX IF NOT EXISTS idx_token_blacklist_added_at ON token_blacklist(added_at);
+    CREATE INDEX IF NOT EXISTS idx_dev_blocklist_added_at ON dev_blocklist(added_at);
+  `);
+
+  // Migration log - track migration attempts for rollback
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS migration_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      status TEXT NOT NULL, -- 'started', 'completed', 'failed', 'rolled_back'
+      backup_path TEXT,
+      error_message TEXT
+    )
   `);
 
   // Record schema version
@@ -248,14 +290,35 @@ export function needsMigration(): boolean {
  * Keeps JSON files as backups.
  */
 export function migrateFromJson(): { success: boolean; message: string } {
-  return transaction(() => {
-    try {
+  // Create pre-migration backup
+  const backupResult = createJsonBackups();
+  if (!backupResult.success) {
+    return {
+      success: false,
+      message: `Pre-migration backup failed: ${backupResult.message}`,
+    };
+  }
+
+  // Extract backup path from message (format: "Backups created in <dir>: <file1>, <file2>")
+  const backupPath = backupResult.message.match(/backups[/][^:]+/)?.[0] || backupResult.message;
+
+  // Insert migration log entry
+  run(`INSERT INTO migration_log (status, backup_path) VALUES (?, ?)`, "started", backupPath);
+  const migrationLogId = query<{ id: number }>(
+    "SELECT id FROM migration_log ORDER BY id DESC LIMIT 1"
+  )[0]?.id;
+
+  try {
+    return transaction(() => {
       let migratedLessons = 0;
       let migratedPools = 0;
       let migratedDeploys = 0;
       let migratedSnapshots = 0;
       let migratedPerformance = 0;
       let migratedPositions = 0;
+
+      // Collect orphaned data for backup and manual recovery
+      const orphanedSnapshots: Array<Record<string, unknown> & { _poolAddress: string }> = [];
 
       // Migrate lessons.json
       if (fs.existsSync(LESSONS_FILE)) {
@@ -387,7 +450,14 @@ export function migrateFromJson(): { success: boolean; message: string } {
               const s = snapshot as Record<string, unknown>;
               // Only migrate snapshots that have a valid position reference
               const positionAddr = s.position as string | undefined;
-              if (!positionAddr) continue; // Skip snapshots without position reference
+              if (!positionAddr) {
+                // Log warning and collect orphaned snapshot for backup
+                console.warn(
+                  `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`
+                );
+                orphanedSnapshots.push({ ...s, _poolAddress: poolAddress });
+                continue;
+              }
 
               run(
                 `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
@@ -526,18 +596,129 @@ export function migrateFromJson(): { success: boolean; message: string } {
         }
       }
 
+      // Migrate token-blacklist.json if exists
+      if (fs.existsSync(TOKEN_BLACKLIST_FILE)) {
+        try {
+          const blacklistData = JSON.parse(
+            fs.readFileSync(TOKEN_BLACKLIST_FILE, "utf-8")
+          ) as Record<
+            string,
+            { symbol: string; reason: string; added_at: string; added_by?: string }
+          >;
+
+          let migratedCount = 0;
+          for (const [mint, entry] of Object.entries(blacklistData)) {
+            try {
+              run(
+                `INSERT OR IGNORE INTO token_blacklist (mint, symbol, reason, added_at, added_by)
+                 VALUES (?, ?, ?, ?, ?)`,
+                mint,
+                entry.symbol || "UNKNOWN",
+                entry.reason || "no reason provided",
+                entry.added_at || new Date().toISOString(),
+                entry.added_by || "agent"
+              );
+              migratedCount++;
+            } catch (err) {
+              log("migration_warn", `Failed to migrate blacklist entry ${mint}: ${err}`);
+            }
+          }
+          log("migration", `Migrated ${migratedCount} token blacklist entries from JSON`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to migrate token blacklist: ${errorMessage}`);
+        }
+      }
+
+      // Migrate dev-blocklist.json if exists
+      if (fs.existsSync(DEV_BLOCKLIST_FILE)) {
+        try {
+          const blocklistData = JSON.parse(fs.readFileSync(DEV_BLOCKLIST_FILE, "utf-8")) as Record<
+            string,
+            { label: string; reason: string; added_at: string }
+          >;
+
+          let migratedCount = 0;
+          for (const [wallet, entry] of Object.entries(blocklistData)) {
+            try {
+              run(
+                `INSERT OR IGNORE INTO dev_blocklist (wallet, label, reason, added_at)
+                 VALUES (?, ?, ?, ?)`,
+                wallet,
+                entry.label || "unknown",
+                entry.reason || "no reason provided",
+                entry.added_at || new Date().toISOString()
+              );
+              migratedCount++;
+            } catch (err) {
+              log("migration_warn", `Failed to migrate dev blocklist entry ${wallet}: ${err}`);
+            }
+          }
+          log("migration", `Migrated ${migratedCount} dev blocklist entries from JSON`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log("migration_error", `Failed to migrate dev blocklist: ${errorMessage}`);
+        }
+      }
+
+      // Save orphaned snapshots to backup file if any were found
+      let orphanedMessage = "";
+      if (orphanedSnapshots.length > 0) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const backupFile = path.join(PROJECT_ROOT, `orphaned-snapshots-backup-${timestamp}.json`);
+        fs.writeFileSync(
+          backupFile,
+          JSON.stringify(
+            {
+              orphanedSnapshots,
+              count: orphanedSnapshots.length,
+              exported_at: new Date().toISOString(),
+              note: "These snapshots were skipped during migration because they lack a position reference. Manual recovery may be needed.",
+            },
+            null,
+            2
+          )
+        );
+        orphanedMessage = `, ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile}`;
+        console.warn(
+          `[migrateFromJson] ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile} for manual recovery`
+        );
+      }
+
+      // Update migration log to completed
+      if (migrationLogId) {
+        run(
+          `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
+          "completed",
+          migrationLogId
+        );
+      }
+
       return {
         success: true,
-        message: `Migration complete: ${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions`,
+        message: `Migration complete: ${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions${orphanedMessage}`,
       };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return {
-        success: false,
-        message: `Migration failed: ${errorMessage}`,
-      };
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Update migration log to failed
+    if (migrationLogId) {
+      try {
+        run(
+          `UPDATE migration_log SET status = ?, completed_at = datetime('now'), error_message = ? WHERE id = ?`,
+          "failed",
+          errorMessage,
+          migrationLogId
+        );
+      } catch {
+        // Ignore log update failure
+      }
     }
-  });
+    return {
+      success: false,
+      message: `Migration failed: ${errorMessage}`,
+    };
+  }
 }
 
 /**

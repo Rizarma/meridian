@@ -3,29 +3,30 @@
  *
  * Agent can blacklist via Telegram ("blacklist this token, it rugged").
  * Screening filters blacklisted tokens before passing pools to the LLM.
+ *
+ * NOTE: Migrated from JSON to SQLite for data persistence across deployments.
  */
 
-import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
+import { get, query, run } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
-import type { BlacklistDB, BlacklistEntry } from "../types/blocklist.js";
+import type { BlacklistEntry } from "../types/blocklist.js";
 
-const BLACKLIST_FILE = "./token-blacklist.json";
+// ═══════════════════════════════════════════════════════════════════════════
+// Database Types
+// ═══════════════════════════════════════════════════════════════════════════
 
-function load(): BlacklistDB {
-  if (!fs.existsSync(BLACKLIST_FILE)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(BLACKLIST_FILE, "utf8")) as BlacklistDB;
-  } catch {
-    return {};
-  }
+interface TokenBlacklistRow {
+  mint: string;
+  symbol: string;
+  reason: string;
+  added_at: string;
+  added_by: string;
 }
 
-function save(data: BlacklistDB): void {
-  fs.writeFileSync(BLACKLIST_FILE, JSON.stringify(data, null, 2));
-}
-
-// ─── Check ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Core Functions
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Returns true if the mint is on the blacklist.
@@ -33,11 +34,32 @@ function save(data: BlacklistDB): void {
  */
 export function isBlacklisted(mint: string): boolean {
   if (!mint) return false;
-  const db = load();
-  return !!db[mint];
+  const row = get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM token_blacklist WHERE mint = ?",
+    mint
+  );
+  return (row?.count ?? 0) > 0;
 }
 
-// ─── Tool Handlers ─────────────────────────────────────────────
+/**
+ * Get a single blacklist entry.
+ */
+export function getBlacklistEntry(mint: string): (BlacklistEntry & { mint: string }) | null {
+  if (!mint) return null;
+  const row = get<TokenBlacklistRow>("SELECT * FROM token_blacklist WHERE mint = ?", mint);
+  if (!row) return null;
+  return {
+    mint: row.mint,
+    symbol: row.symbol,
+    reason: row.reason,
+    added_at: row.added_at,
+    added_by: row.added_by,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Handlers
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Tool handler: add_to_blacklist
@@ -56,32 +78,46 @@ export function addToBlacklist({
   | { error: string } {
   if (!mint) return { error: "mint required" };
 
-  const db = load();
-
-  if (db[mint]) {
+  // Check if already blacklisted
+  const existing = getBlacklistEntry(mint);
+  if (existing) {
     return {
       already_blacklisted: true,
       mint,
-      symbol: db[mint].symbol,
-      reason: db[mint].reason,
+      symbol: existing.symbol,
+      reason: existing.reason,
     };
   }
 
-  db[mint] = {
+  const entry = {
+    mint,
     symbol: symbol || "UNKNOWN",
     reason: reason || "no reason provided",
     added_at: new Date().toISOString(),
     added_by: "agent",
   };
 
-  save(db);
-  log("blacklist", `Blacklisted ${symbol || mint}: ${reason}`);
-  return {
-    blacklisted: true,
-    mint,
-    symbol: symbol || "UNKNOWN",
-    reason: reason || "no reason provided",
-  };
+  try {
+    run(
+      "INSERT INTO token_blacklist (mint, symbol, reason, added_at, added_by) VALUES (?, ?, ?, ?, ?)",
+      entry.mint,
+      entry.symbol,
+      entry.reason,
+      entry.added_at,
+      entry.added_by
+    );
+    log("blacklist", `Blacklisted ${entry.symbol} (${mint}): ${entry.reason}`);
+    return {
+      blacklisted: true,
+      mint,
+      symbol: entry.symbol,
+      reason: entry.reason,
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("blacklist_error", `Failed to blacklist ${mint}: ${errorMsg}`);
+    return { error: `Failed to blacklist: ${errorMsg}` };
+  }
 }
 
 /**
@@ -94,17 +130,29 @@ export function removeFromBlacklist({
 }): { removed: true; mint: string; was: BlacklistEntry } | { error: string } {
   if (!mint) return { error: "mint required" };
 
-  const db = load();
-
-  if (!db[mint]) {
+  const existing = getBlacklistEntry(mint);
+  if (!existing) {
     return { error: `Mint ${mint} not found on blacklist` };
   }
 
-  const entry = db[mint];
-  delete db[mint];
-  save(db);
-  log("blacklist", `Removed ${entry.symbol || mint} from blacklist`);
-  return { removed: true, mint, was: entry };
+  try {
+    run("DELETE FROM token_blacklist WHERE mint = ?", mint);
+    log("blacklist", `Removed ${existing.symbol} (${mint}) from blacklist`);
+    return {
+      removed: true,
+      mint,
+      was: {
+        symbol: existing.symbol,
+        reason: existing.reason,
+        added_at: existing.added_at,
+        added_by: existing.added_by,
+      },
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("blacklist_error", `Failed to remove ${mint} from blacklist: ${errorMsg}`);
+    return { error: `Failed to remove from blacklist: ${errorMsg}` };
+  }
 }
 
 /**
@@ -114,10 +162,14 @@ export function listBlacklist(): {
   count: number;
   blacklist: Array<BlacklistEntry & { mint: string }>;
 } {
-  const db = load();
-  const entries = Object.entries(db).map(([mint, info]) => ({
-    mint,
-    ...info,
+  const rows = query<TokenBlacklistRow>("SELECT * FROM token_blacklist ORDER BY added_at DESC");
+
+  const entries = rows.map((row) => ({
+    mint: row.mint,
+    symbol: row.symbol,
+    reason: row.reason,
+    added_at: row.added_at,
+    added_by: row.added_by,
   }));
 
   return {
@@ -126,7 +178,19 @@ export function listBlacklist(): {
   };
 }
 
-// Tool registrations
+/**
+ * Clear all blacklist entries (useful for testing).
+ */
+export function clearBlacklist(): { cleared: number } {
+  const result = run("DELETE FROM token_blacklist");
+  log("blacklist", `Cleared ${result.changes} blacklist entries`);
+  return { cleared: Number(result.changes) };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Registrations
+// ═══════════════════════════════════════════════════════════════════════════
+
 registerTool({
   name: "add_to_blacklist",
   handler: addToBlacklist,
