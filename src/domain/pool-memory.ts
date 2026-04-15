@@ -359,15 +359,27 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
 export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSnapshotInput): void {
   if (!poolAddress) return;
 
+  const positionAddr = snapshot.position;
+  if (!positionAddr) return;
+
   transaction(() => {
     // Ensure pool exists
     getOrCreatePool(poolAddress, snapshot.pair);
 
+    // Skip if position is not tracked in position_state (FK constraint requires it)
+    const tracked = get<{ cnt: number }>(
+      "SELECT COUNT(*) as cnt FROM position_state WHERE position = ?",
+      positionAddr
+    );
+    if (!tracked || tracked.cnt === 0) {
+      // Position exists on-chain but not in our state — skip snapshot
+      return;
+    }
+
     // Insert snapshot
-    const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
     run(
-      `INSERT INTO position_snapshots 
-       (position_address, ts, pnl_pct, pnl_usd, in_range, unclaimed_fees_usd, 
+      `INSERT INTO position_snapshots
+       (position_address, ts, pnl_pct, pnl_usd, in_range, unclaimed_fees_usd,
         minutes_out_of_range, age_minutes, data_json)
        VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)`,
       positionAddr,
