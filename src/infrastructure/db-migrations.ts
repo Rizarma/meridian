@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { LESSONS_FILE, POOL_MEMORY_FILE, PROJECT_ROOT } from "../config/paths.js";
 import { getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
+import { initThresholdEvolutionTables } from "./db-threshold-evolution.js";
 import { log } from "./logger.js";
 
 /**
@@ -192,6 +193,141 @@ export function initSchema(): void {
     )
   `);
 
+  // Position state - runtime position tracking
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS position_state (
+      position TEXT PRIMARY KEY,
+      pool TEXT NOT NULL,
+      pool_name TEXT,
+      strategy TEXT NOT NULL,
+      strategy_config TEXT,
+      bin_range TEXT,
+      amount_sol REAL NOT NULL,
+      amount_x REAL DEFAULT 0,
+      active_bin_at_deploy INTEGER,
+      bin_step INTEGER,
+      volatility REAL,
+      fee_tvl_ratio REAL,
+      initial_fee_tvl_24h REAL,
+      organic_score INTEGER,
+      initial_value_usd REAL,
+      signal_snapshot TEXT,
+      deployed_at TEXT NOT NULL,
+      out_of_range_since TEXT,
+      last_claim_at TEXT,
+      total_fees_claimed_usd REAL DEFAULT 0,
+      rebalance_count INTEGER DEFAULT 0,
+      closed INTEGER DEFAULT 0,
+      closed_at TEXT,
+      notes TEXT,
+      peak_pnl_pct REAL DEFAULT 0,
+      pending_peak_pnl_pct REAL,
+      pending_peak_started_at TEXT,
+      trailing_active INTEGER DEFAULT 0,
+      instruction TEXT,
+      pending_trailing_current_pnl_pct REAL,
+      pending_trailing_peak_pnl_pct REAL,
+      pending_trailing_drop_pct REAL,
+      pending_trailing_started_at TEXT,
+      confirmed_trailing_exit_reason TEXT,
+      confirmed_trailing_exit_until TEXT,
+      last_updated TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Position state events - events for position_state entries
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS position_state_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      action TEXT NOT NULL,
+      position TEXT,
+      pool_name TEXT,
+      reason TEXT
+    )
+  `);
+
+  // State metadata - generic key-value store
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS state_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
+  // Token blacklist - blocked mints
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS token_blacklist (
+      mint TEXT PRIMARY KEY,
+      symbol TEXT NOT NULL DEFAULT 'UNKNOWN',
+      reason TEXT NOT NULL DEFAULT 'no reason provided',
+      added_at TEXT NOT NULL,
+      added_by TEXT NOT NULL DEFAULT 'agent'
+    )
+  `);
+
+  // Strategies - stored strategy definitions
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS strategies (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT 'unknown',
+      lp_strategy TEXT NOT NULL,
+      token_criteria_json TEXT NOT NULL DEFAULT '{}',
+      entry_criteria_json TEXT NOT NULL DEFAULT '{}',
+      range_criteria_json TEXT NOT NULL DEFAULT '{}',
+      exit_criteria_json TEXT NOT NULL DEFAULT '{}',
+      best_for TEXT,
+      raw TEXT DEFAULT '',
+      added_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  // Active strategy - singleton tracking which strategy is active
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS active_strategy (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      active_id TEXT NOT NULL
+    )
+  `);
+
+  // Threshold suggestions - pending approvals (from threshold evolution)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS threshold_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      field TEXT NOT NULL,
+      current_value REAL NOT NULL,
+      suggested_value REAL NOT NULL,
+      confidence INTEGER NOT NULL CHECK (confidence >= 0 AND confidence <= 100),
+      rationale TEXT NOT NULL,
+      sample_size INTEGER NOT NULL,
+      winner_count INTEGER NOT NULL,
+      loser_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+      reviewed_at TEXT,
+      reviewed_by TEXT,
+      applied_at TEXT
+    )
+  `);
+
+  // Threshold history - applied changes (from threshold evolution)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS threshold_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      field TEXT NOT NULL,
+      old_value REAL NOT NULL,
+      new_value REAL NOT NULL,
+      rationale TEXT NOT NULL,
+      confidence INTEGER NOT NULL,
+      sample_size INTEGER NOT NULL,
+      triggered_by TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+      performance_snapshot TEXT
+    )
+  `);
+
   // Create indexes for common queries
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_positions_pool ON positions(pool);
@@ -208,6 +344,16 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lessons_outcome ON lessons(outcome);
     CREATE INDEX IF NOT EXISTS idx_lessons_created_at ON lessons(created_at);
     CREATE INDEX IF NOT EXISTS idx_signal_weight_history_signal ON signal_weight_history(signal);
+    CREATE INDEX IF NOT EXISTS idx_position_state_closed ON position_state(closed);
+    CREATE INDEX IF NOT EXISTS idx_position_state_deployed ON position_state(deployed_at);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_ts ON position_state_events(ts);
+    CREATE INDEX IF NOT EXISTS idx_position_state_events_position ON position_state_events(position);
+    CREATE INDEX IF NOT EXISTS idx_token_blacklist_added ON token_blacklist(added_at);
+    CREATE INDEX IF NOT EXISTS idx_strategies_added ON strategies(added_at);
+    CREATE INDEX IF NOT EXISTS idx_suggestions_status ON threshold_suggestions(status);
+    CREATE INDEX IF NOT EXISTS idx_suggestions_created ON threshold_suggestions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_history_field ON threshold_history(field);
+    CREATE INDEX IF NOT EXISTS idx_history_applied ON threshold_history(applied_at);
   `);
 
   // Migration log - track migration attempts for rollback
@@ -235,7 +381,7 @@ export function initSchema(): void {
  * Check if migration is needed from JSON files.
  * Returns true if tables are empty and JSON files exist with data.
  */
-export function needsMigration(): boolean {
+export function needsJsonImport(): boolean {
   // Check if we have any data in key tables
   const positionCount = query<{ count: number }>("SELECT COUNT(*) as count FROM positions");
   const poolCount = query<{ count: number }>("SELECT COUNT(*) as count FROM pools");
@@ -806,15 +952,62 @@ export function rollbackMigration(): { success: boolean; message: string } {
 }
 
 /**
+ * Validate that all required tables exist in the database.
+ * Returns an object with the list of missing tables (empty if all present).
+ */
+export function validateSchema(): { valid: boolean; missingTables: string[] } {
+  const requiredTables = [
+    "schema_version",
+    "positions",
+    "position_snapshots",
+    "position_events",
+    "pools",
+    "pool_deploys",
+    "lessons",
+    "performance",
+    "signal_weights",
+    "signal_weight_history",
+    "migration_log",
+    "position_state",
+    "position_state_events",
+    "state_metadata",
+    "token_blacklist",
+    "strategies",
+    "active_strategy",
+    "threshold_suggestions",
+    "threshold_history",
+  ];
+
+  const db = getDb();
+  const existing = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    .all() as { name: string }[];
+  const existingNames = new Set(existing.map((r) => r.name));
+
+  const missingTables = requiredTables.filter((t) => !existingNames.has(t));
+  return { valid: missingTables.length === 0, missingTables };
+}
+
+/**
  * Full database setup - initialize schema and migrate if needed.
  */
 export function setupDatabase(): { success: boolean; message: string } {
   try {
     initSchema();
+    initThresholdEvolutionTables();
 
-    if (needsMigration()) {
+    if (needsJsonImport()) {
       const result = migrateFromJson();
       return result;
+    }
+
+    // Validate schema completeness after initialization
+    const validation = validateSchema();
+    if (!validation.valid) {
+      log(
+        "db_setup",
+        `Schema validation warning: missing tables: ${validation.missingTables.join(", ")}`
+      );
     }
 
     return {
