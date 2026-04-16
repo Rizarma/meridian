@@ -24,7 +24,7 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 - Use `.env` for secrets and environment-specific overrides (CI/CD, Docker)
 - Use `user-config.json` for day-to-day tuning (models, screening thresholds, strategy)
 
-**Data files:** `lessons.json`, `pool-memory.json`, etc. are stored in project root by default. Override with `MERIDIAN_ROOT` env var.
+**Data storage:** SQLite database (`meridian.db`) stores all state, lessons, pool memory, and signal weights. Override location with `MERIDIAN_ROOT` env var.
 
 **Timezone:** Set `TZ` env var to change log timestamps from UTC (e.g., `TZ=Asia/Jakarta`). File rotation dates remain UTC.
 

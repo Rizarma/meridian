@@ -1,20 +1,18 @@
 /**
- * Agent learning system.
+ * Agent learning system - SQLite implementation.
  *
  * After each position closes, performance is analyzed and lessons are
  * derived. These lessons are injected into the system prompt so the
  * agent avoids repeating mistakes and doubles down on what works.
  */
 
-import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
-import { LESSONS_FILE } from "../config/paths.js";
+import { get, parseJson, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
 import type {
   LessonContext,
   LessonEntry,
   LessonOutcome,
-  LessonsData,
   ListedLesson,
   ListLessonsOptions,
   ListLessonsResult,
@@ -27,6 +25,35 @@ import type {
 import { runThresholdEvolution } from "./threshold-evolution.js";
 
 const MAX_MANUAL_LESSON_LENGTH = 400;
+
+// Tags that map to each agent role — used for role-aware lesson injection
+const ROLE_TAGS: RoleTags = {
+  SCREENER: [
+    "screening",
+    "narrative",
+    "strategy",
+    "deployment",
+    "token",
+    "volume",
+    "entry",
+    "bundler",
+    "holders",
+    "organic",
+  ],
+  MANAGER: [
+    "management",
+    "risk",
+    "oor",
+    "fees",
+    "position",
+    "hold",
+    "close",
+    "pnl",
+    "rebalance",
+    "claim",
+  ],
+  GENERAL: [], // all lessons
+};
 
 function sanitizeLessonText(
   text: string | null | undefined,
@@ -42,30 +69,107 @@ function sanitizeLessonText(
   return cleaned || null;
 }
 
-function load(): LessonsData {
-  if (!fs.existsSync(LESSONS_FILE)) {
-    return { lessons: [], performance: [] };
-  }
-  try {
-    return JSON.parse(fs.readFileSync(LESSONS_FILE, "utf8"));
-  } catch {
-    return { lessons: [], performance: [] };
-  }
+// ─── Database Row Types ───────────────────────────────────────
+
+interface LessonRow {
+  id: number;
+  rule: string;
+  tags: string; // JSON
+  outcome: string;
+  context: string | null;
+  pool: string | null;
+  pnl_pct: number | null;
+  range_efficiency: number | null;
+  created_at: string;
+  pinned: number;
+  role: string | null;
+  data_json: string | null;
 }
 
-function save(data: LessonsData): void {
-  fs.writeFileSync(LESSONS_FILE, JSON.stringify(data, null, 2));
+interface PerformanceRow {
+  id: number;
+  position: string;
+  pool: string;
+  pool_name: string | null;
+  strategy: string | null;
+  amount_sol: number | null;
+  pnl_pct: number | null;
+  pnl_usd: number | null;
+  fees_earned_usd: number | null;
+  initial_value_usd: number | null;
+  final_value_usd: number | null;
+  minutes_held: number | null;
+  minutes_in_range: number | null;
+  range_efficiency: number | null;
+  close_reason: string | null;
+  base_mint: string | null;
+  bin_step: number | null;
+  volatility: number | null;
+  fee_tvl_ratio: number | null;
+  organic_score: number | null;
+  bin_range: string | null; // JSON
+  recorded_at: string;
+  data_json: string | null;
 }
 
-// ─── Record Position Performance ──────────────────────────────
+// ─── Row Mappers ──────────────────────────────────────────────
+
+function lessonFromRow(row: LessonRow): LessonEntry {
+  return {
+    id: row.id,
+    rule: row.rule,
+    tags: parseJson<string[]>(row.tags) ?? [],
+    outcome: row.outcome as LessonOutcome,
+    context: row.context ?? undefined,
+    pool: row.pool ?? undefined,
+    pnl_pct: row.pnl_pct ?? undefined,
+    range_efficiency: row.range_efficiency ?? undefined,
+    created_at: row.created_at,
+    pinned: Boolean(row.pinned),
+    role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || null,
+  };
+}
+
+function performanceFromRow(row: PerformanceRow): PerformanceRecord {
+  const data = row.data_json ? parseJson<Record<string, unknown>>(row.data_json) : {};
+  return {
+    position: row.position,
+    pool: row.pool,
+    pool_name: row.pool_name ?? "",
+    strategy: row.strategy ?? "",
+    bin_range:
+      parseJson(row.bin_range) ??
+      (data?.bin_range as
+        | number
+        | { min?: number; max?: number; bins_below?: number; bins_above?: number }) ??
+      0,
+    bin_step: row.bin_step ?? (data?.bin_step as number | undefined) ?? undefined,
+    volatility: row.volatility ?? (data?.volatility as number | undefined) ?? undefined,
+    fee_tvl_ratio: row.fee_tvl_ratio ?? (data?.fee_tvl_ratio as number | undefined) ?? undefined,
+    organic_score: row.organic_score ?? (data?.organic_score as number | undefined) ?? undefined,
+    amount_sol: row.amount_sol ?? 0,
+    fees_earned_usd: row.fees_earned_usd ?? 0,
+    final_value_usd: row.final_value_usd ?? 0,
+    initial_value_usd: row.initial_value_usd ?? 0,
+    minutes_in_range: row.minutes_in_range ?? 0,
+    minutes_held: row.minutes_held ?? 0,
+    close_reason: row.close_reason ?? "",
+    base_mint: row.base_mint ?? (data?.base_mint as string | undefined) ?? undefined,
+    deployed_at: data?.deployed_at as string | undefined,
+    pnl_usd: row.pnl_usd ?? 0,
+    pnl_pct: row.pnl_pct ?? 0,
+    range_efficiency: row.range_efficiency ?? 0,
+    recorded_at: row.recorded_at,
+  };
+}
+
+// ─── Record Position Performance ────────────────────────────────
 
 /**
  * Call this when a position closes. Captures performance data and
  * derives a lesson if the outcome was notably good or bad.
  */
 export async function recordPerformance(perf: PositionPerformance): Promise<void> {
-  const data = load();
-
   // Guard against unit-mixed records where a SOL-sized final value is
   // accidentally written into a USD field (e.g. final_value_usd = 2 for a 2 SOL close).
   const suspiciousUnitMix =
@@ -113,19 +217,69 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
     recorded_at: new Date().toISOString(),
   };
 
-  data.performance.push(entry);
-
-  // Derive and store a lesson
+  // Derive lesson before transaction
   const lesson = derivLesson(entry);
-  if (lesson) {
-    data.lessons.push(lesson);
-    log("lessons", `New lesson: ${lesson.rule}`);
-  }
 
-  save(data);
+  transaction(() => {
+    // Insert performance record
+    run(
+      `INSERT INTO performance (position, pool, pool_name, strategy, amount_sol, pnl_pct, pnl_usd,
+        fees_earned_usd, initial_value_usd, final_value_usd, minutes_held, minutes_in_range,
+        range_efficiency, close_reason, base_mint, bin_step, volatility, fee_tvl_ratio,
+        organic_score, bin_range, recorded_at, data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      entry.position,
+      entry.pool,
+      entry.pool_name,
+      entry.strategy,
+      entry.amount_sol,
+      entry.pnl_pct,
+      entry.pnl_usd,
+      entry.fees_earned_usd,
+      entry.initial_value_usd,
+      entry.final_value_usd,
+      entry.minutes_held,
+      entry.minutes_in_range,
+      entry.range_efficiency,
+      entry.close_reason,
+      entry.base_mint ?? null,
+      entry.bin_step ?? null,
+      entry.volatility ?? null,
+      entry.fee_tvl_ratio ?? null,
+      entry.organic_score ?? null,
+      stringifyJson(entry.bin_range),
+      entry.recorded_at,
+      stringifyJson(entry)
+    );
+
+    // Insert lesson if derived
+    if (lesson) {
+      run(
+        `INSERT INTO lessons (id, rule, tags, outcome, context, pool, pnl_pct, range_efficiency, created_at, pinned, role, data_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        lesson.id,
+        lesson.rule,
+        stringifyJson(lesson.tags),
+        lesson.outcome,
+        lesson.context ?? null,
+        lesson.pool ?? null,
+        lesson.pnl_pct ?? null,
+        lesson.range_efficiency ?? null,
+        lesson.created_at,
+        lesson.pinned ? 1 : 0,
+        lesson.role ?? null,
+        stringifyJson(lesson)
+      );
+      log("lessons", `New lesson: ${lesson.rule}`);
+    }
+  });
 
   // Run threshold evolution (pool memory, Darwin weights, hive sync)
-  await runThresholdEvolution(perf, data.performance);
+  // Get all performance for evolution calculation
+  const allPerformance = query<PerformanceRow>(
+    "SELECT * FROM performance ORDER BY recorded_at"
+  ).map(performanceFromRow);
+  await runThresholdEvolution(perf, allPerformance);
 }
 
 /**
@@ -209,17 +363,32 @@ export function addLesson(
 ): void {
   const safeRule = sanitizeLessonText(rule);
   if (!safeRule) return;
-  const data = load();
-  data.lessons.push({
-    id: Date.now(),
+
+  const id = Date.now();
+  const created_at = new Date().toISOString();
+  const lesson: LessonEntry = {
+    id,
     rule: safeRule,
     tags,
     outcome: "manual",
     pinned: !!pinned,
     role: role || null,
-    created_at: new Date().toISOString(),
-  });
-  save(data);
+    created_at,
+  };
+
+  run(
+    `INSERT INTO lessons (id, rule, tags, outcome, created_at, pinned, role, data_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    id,
+    safeRule,
+    stringifyJson(tags),
+    "manual",
+    created_at,
+    pinned ? 1 : 0,
+    role ?? null,
+    stringifyJson(lesson)
+  );
+
   log(
     "lessons",
     `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${safeRule}`
@@ -235,13 +404,12 @@ export function pinLesson(id: number): {
   id?: number;
   rule?: string;
 } {
-  const data = load();
-  const lesson = data.lessons.find((l) => l.id === id);
-  if (!lesson) return { found: false };
-  lesson.pinned = true;
-  save(data);
-  log("lessons", `Pinned lesson ${id}: ${lesson.rule.slice(0, 60)}`);
-  return { found: true, pinned: true, id, rule: lesson.rule };
+  const row = get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
+  if (!row) return { found: false };
+
+  run("UPDATE lessons SET pinned = 1 WHERE id = ?", id);
+  log("lessons", `Pinned lesson ${id}: ${row.rule.slice(0, 60)}`);
+  return { found: true, pinned: true, id, rule: row.rule };
 }
 
 /**
@@ -253,12 +421,11 @@ export function unpinLesson(id: number): {
   id?: number;
   rule?: string;
 } {
-  const data = load();
-  const lesson = data.lessons.find((l) => l.id === id);
-  if (!lesson) return { found: false };
-  lesson.pinned = false;
-  save(data);
-  return { found: true, pinned: false, id, rule: lesson.rule };
+  const row = get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
+  if (!row) return { found: false };
+
+  run("UPDATE lessons SET pinned = 0 WHERE id = ?", id);
+  return { found: true, pinned: false, id, rule: row.rule };
 }
 
 /**
@@ -269,105 +436,88 @@ export function listLessons({
   pinned = null,
   tag = null,
   limit = 30,
+  fullData = false,
 }: ListLessonsOptions = {}): ListLessonsResult {
-  const data = load();
-  let lessons: LessonEntry[] = [...data.lessons];
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
 
-  if (pinned !== null) lessons = lessons.filter((l) => !!l.pinned === pinned);
-  if (role) lessons = lessons.filter((l) => !l.role || l.role === role);
-  if (tag) lessons = lessons.filter((l) => l.tags?.includes(tag));
+  if (pinned !== null) {
+    conditions.push("pinned = ?");
+    params.push(pinned ? 1 : 0);
+  }
 
-  return {
-    total: lessons.length,
-    lessons: lessons.slice(-limit).map(
-      (l): ListedLesson => ({
-        id: l.id,
-        rule: l.rule.slice(0, 120),
-        tags: l.tags,
-        outcome: l.outcome,
-        pinned: !!l.pinned,
-        role: l.role || "all",
-        created_at: l.created_at?.slice(0, 10) || "unknown",
-      })
-    ),
-  };
+  if (role) {
+    conditions.push("(role IS NULL OR role = ?)");
+    params.push(role);
+  }
+
+  if (tag) {
+    conditions.push("tags LIKE ?");
+    params.push(`%"${tag}"%`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  // Get total count
+  const countRow = get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM lessons ${whereClause}`,
+    ...params
+  );
+  const total = countRow?.count ?? 0;
+
+  // Get lessons with limit (most recent first)
+  const rows = query<LessonRow>(
+    `SELECT * FROM lessons ${whereClause} ORDER BY created_at DESC LIMIT ?`,
+    ...params,
+    limit
+  );
+
+  const lessons: ListedLesson[] = rows.map((row) => ({
+    id: row.id,
+    rule: fullData ? row.rule : row.rule.slice(0, 120),
+    tags: parseJson<string[]>(row.tags) ?? [],
+    outcome: row.outcome as LessonOutcome,
+    pinned: Boolean(row.pinned),
+    role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
+    created_at: fullData ? row.created_at : row.created_at?.slice(0, 10) || "unknown",
+  }));
+
+  return { total, lessons };
 }
 
 /**
  * Remove a lesson by ID.
  */
 export function removeLesson(id: number): number {
-  const data = load();
-  const before = data.lessons.length;
-  data.lessons = data.lessons.filter((l) => l.id !== id);
-  save(data);
-  return before - data.lessons.length;
+  const result = run("DELETE FROM lessons WHERE id = ?", id);
+  return result.changes;
 }
 
 /**
  * Remove lessons matching a keyword in their rule text (case-insensitive).
  */
 export function removeLessonsByKeyword(keyword: string): number {
-  const data = load();
-  const before = data.lessons.length;
-  const kw = keyword.toLowerCase();
-  data.lessons = data.lessons.filter((l) => !l.rule.toLowerCase().includes(kw));
-  save(data);
-  return before - data.lessons.length;
+  const result = run("DELETE FROM lessons WHERE LOWER(rule) LIKE LOWER(?)", `%${keyword}%`);
+  return result.changes;
 }
 
 /**
  * Clear ALL lessons (keeps performance data).
  */
 export function clearAllLessons(): number {
-  const data = load();
-  const count = data.lessons.length;
-  data.lessons = [];
-  save(data);
-  return count;
+  const result = run("DELETE FROM lessons");
+  return result.changes;
 }
 
 /**
  * Clear ALL performance records.
  */
 export function clearPerformance(): number {
-  const data = load();
-  const count = data.performance.length;
-  data.performance = [];
-  save(data);
-  return count;
+  const result = run("DELETE FROM performance");
+  return result.changes;
 }
 
 // ─── Lesson Retrieval ──────────────────────────────────────────
-
-// Tags that map to each agent role — used for role-aware lesson injection
-const ROLE_TAGS: RoleTags = {
-  SCREENER: [
-    "screening",
-    "narrative",
-    "strategy",
-    "deployment",
-    "token",
-    "volume",
-    "entry",
-    "bundler",
-    "holders",
-    "organic",
-  ],
-  MANAGER: [
-    "management",
-    "risk",
-    "oor",
-    "fees",
-    "position",
-    "hold",
-    "close",
-    "pnl",
-    "rebalance",
-    "claim",
-  ],
-  GENERAL: [], // all lessons
-};
 
 /**
  * Get lessons formatted for injection into the system prompt.
@@ -382,8 +532,9 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
 
   const { agentType = "GENERAL", maxLessons } = opts;
 
-  const data = load();
-  if (data.lessons.length === 0) return null;
+  // Check if any lessons exist
+  const countRow = get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
+  if (!countRow || countRow.count === 0) return null;
 
   // Smaller caps for automated cycles — they don't need the full lesson history
   const isAutoCycle = agentType === "SCREENER" || agentType === "MANAGER";
@@ -404,9 +555,13 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
   const byPriority = (a: LessonEntry, b: LessonEntry) =>
     (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
 
+  // Load all lessons for filtering (dataset is small, typically < 1000)
+  const allRows = query<LessonRow>("SELECT * FROM lessons");
+  const allLessons = allRows.map(lessonFromRow);
+
   // ── Tier 1: Pinned ──────────────────────────────────────────────
   // Respect role even for pinned lessons — a pinned SCREENER lesson shouldn't pollute MANAGER
-  const pinned = data.lessons
+  const pinned = allLessons
     .filter((l) => l.pinned && (!l.role || l.role === agentType || agentType === "GENERAL"))
     .sort(byPriority)
     .slice(0, PINNED_CAP);
@@ -415,7 +570,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
 
   // ── Tier 2: Role-matched ────────────────────────────────────────
   const roleTags = ROLE_TAGS[agentType] || [];
-  const roleMatched = data.lessons
+  const roleMatched = allLessons
     .filter((l) => {
       if (usedIds.has(l.id)) return false;
       // Include if: lesson has no role restriction OR matches this role
@@ -434,7 +589,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
   const remainingBudget = RECENT_CAP - pinned.length - roleMatched.length;
   const recent =
     remainingBudget > 0
-      ? data.lessons
+      ? allLessons
           .filter((l) => !usedIds.has(l.id))
           .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
           .slice(0, remainingBudget)
@@ -473,39 +628,43 @@ export function getPerformanceHistory({
   hours?: number;
   limit?: number;
 } = {}): PerformanceHistoryResult {
-  const data = load();
-  const p = data.performance;
+  const countRow = get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const totalCount = countRow?.count ?? 0;
 
-  if (p.length === 0)
+  if (totalCount === 0) {
     return { positions: [], count: 0, hours, total_pnl_usd: 0, win_rate_pct: null };
+  }
 
   const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-  const filtered = p
-    .filter((r) => r.recorded_at >= cutoff)
-    .slice(-limit)
-    .map((r) => ({
-      pool_name: r.pool_name,
-      pool: r.pool,
-      strategy: r.strategy,
-      pnl_usd: r.pnl_usd,
-      pnl_pct: r.pnl_pct,
-      fees_earned_usd: r.fees_earned_usd,
-      range_efficiency: r.range_efficiency,
-      minutes_held: r.minutes_held,
-      close_reason: r.close_reason,
-      closed_at: r.recorded_at,
-    }));
+  const rows = query<PerformanceRow>(
+    `SELECT * FROM performance WHERE recorded_at >= ? ORDER BY recorded_at DESC LIMIT ?`,
+    cutoff,
+    limit
+  );
 
-  const totalPnl = filtered.reduce((s, r) => s + (r.pnl_usd ?? 0), 0);
-  const wins = filtered.filter((r) => r.pnl_usd > 0).length;
+  const positions = rows.map((r) => ({
+    pool_name: r.pool_name ?? "",
+    pool: r.pool,
+    strategy: r.strategy ?? "",
+    pnl_usd: r.pnl_usd ?? 0,
+    pnl_pct: r.pnl_pct ?? 0,
+    fees_earned_usd: r.fees_earned_usd ?? 0,
+    range_efficiency: r.range_efficiency ?? 0,
+    minutes_held: r.minutes_held ?? 0,
+    close_reason: r.close_reason ?? "",
+    closed_at: r.recorded_at,
+  }));
+
+  const totalPnl = positions.reduce((s, r) => s + (r.pnl_usd ?? 0), 0);
+  const wins = positions.filter((r) => r.pnl_usd > 0).length;
 
   return {
     hours,
-    count: filtered.length,
+    count: positions.length,
     total_pnl_usd: Math.round(totalPnl * 100) / 100,
-    win_rate_pct: filtered.length > 0 ? Math.round((wins / filtered.length) * 100) : null,
-    positions: filtered,
+    win_rate_pct: positions.length > 0 ? Math.round((wins / positions.length) * 100) : null,
+    positions,
   };
 }
 
@@ -513,24 +672,56 @@ export function getPerformanceHistory({
  * Get performance stats summary.
  */
 export function getPerformanceSummary(): PerformanceMetrics | null {
-  const data = load();
-  const p = data.performance;
+  const perfCountRow = get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const perfCount = perfCountRow?.count ?? 0;
 
-  if (p.length === 0) return null;
+  if (perfCount === 0) return null;
 
-  const totalPnl = p.reduce((s, x) => s + x.pnl_usd, 0);
-  const avgPnlPct = p.reduce((s, x) => s + x.pnl_pct, 0) / p.length;
-  const avgRangeEfficiency = p.reduce((s, x) => s + x.range_efficiency, 0) / p.length;
-  const wins = p.filter((x) => x.pnl_usd > 0).length;
+  const aggRow = get<{
+    total_pnl_usd: number;
+    avg_pnl_pct: number;
+    avg_range_efficiency: number;
+    wins: number;
+  }>(
+    `SELECT
+      COALESCE(SUM(pnl_usd), 0) as total_pnl_usd,
+      COALESCE(AVG(pnl_pct), 0) as avg_pnl_pct,
+      COALESCE(AVG(range_efficiency), 0) as avg_range_efficiency,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins
+    FROM performance`
+  );
+
+  const lessonsCountRow = get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
 
   return {
-    total_positions_closed: p.length,
-    total_pnl_usd: Math.round(totalPnl * 100) / 100,
-    avg_pnl_pct: Math.round(avgPnlPct * 100) / 100,
-    avg_range_efficiency_pct: Math.round(avgRangeEfficiency * 10) / 10,
-    win_rate_pct: Math.round((wins / p.length) * 100),
-    total_lessons: data.lessons.length,
+    total_positions_closed: perfCount,
+    total_pnl_usd: Math.round((aggRow?.total_pnl_usd ?? 0) * 100) / 100,
+    avg_pnl_pct: Math.round((aggRow?.avg_pnl_pct ?? 0) * 100) / 100,
+    avg_range_efficiency_pct: Math.round((aggRow?.avg_range_efficiency ?? 0) * 10) / 10,
+    win_rate_pct: perfCount > 0 ? Math.round(((aggRow?.wins ?? 0) / perfCount) * 100) : 0,
+    total_lessons: lessonsCountRow?.count ?? 0,
   };
+}
+
+/**
+ * Search lessons by keyword in rule text (full-text search).
+ */
+export function searchLessons(keyword: string, limit = 20): ListedLesson[] {
+  const rows = query<LessonRow>(
+    `SELECT * FROM lessons WHERE rule LIKE ? ORDER BY created_at DESC LIMIT ?`,
+    `%${keyword}%`,
+    limit
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    rule: row.rule.slice(0, 120),
+    tags: parseJson<string[]>(row.tags) ?? [],
+    outcome: row.outcome as LessonOutcome,
+    pinned: Boolean(row.pinned),
+    role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
+    created_at: row.created_at?.slice(0, 10) || "unknown",
+  }));
 }
 
 // Tool registrations
@@ -610,5 +801,15 @@ registerTool({
 registerTool({
   name: "get_performance_history",
   handler: getPerformanceHistory,
+  roles: ["GENERAL"],
+});
+
+registerTool({
+  name: "search_lessons",
+  handler: (args: unknown) => {
+    const { keyword, limit } = args as { keyword: string; limit?: number };
+    if (!keyword) return { error: "keyword required" };
+    return { lessons: searchLessons(keyword, limit ?? 20) };
+  },
   roles: ["GENERAL"],
 });

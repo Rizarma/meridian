@@ -134,7 +134,7 @@ cp user-config.example.json user-config.json
 
 **Configuration precedence:** `.env` > `user-config.json` > hardcoded defaults. Use `.env` for secrets and environment-specific overrides (CI/CD, Docker); use `user-config.json` for day-to-day tuning (models, thresholds, strategy). Keys that appear in both files are resolved in that order.
 
-**Data file locations:** By default, Meridian stores data files (`lessons.json`, `pool-memory.json`, `signal-weights.json`, etc.) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
+**Data storage:** By default, Meridian stores all data in a SQLite database (`meridian.db`) in the project root. To override this, set `MERIDIAN_ROOT` in your `.env`:
 
 ```env
 MERIDIAN_ROOT=/path/to/custom/data/directory
@@ -193,9 +193,11 @@ REPL commands:
 | `/learn` | Study top LPers across all current candidate pools |
 | `/learn <pool_address>` | Study top LPers for a specific pool |
 | `/thresholds` | Current screening thresholds and performance stats |
-| `/evolve` | Trigger threshold evolution from performance data (needs 5+ closed positions) |
+| `/evolve` | Review pending threshold suggestions and apply/reject them |
 | `/stop` | Graceful shutdown |
 | `<anything>` | Free-form chat — ask the agent anything, request actions, analyze pools |
+
+> **VPS deployment note:** The bot is fully autonomous and safe to run on a VPS. Threshold evolution suggestions are generated automatically but **not applied until you approve them** — they simply wait in the database. The bot continues trading normally while suggestions are pending.
 
 ---
 
@@ -321,8 +323,17 @@ meridian config set <key> <value>
 meridian lessons
 meridian lessons add "your lesson text"
 meridian performance [--limit 200]
-meridian evolve
 meridian pool-memory --pool <addr>
+```
+
+**Threshold evolution (approval workflow)**
+
+```bash
+meridian evolve review              # View pending suggestions
+meridian evolve apply <id>          # Apply a suggestion to config
+meridian evolve reject <id>         # Reject a suggestion
+meridian evolve report              # View evolution history
+meridian evolve                     # Legacy: auto-apply mode (V1)
 ```
 
 **Blacklist**
@@ -483,12 +494,17 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 | Field | Default | Description |
 |---|---|---|
-| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles |
-| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles |
-| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat |
+| `managementModel` | `minimax/minimax-m2.5` | LLM for management cycles (user-config tuning) |
+| `screeningModel` | `minimax/minimax-m2.5` | LLM for screening cycles (user-config tuning) |
+| `generalModel` | `minimax/minimax-m2.7` | LLM for REPL / chat (user-config tuning) |
 | `temperature` | `0.373` | Sampling temperature for agent calls |
 | `maxTokens` | `4096` | Max tokens per LLM response |
 | `maxSteps` | `20` | Max tool-call iterations per ReAct loop |
+
+**Precedence:** `LLM_MODEL` (env) > role-specific models (user-config) > defaults
+
+- Use `managementModel`/`screeningModel`/`generalModel` in `user-config.json` for per-role tuning
+- Set `LLM_MODEL` in `.env` to override all roles globally (e.g., for testing a new model)
 
 > Override model at runtime: `meridian config set screeningModel anthropic/claude-opus-4-6`
 
@@ -517,18 +533,43 @@ Add a lesson manually:
 meridian lessons add "Never deploy into pump.fun tokens under 2h old"
 ```
 
-### Threshold evolution
+### Threshold evolution (V2 with approval workflow)
 
-After 5+ positions have been closed, run:
+Meridian analyzes every closed position and generates threshold suggestions automatically. Every 5 closed positions, it compares winners vs losers and suggests adjustments to screening criteria (e.g., "raise minOrganic from 65 → 70").
+
+**Important:** Suggestions are **NOT applied automatically**. They are saved as "pending" in the database and require your manual approval. This prevents the bot from evolving into bad configurations while you're away.
+
+**How it works:**
+1. Bot generates suggestions automatically (every 5 closes) — **non-blocking, bot continues trading**
+2. Suggestions sit in SQLite with `status = "pending"` for up to 7 days
+3. You review and approve/reject via CLI
+4. Approved changes are applied immediately to `user-config.json`
+
+**Review and manage suggestions:**
 ```bash
-meridian evolve
+# View pending suggestions
+meridian evolve review
+
+# Apply a suggestion (updates config immediately)
+meridian evolve apply <id>
+
+# Reject a suggestion
+meridian evolve reject <id>
+
+# View evolution report and history
+meridian evolve report
 ```
 
-This analyzes closed position performance (win rate, avg PnL, fee yields) and automatically adjusts screening thresholds in `user-config.json`. Changes take effect immediately.
+**Legacy auto-apply mode (not recommended):**
+```bash
+meridian evolve          # Run analysis and auto-apply (old V1 behavior)
+```
+
+This is safe for VPS deployment — the bot runs 100% autonomously and suggestions simply wait in the database until you review them.
 
 ### Darwinian signal weights
 
-Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to `signal-weights.json` and used by `getTopCandidates()` to rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
+Beyond raw thresholds, Meridian tracks individual screening signals (`high_volume`, `strong_tvl`, `good_distribution`, etc.) and learns which ones actually predict winners. Each closed position updates the weights — winning signals get boosted, losing signals decay. Weights are persisted to SQLite (`signal_weights` table) and used by `getTopCandidates()` to score and rank pools. Configure under `features.darwinEvolution` and `darwin.*` keys.
 
 ---
 
@@ -562,15 +603,7 @@ Opt-in collective intelligence — share lessons and pool outcomes, receive crow
 
 ### Setup
 
-Configure via `user-config.json` (recommended):
-```json
-{
-  "hiveMindUrl": "https://meridian-hive-api-production.up.railway.app",
-  "hiveMindApiKey": "YOUR_TOKEN"
-}
-```
-
-Or via environment variables:
+Configure via environment variables in `.env`:
 ```env
 HIVE_MIND_URL=https://meridian-hive-api-production.up.railway.app
 HIVE_MIND_API_KEY=YOUR_TOKEN
@@ -581,15 +614,14 @@ Or register via CLI:
 npx tsx -e "import('./hive-mind.ts').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
 ```
 
-Get `YOUR_TOKEN` from the private Telegram discussion. Credentials are saved to `user-config.json` automatically when using the CLI register method.
+Get `YOUR_TOKEN` from the private Telegram discussion. After registration, you must manually add `HIVE_MIND_URL`, `HIVE_MIND_API_KEY`, and `HIVE_MIND_AGENT_ID` to your `.env` file.
 
 ### Disable
 
-```json
-{
-  "hiveMindUrl": "",
-  "hiveMindApiKey": ""
-}
+Clear the environment variables in `.env`:
+```env
+HIVE_MIND_URL=
+HIVE_MIND_API_KEY=
 ```
 
 ### Self-hosting

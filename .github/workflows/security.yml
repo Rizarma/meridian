@@ -69,11 +69,16 @@ jobs:
           # Filter out known transitive dependency issues that are outside our control
           # bigint-buffer CVE-2025-3194: comes from @meteora-ag/dlmm -> @solana/spl-token chain
           FILTERED_AUDIT=$(cat audit-results.json | jq '
-            .advisories |= with_entries(
-              select(.value.module_name != "bigint-buffer")
-            ) |
-            .metadata.vulnerabilities.high = ([.advisories[] | select(.severity == "high")] | length) |
-            .metadata.vulnerabilities.critical = ([.advisories[] | select(.severity == "critical")] | length)
+            if .advisories then
+              .advisories |= with_entries(
+                select(.value.module_name != "bigint-buffer")
+              ) |
+              .metadata.vulnerabilities.high = ([.advisories[] | select(.severity == "high")] | length) |
+              .metadata.vulnerabilities.critical = ([.advisories[] | select(.severity == "critical")] | length)
+            else
+              .metadata.vulnerabilities.high = 0 |
+              .metadata.vulnerabilities.critical = 0
+            end
           ')
           
           HIGH_COUNT=$(echo "$FILTERED_AUDIT" | jq '.metadata.vulnerabilities.high // 0')
@@ -85,7 +90,7 @@ jobs:
           # Show all advisories for transparency
           echo ""
           echo "All advisories (including filtered):"
-          cat audit-results.json | jq -r '.advisories[] | "  - \(.module_name): \(.title) [\(.severity)]"' || true
+          cat audit-results.json | jq -r 'if .advisories then .advisories[] | "  - \(.module_name): \(.title) [\(.severity)]" else "No advisories found" end' || true
           
           if [ "$HIGH_COUNT" -gt 0 ] || [ "$CRITICAL_COUNT" -gt 0 ]; then
             echo "❌ Found high or critical vulnerabilities"
