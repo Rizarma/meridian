@@ -14,6 +14,7 @@ import {
   setScreeningLastTriggered,
 } from "./cycles/screening.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
+import { setupDatabase } from "./infrastructure/db-migrations.js";
 import { closeLogStreams, log } from "./infrastructure/logger.js";
 import {
   getLastBriefingDate,
@@ -414,6 +415,15 @@ registerCronRestarter(() => {
 });
 
 export async function start(): Promise<void> {
+  // Initialize database schema first (creates tables if they don't exist)
+  const dbSetup = setupDatabase();
+  if (!dbSetup.success) {
+    log("startup_error", `Database setup failed: ${dbSetup.message}`);
+    throw new Error(dbSetup.message);
+  } else {
+    log("startup", dbSetup.message);
+  }
+
   // Run service validation first
   const validationResult = await runStartupValidation();
   logStartupValidation(validationResult);

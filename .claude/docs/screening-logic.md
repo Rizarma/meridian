@@ -54,5 +54,5 @@ Darwinian system that evolves which screening signals predict profitability:
 - Tracks performance of signals like `high_volume`, `strong_tvl`, `good_distribution`, etc.
 - Adjusts weights based on win rate (winners boost, losers decay)
 - Configured via `darwin*` keys (see [config reference](config-reference.md))
-- Persisted to `signal-weights.json`
+- Persisted to SQLite (`signal_weights` table)
 - Used by `getTopCandidates()` to score and rank pools

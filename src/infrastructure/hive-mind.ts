@@ -9,9 +9,10 @@
  * Setup:
  *   1. Run: node -e "import('./hive-mind.js').then(m => m.register('https://your-hive-url'))"
  *   2. Save the API key shown — it won't be shown again.
- *   3. Agent auto-syncs on each position close and queries during screening.
+ *   3. Add HIVE_MIND_URL and HIVE_MIND_API_KEY to your .env file.
+ *   4. Agent auto-syncs on each position close and queries during screening.
  *
- * Disable: clear hiveMindUrl and hiveMindApiKey in user-config.json.
+ * Disable: clear HIVE_MIND_URL and HIVE_MIND_API_KEY in .env.
  *
  * Privacy: NO wallet addresses or private keys are ever sent.
  *          Only pool addresses (public on-chain data), performance stats,
@@ -20,9 +21,9 @@
  * Zero dependencies — uses only Node.js stdlib + native fetch().
  */
 
-import fs from "node:fs";
 import { config } from "../config/config.js";
-import { LESSONS_FILE, POOL_MEMORY_FILE, USER_CONFIG_PATH } from "../config/paths.js";
+import { listLessons } from "../domain/lessons.js";
+import { getAllPoolDeploys } from "../domain/pool-memory.js";
 import type {
   HiveMindConfig,
   HivePulse,
@@ -47,33 +48,13 @@ let _lastSyncTime = 0;
 // ─── Helpers ────────────────────────────────────────────────────
 
 function readConfig(): HiveMindConfig {
-  try {
-    const fileConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
-    return {
-      hiveMindUrl: process.env.HIVE_MIND_URL || fileConfig.hiveMindUrl || "",
-      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || fileConfig.hiveMindApiKey || "",
-      hiveMindAgentId: fileConfig.hiveMindAgentId || "",
-    };
-  } catch {
-    return {
-      hiveMindUrl: process.env.HIVE_MIND_URL || "",
-      hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
-    };
-  }
-}
-
-function writeConfig(patch: Record<string, unknown>): void {
-  const current = readConfig();
-  const merged = { ...current, ...patch };
-  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
-}
-
-function readJsonFile(filePath: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch {
-    return null;
-  }
+  // SECURITY: All Hive Mind config is ONLY read from environment variables.
+  // Never from user-config.json. This prevents accidental secret leakage.
+  return {
+    hiveMindUrl: process.env.HIVE_MIND_URL || "",
+    hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
+    hiveMindAgentId: process.env.HIVE_MIND_AGENT_ID || "",
+  };
 }
 
 async function fetchWithTimeout(
@@ -103,10 +84,10 @@ export function isEnabled(): boolean {
 
 /**
  * One-time registration with a Hive Mind server.
- * Stores hiveMindUrl and hiveMindApiKey in user-config.json.
+ * IMPORTANT: You must manually add HIVE_MIND_URL, HIVE_MIND_API_KEY, and HIVE_MIND_AGENT_ID to your .env file.
  * @param url - Base URL of the hive server (e.g. "https://hive.example.com")
  * @param registrationToken - Token provided by the hive operator
- * @returns The raw API key (shown once, save it!)
+ * @returns The raw API key (shown once, save it to .env!)
  */
 export async function register(url: string, registrationToken: string): Promise<string> {
   if (!registrationToken) {
@@ -135,11 +116,23 @@ export async function register(url: string, registrationToken: string): Promise<
   }
 
   const { agent_id, api_key } = (await res.json()) as RegistrationResult;
-  writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
+
+  // Write the API key to a temp file instead of logging it to the console
+  // to avoid clear-text logging of sensitive information (CodeQL js/clear-text-logging).
+  const nodeFs = await import("node:fs");
+  const nodeOs = await import("node:os");
+  const nodePath = await import("node:path");
+  const tmpFile = nodePath.join(nodeOs.tmpdir(), `hive-api-key-${agent_id}.txt`);
+  nodeFs.writeFileSync(tmpFile, api_key, { mode: 0o600 });
+
+  console.log("[hive]", "IMPORTANT: Add the following to your .env file:");
+  console.log("[hive]", `  HIVE_MIND_URL=${baseUrl}`);
+  console.log("[hive]", `  HIVE_MIND_API_KEY=<see ${tmpFile}>`);
+  console.log("[hive]", `  HIVE_MIND_AGENT_ID=${agent_id}`);
   console.log(
     "[hive]",
-    "API key saved to user-config.json — view it there (will NOT be shown again)"
+    `Full API key saved to: ${tmpFile} (restricted perms, delete after copying)`
   );
 
   return api_key;
@@ -157,49 +150,36 @@ export async function syncToHive(): Promise<void> {
     // Debounce
     const now = Date.now();
     if (now - _lastSyncTime < SYNC_DEBOUNCE_MS) return;
-    _lastSyncTime = now;
 
     // ── Collect local data ──────────────────────────
 
-    // Lessons
-    const lessonsData = readJsonFile(LESSONS_FILE) || { lessons: [], performance: [] };
-    const lessons = (lessonsData.lessons || []) as Array<{
-      id: number;
-      rule: string;
-      tags: string[];
-      outcome: string;
-      created_at: string;
-      pinned?: boolean;
-      role?: string | null;
-    }>;
+    // Lessons from SQLite
+    const lessonsResult = listLessons({ limit: 1000, fullData: true });
+    const lessons = lessonsResult.lessons.map((lesson) => ({
+      id: lesson.id,
+      rule: lesson.rule,
+      tags: lesson.tags,
+      outcome: lesson.outcome,
+      created_at: lesson.created_at,
+      pinned: lesson.pinned,
+      role: lesson.role,
+    }));
 
-    // Pool deploys — flatten all pools' deploy arrays
-    const poolMemory = readJsonFile(POOL_MEMORY_FILE) || {};
-    const deploys: Array<{
-      pool_address: string;
-      pool_name?: string;
-      deployed_at?: string;
-      closed_at?: string;
-      pnl_pct?: number;
-      pnl_usd?: number;
-      range_efficiency?: number;
-      minutes_held?: number;
-      close_reason?: string;
-      strategy?: string;
-      volatility?: number;
-      base_mint?: string;
-    }> = [];
-    for (const poolAddr of Object.keys(poolMemory)) {
-      const pool = poolMemory[poolAddr] as {
-        name?: string;
-        deploys?: Array<Record<string, unknown>>;
-      };
-      if (Array.isArray(pool.deploys)) {
-        for (const d of pool.deploys) {
-          deploys.push({ pool_address: poolAddr, pool_name: pool.name, ...d });
-        }
-      }
-    }
+    // Pool deploys from SQLite (convert null to undefined for API compatibility)
+    const deploys = getAllPoolDeploys().map((d) => ({
+      pool_address: d.pool_address,
+      pool_name: d.pool_name ?? undefined,
+      deployed_at: d.deployed_at ?? undefined,
+      closed_at: d.closed_at ?? undefined,
+      pnl_pct: d.pnl_pct ?? undefined,
+      pnl_usd: d.pnl_usd ?? undefined,
+      range_efficiency: d.range_efficiency ?? undefined,
+      minutes_held: d.minutes_held ?? undefined,
+      close_reason: d.close_reason ?? undefined,
+      strategy: d.strategy ?? undefined,
+      volatility: d.volatility ?? undefined,
+      base_mint: d.base_mint ?? undefined,
+    }));
 
     // Screening thresholds from config
     const thresholds = {
@@ -224,6 +204,9 @@ export async function syncToHive(): Promise<void> {
     } catch (e) {
       console.log("[hive]", `Could not load agent stats: ${getErrorMessage(e)}`);
     }
+
+    // Update debounce timer after successful data collection
+    _lastSyncTime = now;
 
     // ── POST to /api/sync ───────────────────────────
 

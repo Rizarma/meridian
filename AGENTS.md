@@ -67,13 +67,22 @@ test/            # Phase-numbered integration tests
 - Use `.env` for secrets and environment-specific overrides
 - Use `user-config.json` for day-to-day tuning (models, screening thresholds)
 
-## Data Files
+## Data Storage
 
-Stored in project root by default (override with `MERIDIAN_ROOT` env var):
-- `state.json` - Position tracking
-- `lessons.json` - Learned rules from past positions
-- `pool-memory.json` - Pool deployment history
-- `meridian.db` - SQLite database (migrated state)
+All data is stored in a SQLite database (`meridian.db`) in the project root by default. Override location with `MERIDIAN_ROOT` env var.
+
+**Main tables:**
+- `positions` - Open position tracking with bin ranges, OOR status, notes
+- `position_snapshots` - Historical position state snapshots
+- `position_events` - Deploy, close, claim events
+- `pools` - Pool metadata and deploy history
+- `lessons` - Learned rules from closed positions
+- `performance` - Closed position performance records
+- `signal_weights` - Darwinian signal weighting data
+- `threshold_suggestions` - Pending threshold evolution suggestions (V2)
+- `threshold_history` - Applied threshold changes history
+
+Legacy JSON files (`state.json`, `lessons.json`, `pool-memory.json`, `signal-weights.json`) are kept as backups but no longer actively used.
 
 ## Development Guidelines
 

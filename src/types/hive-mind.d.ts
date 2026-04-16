@@ -4,9 +4,12 @@
 // ─── Configuration Types ─────────────────────────────────────────
 
 export interface HiveMindConfig {
-  hiveMindUrl?: string;
-  hiveMindApiKey?: string;
-  hiveMindAgentId?: string;
+  // SECURITY: All Hive Mind config is ONLY read from environment variables.
+  // Never stored in user-config.json. Set in .env:
+  //   HIVE_MIND_URL, HIVE_MIND_API_KEY, HIVE_MIND_AGENT_ID
+  hiveMindUrl?: string; // From process.env.HIVE_MIND_URL only
+  hiveMindApiKey?: string; // From process.env.HIVE_MIND_API_KEY only
+  hiveMindAgentId?: string; // From process.env.HIVE_MIND_AGENT_ID only
   displayName?: string;
   // Screening thresholds (copied from config for sync)
   minFeeActiveTvlRatio?: number;

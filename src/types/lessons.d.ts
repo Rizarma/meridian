@@ -139,6 +139,7 @@ export interface ListLessonsOptions {
   pinned?: boolean | null;
   tag?: string | null;
   limit?: number;
+  fullData?: boolean; // Return full untruncated data for API export
 }
 
 export interface ListedLesson {

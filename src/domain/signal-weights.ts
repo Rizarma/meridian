@@ -5,20 +5,20 @@
  * and adjusts their weights over time. Signals that consistently appear
  * in winners get boosted; those associated with losers get decayed.
  *
- * Weights are persisted in signal-weights.json and injected into the
- * LLM prompt so the agent can prioritize the right screening criteria.
+ * Weights are persisted in SQLite (signal_weights and signal_weight_history
+ * tables) and injected into the LLM prompt so the agent can prioritize
+ * the right screening criteria.
  */
 
-import fs from "node:fs";
+import { get, query, run, transaction } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
 import type {
   PerformanceRecord,
   SignalWeights,
   WeightChange,
   WeightConfig,
+  WeightHistoryEntry,
 } from "../types/weights.js";
-
-const WEIGHTS_FILE = "./signal-weights.json";
 
 // ─── Signal Definitions ─────────────────────────────────────────
 
@@ -55,25 +55,105 @@ const BOOLEAN_SIGNALS: Set<string> = new Set(["smart_wallets_present"]);
 // Categorical signals — compared by win rate across categories
 const CATEGORICAL_SIGNALS: Set<string> = new Set(["narrative_quality"]);
 
+// ─── Database Types ──────────────────────────────────────────────
+
+interface SignalWeightRow {
+  signal: string;
+  weight: number;
+  updated_at: string;
+}
+
+interface SignalWeightHistoryRow {
+  id: number;
+  signal: string;
+  weight_from: number | null;
+  weight_to: number;
+  lift: number | null;
+  action: string | null;
+  window_size: number | null;
+  win_count: number | null;
+  loss_count: number | null;
+  changed_at: string;
+}
+
 // ─── Persistence ─────────────────────────────────────────────────
 
 export function loadWeights(): SignalWeights {
-  if (!fs.existsSync(WEIGHTS_FILE)) {
-    const initial: SignalWeights = {
-      weights: { ...DEFAULT_WEIGHTS },
-      last_recalc: null,
-      recalc_count: 0,
-      history: [],
-    };
-    saveWeights(initial);
-    log("signal_weights", "Created signal-weights.json with default weights");
-    return initial;
-  }
   try {
-    return JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8")) as SignalWeights;
+    // Query all signal weights from database
+    const rows = query<SignalWeightRow>("SELECT signal, weight, updated_at FROM signal_weights");
+
+    // Build weights record from database rows
+    const weights: Record<string, number> = { ...DEFAULT_WEIGHTS };
+    for (const row of rows) {
+      weights[row.signal] = row.weight;
+    }
+
+    // Ensure all signals exist (handles new signals added after initial creation)
+    for (const name of SIGNAL_NAMES) {
+      if (weights[name] == null) weights[name] = 1.0;
+    }
+
+    // Get metadata from most recent history entry
+    const latestHistory = get<{ changed_at: string }>(
+      "SELECT changed_at FROM signal_weight_history ORDER BY changed_at DESC LIMIT 1"
+    );
+
+    // Get recalc count from history entries with window_size (recalc events)
+    const recalcRow = get<{ count: number }>(
+      "SELECT COUNT(DISTINCT changed_at) as count FROM signal_weight_history WHERE window_size IS NOT NULL"
+    );
+
+    // Load recent history entries (last 20 recalc events)
+    const historyRows = query<SignalWeightHistoryRow>(
+      `SELECT DISTINCT changed_at, window_size, win_count, loss_count
+       FROM signal_weight_history
+       WHERE window_size IS NOT NULL
+       ORDER BY changed_at DESC
+       LIMIT 20`
+    );
+
+    // Build history entries from database
+    const history: WeightHistoryEntry[] = historyRows.map((row) => {
+      // Get all changes for this recalc event
+      const changeRows = query<SignalWeightHistoryRow>(
+        `SELECT signal, weight_from, weight_to, lift, action
+         FROM signal_weight_history
+         WHERE changed_at = ? AND action IS NOT NULL`,
+        row.changed_at
+      );
+
+      const changes: WeightChange[] = changeRows.map((c) => ({
+        signal: c.signal,
+        from: c.weight_from ?? 1.0,
+        to: c.weight_to,
+        lift: c.lift ?? 0,
+        action: (c.action as "boosted" | "decayed") || "boosted",
+      }));
+
+      return {
+        timestamp: row.changed_at,
+        changes,
+        window_size: row.window_size ?? 0,
+        win_count: row.win_count ?? 0,
+        loss_count: row.loss_count ?? 0,
+      };
+    });
+
+    // Reverse to get chronological order
+    history.reverse();
+
+    return {
+      weights,
+      last_recalc: latestHistory?.changed_at || null,
+      recalc_count: recalcRow?.count ?? 0,
+      history,
+    };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    log("signal_weights_error", `Failed to read signal-weights.json: ${errorMsg}`);
+    log("signal_weights_error", `Failed to load weights from database: ${errorMsg}`);
+
+    // Return defaults on error
     return {
       weights: { ...DEFAULT_WEIGHTS },
       last_recalc: null,
@@ -85,10 +165,20 @@ export function loadWeights(): SignalWeights {
 
 export function saveWeights(data: SignalWeights): void {
   try {
-    fs.writeFileSync(WEIGHTS_FILE, JSON.stringify(data, null, 2));
+    transaction(() => {
+      // Save each signal weight using INSERT OR REPLACE
+      for (const [signal, weight] of Object.entries(data.weights)) {
+        run(
+          `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
+           VALUES (?, ?, datetime('now'))`,
+          signal,
+          weight
+        );
+      }
+    });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    log("signal_weights_error", `Failed to write signal-weights.json: ${errorMsg}`);
+    log("signal_weights_error", `Failed to save weights to database: ${errorMsg}`);
   }
 }
 
@@ -97,6 +187,7 @@ export function saveWeights(data: SignalWeights): void {
 interface RecalculateResult {
   changes: WeightChange[];
   weights: Record<string, number>;
+  persisted: boolean;
 }
 
 interface RecalculateConfig {
@@ -145,7 +236,7 @@ export function recalculateWeights(
       "signal_weights",
       `Only ${recent.length} records in ${windowDays}d window (need ${minSamples}), skipping recalc`
     );
-    return { changes: [], weights };
+    return { changes: [], weights, persisted: false };
   }
 
   // Classify wins and losses
@@ -157,7 +248,7 @@ export function recalculateWeights(
       "signal_weights",
       `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`
     );
-    return { changes: [], weights };
+    return { changes: [], weights, persisted: false };
   }
 
   // Compute predictive lift for each signal
@@ -171,7 +262,7 @@ export function recalculateWeights(
 
   if (ranked.length === 0) {
     log("signal_weights", "No signals had enough samples for lift calculation");
-    return { changes: [], weights };
+    return { changes: [], weights, persisted: false };
   }
 
   // Split into quartiles
@@ -208,31 +299,57 @@ export function recalculateWeights(
     }
   }
 
-  // Persist
-  data.weights = weights;
-  data.last_recalc = new Date().toISOString();
-  data.recalc_count = (data.recalc_count || 0) + 1;
-  if (!data.history) data.history = [];
-  if (changes.length > 0) {
-    data.history.push({
-      timestamp: data.last_recalc,
-      changes,
-      window_size: recent.length,
-      win_count: wins.length,
-      loss_count: losses.length,
+  // Persist to database
+  const now = new Date().toISOString();
+
+  try {
+    transaction(() => {
+      // Save updated weights
+      for (const [signal, weight] of Object.entries(weights)) {
+        run(
+          `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
+           VALUES (?, ?, ?)`,
+          signal,
+          weight,
+          now
+        );
+      }
+
+      // Save history entries for each change
+      if (changes.length > 0) {
+        for (const change of changes) {
+          run(
+            `INSERT INTO signal_weight_history
+             (signal, weight_from, weight_to, lift, action, window_size, win_count, loss_count, changed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            change.signal,
+            change.from,
+            change.to,
+            change.lift,
+            change.action,
+            recent.length,
+            wins.length,
+            losses.length,
+            now
+          );
+        }
+      }
     });
-    if (data.history.length > 20) data.history = data.history.slice(-20);
+
+    log(
+      "signal_weights",
+      changes.length > 0
+        ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
+        : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`
+    );
+
+    return { changes, weights, persisted: true };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log("signal_weights_error", `Failed to persist weights to database: ${errorMsg}`);
+    // Return with persisted: false so caller knows persistence failed
+    return { changes, weights, persisted: false };
   }
-  saveWeights(data);
-
-  log(
-    "signal_weights",
-    changes.length > 0
-      ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
-      : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`
-  );
-
-  return { changes, weights };
 }
 
 // ─── Lift Computation ────────────────────────────────────────────
