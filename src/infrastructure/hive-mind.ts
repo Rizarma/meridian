@@ -177,7 +177,7 @@ export async function syncToHive(): Promise<void> {
       minutes_held: d.minutes_held ?? undefined,
       close_reason: d.close_reason ?? undefined,
       strategy: d.strategy ?? undefined,
-      volatility: d.volatility ?? undefined,
+      volatility: d.volatility_at_deploy ?? undefined,
       base_mint: d.base_mint ?? undefined,
     }));
 

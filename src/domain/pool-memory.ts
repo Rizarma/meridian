@@ -408,6 +408,22 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
 
 // ─── Read Operations ───────────────────────────────────────────
 
+/**
+ * Get all pool deploys across all pools, joined with pool metadata.
+ * Used by hive-mind sync to upload anonymized deploy history.
+ */
+export function getAllPoolDeploys(): (PoolDeployRow & {
+  pool_name: string | null;
+  base_mint: string | null;
+})[] {
+  return getDb().query<PoolDeployRow & { pool_name: string | null; base_mint: string | null }>(
+    `SELECT pd.*, p.name as pool_name, p.base_mint
+     FROM pool_deploys pd
+     LEFT JOIN pools p ON pd.pool_address = p.address
+     ORDER BY pd.closed_at`
+  );
+}
+
 export function isPoolOnCooldown(poolAddress: string): boolean {
   if (!poolAddress) return false;
 
