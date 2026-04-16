@@ -4,28 +4,15 @@
  * Thin dispatcher that delegates to the registry and middleware chain.
  * All cross-cutting concerns (safety, logging, notifications) are handled
  * by middleware — this file just wires them together.
+ *
+ * Updated to use dependency injection via registry middleware context.
  */
 
 import { log } from "../src/infrastructure/logger.js";
 import type { ToolName } from "../src/types/executor.js";
 import type { AgentType, ToolExecutionResult } from "../src/types/index.js";
-import {
-  applyMiddleware,
-  loggingMiddleware,
-  notificationMiddleware,
-  persistenceMiddleware,
-  safetyCheckMiddleware,
-} from "./middleware.js";
-import { getTool } from "./registry.js";
+import { getMiddlewareChain, getMiddlewareContext, getTool } from "./registry.js";
 import "./discover.js"; // Auto-discover and register all tools
-
-// Middleware chain — order matters (safety first, notifications last, persistence after notifications)
-const MIDDLEWARE_CHAIN = [
-  safetyCheckMiddleware,
-  loggingMiddleware,
-  notificationMiddleware,
-  persistenceMiddleware,
-];
 
 /**
  * Validate that a value is a valid ToolExecutionResult shape.
@@ -54,6 +41,8 @@ function validateToolResult(result: unknown): ToolExecutionResult {
 /**
  * Execute a tool call with safety checks, logging, and notifications.
  * Thin dispatcher — all heavy lifting is in registry and middleware.
+ *
+ * NOTE: Middleware context must be initialized via bootstrap() before calling this.
  */
 export async function executeTool(
   name: string,
@@ -78,9 +67,33 @@ export async function executeTool(
     return { error };
   }
 
-  // Execute through middleware chain
+  // Get middleware chain from registry (set during bootstrap)
+  const middlewareChain = getMiddlewareChain();
+  const middlewareContext = getMiddlewareContext();
+
+  // Execute through middleware chain if configured
   try {
-    const rawResult = await applyMiddleware(tool, args, role, MIDDLEWARE_CHAIN, tool.handler);
+    let rawResult: unknown;
+
+    if (middlewareChain && middlewareContext) {
+      const { applyMiddleware } = await import("./middleware.js");
+      rawResult = await applyMiddleware(
+        tool,
+        args,
+        role,
+        middlewareChain,
+        async (handlerArgs: unknown) => {
+          const result = tool.handler(handlerArgs);
+          // Normalize to Promise
+          return Promise.resolve(result);
+        }
+      );
+    } else {
+      // Fallback: execute directly without middleware
+      log("warn", `No middleware configured for ${cleanName}, executing directly`);
+      const result = tool.handler(args);
+      rawResult = await Promise.resolve(result);
+    }
 
     return validateToolResult(rawResult);
   } catch (error) {
