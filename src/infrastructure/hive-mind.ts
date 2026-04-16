@@ -117,13 +117,23 @@ export async function register(url: string, registrationToken: string): Promise<
 
   const { agent_id, api_key } = (await res.json()) as RegistrationResult;
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
+
+  // Write the API key to a temp file instead of logging it to the console
+  // to avoid clear-text logging of sensitive information (CodeQL js/clear-text-logging).
+  const nodeFs = await import("node:fs");
+  const nodeOs = await import("node:os");
+  const nodePath = await import("node:path");
+  const tmpFile = nodePath.join(nodeOs.tmpdir(), `hive-api-key-${agent_id}.txt`);
+  nodeFs.writeFileSync(tmpFile, api_key, { mode: 0o600 });
+
+  console.log("[hive]", "IMPORTANT: Add the following to your .env file:");
+  console.log("[hive]", `  HIVE_MIND_URL=${baseUrl}`);
+  console.log("[hive]", `  HIVE_MIND_API_KEY=<see ${tmpFile}>`);
+  console.log("[hive]", `  HIVE_MIND_AGENT_ID=${agent_id}`);
   console.log(
     "[hive]",
-    "IMPORTANT: Add the following to your .env file — these will NOT be shown again:"
+    `Full API key saved to: ${tmpFile} (restricted perms, delete after copying)`
   );
-  console.log("[hive]", `  HIVE_MIND_URL=${baseUrl}`);
-  console.log("[hive]", `  HIVE_MIND_API_KEY=${api_key}`);
-  console.log("[hive]", `  HIVE_MIND_AGENT_ID=${agent_id}`);
 
   return api_key;
 }
