@@ -365,10 +365,9 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
     // Ensure pool exists
     getOrCreatePool(poolAddress, snapshot.pair);
 
-    // Insert snapshot (IGNORE if position doesn't exist in local DB — e.g. pre-reset positions)
     const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
     getDb().run(
-      `INSERT OR IGNORE INTO position_snapshots
+      `INSERT INTO position_snapshots
        (position_address, ts, pnl_pct, pnl_usd, in_range, unclaimed_fees_usd,
         minutes_out_of_range, age_minutes, data_json)
        VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)`,
@@ -635,9 +634,9 @@ export function addPoolNote({
     // Ensure pool exists
     getOrCreatePool(pool_address);
 
-    // Insert note as position event (IGNORE if position doesn't exist in local DB)
+    // Insert note as position event (position_events FK constraint removed — also stores pool notes)
     getDb().run(
-      `INSERT OR IGNORE INTO position_events (position_address, event_type, ts, data_json) VALUES (?, ?, datetime('now'), ?)`,
+      `INSERT INTO position_events (position_address, event_type, ts, data_json) VALUES (?, ?, datetime('now'), ?)`,
       pool_address,
       "pool_note",
       getDb().stringifyJson({ note: safeNote, added_at: new Date().toISOString() })
