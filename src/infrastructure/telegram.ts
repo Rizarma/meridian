@@ -252,30 +252,6 @@ export function isEnabled(): boolean {
   return !!bot;
 }
 
-function escapeMarkdown(text: string): string {
-  // Escape Markdown special characters: * _ [ ] ( ) ~ ` > # + - = | { } . !
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\*/g, "\\*")
-    .replace(/_/g, "\\_")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)")
-    .replace(/~/g, "\\~")
-    .replace(/`/g, "\\`")
-    .replace(/>/g, "\\>")
-    .replace(/#/g, "\\#")
-    .replace(/\+/g, "\\+")
-    .replace(/-/g, "\\-")
-    .replace(/=/g, "\\=")
-    .replace(/\|/g, "\\|")
-    .replace(/\{/g, "\\{")
-    .replace(/\}/g, "\\}")
-    .replace(/\./g, "\\.")
-    .replace(/!/g, "\\!");
-}
-
 export async function sendMessage(text: string): Promise<unknown> {
   if (!bot || !chatId) return null;
   const safeText = String(text).slice(0, 4096);
@@ -289,8 +265,8 @@ export async function sendMessage(text: string): Promise<unknown> {
       const errorMessage = error.description || "";
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
         log("telegram_warn", "MarkdownV2 parsing failed, sending as plain text");
-        // Re-slice after escaping to ensure we don't exceed Telegram's limit
-        return await bot.api.sendMessage(chatId, escapeMarkdown(safeText).slice(0, 4096));
+        // Send as plain text without escaping
+        return await bot.api.sendMessage(chatId, safeText.slice(0, 4096));
       }
       // Ignore "message is not modified" — content hasn't changed, no need to update
       if (errorMessage.includes("message is not modified")) {
@@ -336,12 +312,8 @@ export async function editMessage(text: string, messageId: number): Promise<unkn
       const errorMessage = error.description || "";
       if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
         log("telegram_warn", "MarkdownV2 parsing failed, editing as plain text");
-        // Re-slice after escaping to ensure we don't exceed Telegram's limit
-        return await bot.api.editMessageText(
-          chatId,
-          messageId,
-          escapeMarkdown(safeText).slice(0, 4096)
-        );
+        // Edit as plain text without escaping
+        return await bot.api.editMessageText(chatId, messageId, safeText.slice(0, 4096));
       }
       // Ignore "message is not modified" — content hasn't changed, no need to update
       if (errorMessage.includes("message is not modified")) {

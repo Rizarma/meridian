@@ -3,10 +3,12 @@ interface CacheEntry<V> {
   expiresAt: number;
 }
 
+import { CACHE } from "../config/constants.js";
+
 export class TTLCache<K, V> {
   private cache: Map<K, CacheEntry<V>>;
   private cleanupInterval: NodeJS.Timeout | null = null;
-  private readonly CLEANUP_INTERVAL_MS = 60000; // 1 minute
+  private readonly CLEANUP_INTERVAL_MS = CACHE.CLEANUP_INTERVAL_MS;
 
   constructor(enableCleanup = true) {
     this.cache = new Map();
