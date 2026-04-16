@@ -11,31 +11,31 @@
 import { log } from "../src/infrastructure/logger.js";
 import type { ToolName } from "../src/types/executor.js";
 import type { AgentType, ToolExecutionResult } from "../src/types/index.js";
+import { normalizeResult } from "../src/types/result.js";
 import { getMiddlewareChain, getMiddlewareContext, getTool } from "./registry.js";
 import "./discover.js"; // Auto-discover and register all tools
 
 /**
  * Validate that a value is a valid ToolExecutionResult shape.
- * Returns the value if valid, or creates a safe error result.
+ * Uses normalizeResult to handle legacy formats and ensure consistency.
  */
 function validateToolResult(result: unknown): ToolExecutionResult {
-  if (typeof result !== "object" || result === null) {
-    return { success: false, error: "Invalid result: not an object" };
+  const normalized = normalizeResult(result);
+  // Convert ToolResult to ToolExecutionResult format
+  if (normalized.success) {
+    return {
+      success: true,
+      data: normalized.data,
+      ...normalized.meta,
+    } as ToolExecutionResult;
   }
-  const r = result as Record<string, unknown>;
-
-  // Must have at least one of: success flag, error, blocked, or other result fields
-  const hasSuccess = typeof r.success === "boolean";
-  const hasError = typeof r.error === "string";
-  const hasBlocked = typeof r.blocked === "boolean";
-  const hasReason = typeof r.reason === "string";
-
-  // If it has none of the expected fields, wrap it as a success result
-  if (!hasSuccess && !hasError && !hasBlocked && !hasReason) {
-    return { success: true, ...r };
-  }
-
-  return r as ToolExecutionResult;
+  return {
+    success: false,
+    error: normalized.error,
+    code: normalized.code,
+    blocked: normalized.blocked,
+    reason: normalized.reason,
+  } as ToolExecutionResult;
 }
 
 /**
