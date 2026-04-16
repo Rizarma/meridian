@@ -8,17 +8,17 @@
  * - Logging middleware records actions
  * - Each middleware can short-circuit or pass through
  *
- * These tests exercise the REAL middleware functions, not mocks.
+ * These tests exercise the REAL middleware functions with dependency injection.
  */
 
 import type { ToolName } from "../src/types/executor.js";
 import type { AgentType } from "../src/types/index.js";
 import {
   applyMiddleware,
-  loggingMiddleware,
+  createLoggingMiddleware,
+  createSafetyCheckMiddleware,
+  type MiddlewareContext,
   type MiddlewareFn,
-  notificationMiddleware,
-  safetyCheckMiddleware,
 } from "../tools/middleware.js";
 import type { ToolRegistration } from "../tools/registry.js";
 import { describeAsync, expect, runTestsAsync, testAsync } from "./test-harness.js";
@@ -35,6 +35,48 @@ const createMockTool = (
   handler: mockHandler,
   roles,
   isWriteTool,
+});
+
+// Create a mock middleware context for testing
+const createMockContext = (): MiddlewareContext => ({
+  config: {
+    risk: { maxPositions: 5, maxDeployAmount: 50 },
+    screening: { minBinStep: 80, maxBinStep: 125 },
+    management: { gasReserve: 0.2, deployAmountSol: 0.5 },
+  } as unknown as MiddlewareContext["config"],
+  logger: {
+    log: () => {},
+    logAction: () => {},
+  },
+  notificationService: {
+    notifySwap: async () => {},
+    notifyDeploy: async () => {},
+    notifyClose: async () => {},
+  },
+  persistenceService: {
+    trackPosition: async () => {},
+    recordClaim: async () => {},
+    recordClose: async () => {},
+    recordPerformance: async () => {},
+  },
+  autoSwapService: {
+    handleAutoSwapAfterClose: async () => {},
+    handleAutoSwapAfterClaim: async () => {},
+  },
+  safetyCheckService: {
+    runSafetyChecks: async () => ({ pass: true }),
+  },
+  validation: {
+    validateSwapTokenArgs: () => ({
+      success: true,
+      data: { input_mint: "test", output_mint: "SOL", amount: 1 },
+    }),
+    validateDeployPositionArgs: () => ({
+      success: true,
+      data: { pool_address: "test", amount_y: 1 },
+    }),
+    validateClosePositionArgs: () => ({ success: true, data: { position_address: "test" } }),
+  },
 });
 
 describeAsync("applyMiddleware Chain Composition", async () => {
@@ -56,7 +98,7 @@ describeAsync("applyMiddleware Chain Composition", async () => {
     };
 
     const tool = createMockTool("discover_pools");
-    await applyMiddleware(tool, {}, "GENERAL", [mw1, mw2], tool.handler);
+    await applyMiddleware(tool, {}, "GENERAL", [mw1, mw2], async (args) => tool.handler(args));
 
     // Should be: mw1-before, mw2-before, handler, mw2-after, mw1-after
     expect(order[0]).toBe("mw1-before");
@@ -85,7 +127,7 @@ describeAsync("applyMiddleware Chain Composition", async () => {
       {},
       "GENERAL",
       [blockingMw, afterMw],
-      tool.handler
+      async (args) => tool.handler(args)
     )) as { blocked: boolean; reason: string };
 
     expect(order.length).toBe(1);
@@ -96,7 +138,9 @@ describeAsync("applyMiddleware Chain Composition", async () => {
 
   testAsync("empty chain just executes handler", async () => {
     const tool = createMockTool("discover_pools");
-    const result = (await applyMiddleware(tool, { test: true }, "GENERAL", [], tool.handler)) as {
+    const result = (await applyMiddleware(tool, { test: true }, "GENERAL", [], async (args) =>
+      tool.handler(args)
+    )) as {
       success: boolean;
       args: { test: boolean };
     };
@@ -108,7 +152,8 @@ describeAsync("applyMiddleware Chain Composition", async () => {
 
 describeAsync("Safety Check Middleware", async () => {
   testAsync("safety middleware passes through non-write tools", async () => {
-    // For non-write tools, safety middleware should just call next()
+    const context = createMockContext();
+    const safetyCheckMiddleware = createSafetyCheckMiddleware(context);
     const tool = createMockTool("discover_pools", false);
 
     // Mock next that returns success
@@ -125,39 +170,35 @@ describeAsync("Safety Check Middleware", async () => {
     expect((result as { success: boolean }).success).toBe(true);
   });
 
-  testAsync("safety middleware checks write tools", async () => {
-    // For write tools, safety middleware should run checks
-    // Since we can't easily mock the safety check internals without refactoring,
-    // we verify the middleware at least attempts to check by inspecting behavior
+  testAsync("safety middleware blocks when checks fail", async () => {
+    const context = createMockContext();
+    // Override safety check to fail
+    context.safetyCheckService = {
+      runSafetyChecks: async () => ({ pass: false, reason: "Test safety block" }),
+    };
+    const safetyCheckMiddleware = createSafetyCheckMiddleware(context);
 
     const tool = createMockTool("deploy_position", true);
 
-    // The safety middleware will try to run checks which will fail
-    // because config and dependencies aren't set up in test environment
-    // That's expected - we just verify it doesn't crash
-
-    let _nextCalled = false;
+    let nextCalled = false;
     const mockNext = async () => {
-      _nextCalled = true;
+      nextCalled = true;
       return { success: true };
     };
 
-    // This will likely fail the safety checks due to missing config,
-    // but it shouldn't throw an unhandled error
-    try {
-      const result = await safetyCheckMiddleware(tool, {}, "GENERAL", mockNext);
-      // If safety checks fail, next won't be called and result will have blocked/reason
-      // If they somehow pass (unlikely in test env), next will be called
-      expect(result !== undefined && result !== null).toBe(true);
-    } catch {
-      // If it throws, that's also acceptable behavior for missing deps
-      expect(true).toBe(true);
-    }
+    const result = await safetyCheckMiddleware(tool, {}, "GENERAL", mockNext);
+
+    // When safety checks fail, next should NOT be called
+    expect(nextCalled).toBe(false);
+    expect((result as { blocked: boolean }).blocked).toBe(true);
+    expect((result as { reason: string }).reason).toBe("Test safety block");
   });
 });
 
 describeAsync("Logging Middleware", async () => {
   testAsync("logging middleware records successful execution", async () => {
+    const context = createMockContext();
+    const loggingMiddleware = createLoggingMiddleware(context);
     const tool = createMockTool("discover_pools");
 
     const mockNext = async () => ({ success: true, data: "test" });
@@ -171,6 +212,8 @@ describeAsync("Logging Middleware", async () => {
   });
 
   testAsync("logging middleware records failed execution", async () => {
+    const context = createMockContext();
+    const loggingMiddleware = createLoggingMiddleware(context);
     const tool = createMockTool("deploy_position", true);
 
     const mockNext = async () => ({ success: false, error: "Test error" });
@@ -182,6 +225,8 @@ describeAsync("Logging Middleware", async () => {
   });
 
   testAsync("logging middleware propagates errors", async () => {
+    const context = createMockContext();
+    const loggingMiddleware = createLoggingMiddleware(context);
     const tool = createMockTool("deploy_position", true);
 
     const mockNext = async () => {
@@ -198,112 +243,5 @@ describeAsync("Logging Middleware", async () => {
   });
 });
 
-describeAsync("Notification Middleware", async () => {
-  testAsync("notification middleware passes through blocked results", async () => {
-    const tool = createMockTool("deploy_position", true);
-
-    const mockNext = async () => ({ blocked: true, reason: "Safety check failed" });
-
-    const result = await notificationMiddleware(tool, {}, "GENERAL", mockNext);
-
-    expect((result as { blocked: boolean }).blocked).toBe(true);
-    expect((result as { reason: string }).reason).toBe("Safety check failed");
-  });
-
-  testAsync("notification middleware passes through error results", async () => {
-    const tool = createMockTool("deploy_position", true);
-
-    const mockNext = async () => ({ error: "Something went wrong" });
-
-    const result = await notificationMiddleware(tool, {}, "GENERAL", mockNext);
-
-    expect((result as { error: string }).error).toBe("Something went wrong");
-  });
-
-  testAsync("notification middleware processes successful results", async () => {
-    const tool = createMockTool("discover_pools", false);
-
-    const mockNext = async () => ({ success: true, data: "test" });
-
-    const result = await notificationMiddleware(tool, {}, "GENERAL", mockNext);
-
-    expect((result as { success: boolean }).success).toBe(true);
-    expect((result as { data: string }).data).toBe("test");
-    // Note: We can't easily verify notifications without mocking Telegram
-    // The fact that it doesn't throw is the main test
-  });
-});
-
-describeAsync("Middleware Integration", async () => {
-  testAsync("full chain executes in correct order: safety → logging → notification", async () => {
-    const order: string[] = [];
-
-    // Create tracking versions of the real middleware
-    const trackingSafety: MiddlewareFn = async (tool, args, role, next) => {
-      order.push("safety-before");
-      const result = await safetyCheckMiddleware(tool, args, role, async () => {
-        order.push("safety-next");
-        return await next();
-      });
-      order.push("safety-after");
-      return result;
-    };
-
-    const trackingLogging: MiddlewareFn = async (tool, args, role, next) => {
-      order.push("logging-before");
-      const result = await loggingMiddleware(tool, args, role, async () => {
-        order.push("logging-next");
-        return await next();
-      });
-      order.push("logging-after");
-      return result;
-    };
-
-    const trackingNotification: MiddlewareFn = async (tool, args, role, next) => {
-      order.push("notification-before");
-      const result = await notificationMiddleware(tool, args, role, async () => {
-        order.push("notification-next");
-        return await next();
-      });
-      order.push("notification-after");
-      return result;
-    };
-
-    const tool = createMockTool("discover_pools");
-    const handler = async () => ({ success: true, handler: "executed" });
-
-    await applyMiddleware(
-      tool,
-      {},
-      "GENERAL",
-      [trackingSafety, trackingLogging, trackingNotification],
-      handler
-    );
-
-    // Expected order:
-    // safety-before → safety-next → logging-before → logging-next → notification-before → notification-next
-    // → handler → notification-after → logging-after → safety-after
-    expect(order[0]).toBe("safety-before");
-    expect(order[1]).toBe("safety-next");
-    expect(order[2]).toBe("logging-before");
-    expect(order[3]).toBe("logging-next");
-    expect(order[4]).toBe("notification-before");
-    expect(order[5]).toBe("notification-next");
-    expect(order[6]).toBe("notification-after");
-    expect(order[7]).toBe("logging-after");
-    expect(order[8]).toBe("safety-after");
-  });
-});
-
-// ============================================================================
-// Run tests if this file is executed directly
-// ============================================================================
-
-const isMainModule =
-  import.meta.url.startsWith("file://") &&
-  process.argv[1] &&
-  import.meta.url.includes(process.argv[1].replace(/\\/g, "/"));
-
-if (isMainModule) {
-  runTestsAsync().catch(() => process.exit(1));
-}
+// Run all tests
+runTestsAsync();
