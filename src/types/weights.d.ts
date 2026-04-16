@@ -61,4 +61,5 @@ export interface RecalculateConfig {
 export interface RecalculateResult {
   changes: WeightChange[];
   weights: Record<string, number>;
+  persisted: boolean;
 }

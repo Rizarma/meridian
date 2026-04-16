@@ -7,8 +7,13 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
-import { get, parseJson, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
+
+// Lazy accessor to infrastructure (breaks circular deps, enables testing)
+const infra = () => getInfrastructure();
+const getDb = () => infra().db;
+
 import type {
   LessonContext,
   LessonEntry,
@@ -118,7 +123,7 @@ function lessonFromRow(row: LessonRow): LessonEntry {
   return {
     id: row.id,
     rule: row.rule,
-    tags: parseJson<string[]>(row.tags) ?? [],
+    tags: getDb().parseJson<string[]>(row.tags) ?? [],
     outcome: row.outcome as LessonOutcome,
     context: row.context ?? undefined,
     pool: row.pool ?? undefined,
@@ -131,14 +136,14 @@ function lessonFromRow(row: LessonRow): LessonEntry {
 }
 
 function performanceFromRow(row: PerformanceRow): PerformanceRecord {
-  const data = row.data_json ? parseJson<Record<string, unknown>>(row.data_json) : {};
+  const data = row.data_json ? getDb().parseJson<Record<string, unknown>>(row.data_json) : {};
   return {
     position: row.position,
     pool: row.pool,
     pool_name: row.pool_name ?? "",
     strategy: row.strategy ?? "",
     bin_range:
-      parseJson(row.bin_range) ??
+      getDb().parseJson(row.bin_range) ??
       (data?.bin_range as
         | number
         | { min?: number; max?: number; bins_below?: number; bins_above?: number }) ??
@@ -220,9 +225,9 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
   // Derive lesson before transaction
   const lesson = derivLesson(entry);
 
-  transaction(() => {
+  getDb().transaction(() => {
     // Insert performance record
-    run(
+    getDb().run(
       `INSERT INTO performance (position, pool, pool_name, strategy, amount_sol, pnl_pct, pnl_usd,
         fees_earned_usd, initial_value_usd, final_value_usd, minutes_held, minutes_in_range,
         range_efficiency, close_reason, base_mint, bin_step, volatility, fee_tvl_ratio,
@@ -247,19 +252,19 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
       entry.volatility ?? null,
       entry.fee_tvl_ratio ?? null,
       entry.organic_score ?? null,
-      stringifyJson(entry.bin_range),
+      getDb().stringifyJson(entry.bin_range),
       entry.recorded_at,
-      stringifyJson(entry)
+      getDb().stringifyJson(entry)
     );
 
     // Insert lesson if derived
     if (lesson) {
-      run(
+      getDb().run(
         `INSERT INTO lessons (id, rule, tags, outcome, context, pool, pnl_pct, range_efficiency, created_at, pinned, role, data_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         lesson.id,
         lesson.rule,
-        stringifyJson(lesson.tags),
+        getDb().stringifyJson(lesson.tags),
         lesson.outcome,
         lesson.context ?? null,
         lesson.pool ?? null,
@@ -268,7 +273,7 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
         lesson.created_at,
         lesson.pinned ? 1 : 0,
         lesson.role ?? null,
-        stringifyJson(lesson)
+        getDb().stringifyJson(lesson)
       );
       log("lessons", `New lesson: ${lesson.rule}`);
     }
@@ -276,9 +281,9 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
 
   // Run threshold evolution (pool memory, Darwin weights, hive sync)
   // Get all performance for evolution calculation
-  const allPerformance = query<PerformanceRow>(
-    "SELECT * FROM performance ORDER BY recorded_at"
-  ).map(performanceFromRow);
+  const allPerformance = getDb()
+    .query<PerformanceRow>("SELECT * FROM performance ORDER BY recorded_at")
+    .map(performanceFromRow);
   await runThresholdEvolution(perf, allPerformance);
 }
 
@@ -376,17 +381,17 @@ export function addLesson(
     created_at,
   };
 
-  run(
+  getDb().run(
     `INSERT INTO lessons (id, rule, tags, outcome, created_at, pinned, role, data_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     safeRule,
-    stringifyJson(tags),
+    getDb().stringifyJson(tags),
     "manual",
     created_at,
     pinned ? 1 : 0,
     role ?? null,
-    stringifyJson(lesson)
+    getDb().stringifyJson(lesson)
   );
 
   log(
@@ -404,10 +409,10 @@ export function pinLesson(id: number): {
   id?: number;
   rule?: string;
 } {
-  const row = get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
+  const row = getDb().get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
   if (!row) return { found: false };
 
-  run("UPDATE lessons SET pinned = 1 WHERE id = ?", id);
+  getDb().run("UPDATE lessons SET pinned = 1 WHERE id = ?", id);
   log("lessons", `Pinned lesson ${id}: ${row.rule.slice(0, 60)}`);
   return { found: true, pinned: true, id, rule: row.rule };
 }
@@ -421,10 +426,10 @@ export function unpinLesson(id: number): {
   id?: number;
   rule?: string;
 } {
-  const row = get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
+  const row = getDb().get<LessonRow>("SELECT * FROM lessons WHERE id = ?", id);
   if (!row) return { found: false };
 
-  run("UPDATE lessons SET pinned = 0 WHERE id = ?", id);
+  getDb().run("UPDATE lessons SET pinned = 0 WHERE id = ?", id);
   return { found: true, pinned: false, id, rule: row.rule };
 }
 
@@ -436,7 +441,6 @@ export function listLessons({
   pinned = null,
   tag = null,
   limit = 30,
-  fullData = false,
 }: ListLessonsOptions = {}): ListLessonsResult {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
@@ -459,14 +463,14 @@ export function listLessons({
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   // Get total count
-  const countRow = get<{ count: number }>(
+  const countRow = getDb().get<{ count: number }>(
     `SELECT COUNT(*) as count FROM lessons ${whereClause}`,
     ...params
   );
   const total = countRow?.count ?? 0;
 
   // Get lessons with limit (most recent first)
-  const rows = query<LessonRow>(
+  const rows = getDb().query<LessonRow>(
     `SELECT * FROM lessons ${whereClause} ORDER BY created_at DESC LIMIT ?`,
     ...params,
     limit
@@ -474,12 +478,12 @@ export function listLessons({
 
   const lessons: ListedLesson[] = rows.map((row) => ({
     id: row.id,
-    rule: fullData ? row.rule : row.rule.slice(0, 120),
-    tags: parseJson<string[]>(row.tags) ?? [],
+    rule: row.rule.slice(0, 120),
+    tags: getDb().parseJson<string[]>(row.tags) ?? [],
     outcome: row.outcome as LessonOutcome,
     pinned: Boolean(row.pinned),
     role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
-    created_at: fullData ? row.created_at : row.created_at?.slice(0, 10) || "unknown",
+    created_at: row.created_at?.slice(0, 10) || "unknown",
   }));
 
   return { total, lessons };
@@ -489,7 +493,7 @@ export function listLessons({
  * Remove a lesson by ID.
  */
 export function removeLesson(id: number): number {
-  const result = run("DELETE FROM lessons WHERE id = ?", id);
+  const result = getDb().run("DELETE FROM lessons WHERE id = ?", id);
   return result.changes;
 }
 
@@ -497,7 +501,7 @@ export function removeLesson(id: number): number {
  * Remove lessons matching a keyword in their rule text (case-insensitive).
  */
 export function removeLessonsByKeyword(keyword: string): number {
-  const result = run("DELETE FROM lessons WHERE LOWER(rule) LIKE LOWER(?)", `%${keyword}%`);
+  const result = getDb().run("DELETE FROM lessons WHERE LOWER(rule) LIKE LOWER(?)", `%${keyword}%`);
   return result.changes;
 }
 
@@ -505,7 +509,7 @@ export function removeLessonsByKeyword(keyword: string): number {
  * Clear ALL lessons (keeps performance data).
  */
 export function clearAllLessons(): number {
-  const result = run("DELETE FROM lessons");
+  const result = getDb().run("DELETE FROM lessons");
   return result.changes;
 }
 
@@ -513,7 +517,7 @@ export function clearAllLessons(): number {
  * Clear ALL performance records.
  */
 export function clearPerformance(): number {
-  const result = run("DELETE FROM performance");
+  const result = getDb().run("DELETE FROM performance");
   return result.changes;
 }
 
@@ -533,7 +537,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
   const { agentType = "GENERAL", maxLessons } = opts;
 
   // Check if any lessons exist
-  const countRow = get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
+  const countRow = getDb().get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
   if (!countRow || countRow.count === 0) return null;
 
   // Smaller caps for automated cycles — they don't need the full lesson history
@@ -556,7 +560,7 @@ export function getLessonsForPrompt(opts: LessonContext | number = {}): string |
     (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
 
   // Load all lessons for filtering (dataset is small, typically < 1000)
-  const allRows = query<LessonRow>("SELECT * FROM lessons");
+  const allRows = getDb().query<LessonRow>("SELECT * FROM lessons");
   const allLessons = allRows.map(lessonFromRow);
 
   // ── Tier 1: Pinned ──────────────────────────────────────────────
@@ -628,7 +632,7 @@ export function getPerformanceHistory({
   hours?: number;
   limit?: number;
 } = {}): PerformanceHistoryResult {
-  const countRow = get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const countRow = getDb().get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
   const totalCount = countRow?.count ?? 0;
 
   if (totalCount === 0) {
@@ -637,7 +641,7 @@ export function getPerformanceHistory({
 
   const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-  const rows = query<PerformanceRow>(
+  const rows = getDb().query<PerformanceRow>(
     `SELECT * FROM performance WHERE recorded_at >= ? ORDER BY recorded_at DESC LIMIT ?`,
     cutoff,
     limit
@@ -672,12 +676,12 @@ export function getPerformanceHistory({
  * Get performance stats summary.
  */
 export function getPerformanceSummary(): PerformanceMetrics | null {
-  const perfCountRow = get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const perfCountRow = getDb().get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
   const perfCount = perfCountRow?.count ?? 0;
 
   if (perfCount === 0) return null;
 
-  const aggRow = get<{
+  const aggRow = getDb().get<{
     total_pnl_usd: number;
     avg_pnl_pct: number;
     avg_range_efficiency: number;
@@ -691,7 +695,7 @@ export function getPerformanceSummary(): PerformanceMetrics | null {
     FROM performance`
   );
 
-  const lessonsCountRow = get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
+  const lessonsCountRow = getDb().get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
 
   return {
     total_positions_closed: perfCount,
@@ -707,7 +711,7 @@ export function getPerformanceSummary(): PerformanceMetrics | null {
  * Search lessons by keyword in rule text (full-text search).
  */
 export function searchLessons(keyword: string, limit = 20): ListedLesson[] {
-  const rows = query<LessonRow>(
+  const rows = getDb().query<LessonRow>(
     `SELECT * FROM lessons WHERE rule LIKE ? ORDER BY created_at DESC LIMIT ?`,
     `%${keyword}%`,
     limit
@@ -716,7 +720,7 @@ export function searchLessons(keyword: string, limit = 20): ListedLesson[] {
   return rows.map((row) => ({
     id: row.id,
     rule: row.rule.slice(0, 120),
-    tags: parseJson<string[]>(row.tags) ?? [],
+    tags: getDb().parseJson<string[]>(row.tags) ?? [],
     outcome: row.outcome as LessonOutcome,
     pinned: Boolean(row.pinned),
     role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",

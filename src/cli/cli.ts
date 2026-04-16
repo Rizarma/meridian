@@ -233,6 +233,48 @@ Shows all closed position performance history with summary stats.
 Output: { summary: { total_positions_closed, total_pnl_usd, avg_pnl_pct, win_rate_pct, total_lessons }, count, positions: [...] }
 \`\`\`
 
+### meridian db export [positions|pools|lessons|all|legacy] [outputPath]
+Exports database tables to JSON. Default exports all tables to timestamped backup directory.
+\`\`\`
+Output: { success, backupDir, files, message }
+\`\`\`
+
+### meridian db import <type> <file> [--validate-only] [--strict]
+Imports data from JSON file. Types: positions, pools, lessons.
+\`\`\`
+Output: { success, imported, skipped, errors, message }
+\`\`\`
+
+### meridian db backup
+Creates a full timestamped backup of all database tables.
+\`\`\`
+Output: { success, backupDir, files, message }
+\`\`\`
+
+### meridian db reset [--force|--yes]
+Resets the database (deletes all data). Requires --force or interactive confirmation.
+\`\`\`
+Output: { success, message, cleared }
+\`\`\`
+
+### meridian db list
+Lists available backups with timestamps.
+\`\`\`
+Output: { count, backups: [{name, created_at, files}] }
+\`\`\`
+
+### meridian db validate <type> <file>
+Validates JSON file structure before import.
+\`\`\`
+Output: { valid, file, type, errors, warnings }
+\`\`\`
+
+### meridian db restore [backupName] [--force|--yes]
+Restores database from a backup. Without backupName, lists available backups.
+\`\`\`
+Output: { success, backup, restored }
+\`\`\`
+
 ### meridian start [--dry-run]
 Starts the autonomous agent with cron jobs (management + screening).
 
@@ -787,6 +829,13 @@ switch (subcommand as CLISubcommand) {
         single_sided_x: argv.includes("--single-sided-x"),
       })
     );
+    break;
+  }
+
+  // ── db ───────────────────────────────────────────────────────────
+  case "db": {
+    const { handleDbCommand } = await import("./db-commands.js");
+    await handleDbCommand(sub2, argv.filter((a) => !a.startsWith("-"))[2], argv);
     break;
   }
 

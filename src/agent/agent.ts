@@ -10,7 +10,7 @@ import { getMyPositions } from "../../tools/dlmm.js";
 import { executeTool } from "../../tools/executor.js";
 import { getWalletBalances } from "../../tools/wallet.js";
 import { config } from "../config/config.js";
-import { FALLBACK_MODELS, MAX_REACT_STEPS } from "../config/constants.js";
+import { FALLBACK_MODELS, MAX_REACT_STEPS, RETRY, TIME, TIMEOUT } from "../config/constants.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "../domain/lessons.js";
 import { log } from "../infrastructure/logger.js";
 import { getStateSummary } from "../infrastructure/state.js";
@@ -27,6 +27,13 @@ import type {
 import { getErrorMessage } from "../utils/errors.js";
 import { recordActivity } from "../utils/health-check.js";
 import { rateLimiters, withRateLimit } from "../utils/rate-limiter.js";
+import {
+  validateAddLiquidityParams,
+  validateClosePositionArgs,
+  validateDeployPositionArgs,
+  validateSwapTokenArgs,
+  validateWithdrawLiquidityParams,
+} from "../utils/validation-args.js";
 import { INTENTS } from "./intent.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
@@ -66,7 +73,7 @@ function getToolsForRole(agentType: AgentType, goal: string): ToolDefinition[] {
 const client = new OpenAI({
   baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
   apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
-  timeout: 5 * 60 * 1000,
+  timeout: TIMEOUT.RPC_TIMEOUT_MS,
 });
 
 const DEFAULT_MODEL = config.llm.generalModel;
@@ -185,7 +192,7 @@ export async function agentLoop(
       let toolChoice: ToolChoice | null =
         step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool) ? "required" : "auto";
 
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < RETRY.MAX_RPC_RETRIES; attempt++) {
         try {
           const requestParams: ChatCompletionRequest = {
             model: usedModel,
@@ -198,6 +205,7 @@ export async function agentLoop(
           if (toolChoice !== null) {
             requestParams.tool_choice = toolChoice;
           }
+          // biome-ignore lint/performance/noAwaitInLoops: intentional retry loop
           response = await withRateLimit(rateLimiters.openrouter, () =>
             client.chat.completions.create(requestParams)
           );
@@ -223,14 +231,14 @@ export async function agentLoop(
         if (response.choices?.length) break;
         const errCode = (response as unknown as { error?: { code?: number } }).error?.code;
         if (errCode === 502 || errCode === 503 || errCode === 529) {
-          const wait = (attempt + 1) * 5000;
+          const wait = (attempt + 1) * RETRY.BASE_RETRY_WAIT_MS;
           if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
             usedModel = FALLBACK_MODEL;
             log("agent", `Switching to fallback model ${FALLBACK_MODEL}`);
           } else {
             log(
               "agent",
-              `Provider error ${errCode}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`
+              `Provider error ${errCode}, retrying in ${wait / TIME.SECOND}s (attempt ${attempt + 1}/${RETRY.MAX_RPC_RETRIES})`
             );
             await new Promise((r) => setTimeout(r, wait));
           }
@@ -283,9 +291,9 @@ export async function agentLoop(
           messages.pop();
           log(
             "agent",
-            `Rejected no-tool final answer (${noToolRetryCount}/2) for tool-required request`
+            `Rejected no-tool final answer (${noToolRetryCount}/${RETRY.MAX_NO_TOOL_RETRIES}) for tool-required request`
           );
-          if (noToolRetryCount >= 2) {
+          if (noToolRetryCount >= RETRY.MAX_NO_TOOL_RETRIES) {
             recordActivity();
             return {
               content:
@@ -362,6 +370,59 @@ export async function agentLoop(
               };
             }
 
+            // Validate tool arguments before execution for write operations
+            const writeToolsRequiringValidation = [
+              "swap_token",
+              "deploy_position",
+              "close_position",
+              "add_liquidity",
+              "withdraw_liquidity",
+            ];
+
+            if (writeToolsRequiringValidation.includes(functionName)) {
+              let validation: { success: true; data: unknown } | { success: false; error: string };
+              switch (functionName) {
+                case "swap_token":
+                  validation = validateSwapTokenArgs(functionArgs);
+                  break;
+                case "deploy_position":
+                  validation = validateDeployPositionArgs(functionArgs);
+                  break;
+                case "close_position":
+                  validation = validateClosePositionArgs(functionArgs);
+                  break;
+                case "add_liquidity":
+                  validation = validateAddLiquidityParams(functionArgs);
+                  break;
+                case "withdraw_liquidity":
+                  validation = validateWithdrawLiquidityParams(functionArgs);
+                  break;
+                default:
+                  validation = { success: true, data: functionArgs };
+              }
+
+              if (!validation.success) {
+                log("agent", `Validation failed for ${functionName}: ${validation.error}`);
+                const errorResult = {
+                  error: `Invalid arguments: ${validation.error}`,
+                  success: false,
+                  blocked: true,
+                };
+                await onToolFinish?.({
+                  name: functionName,
+                  args: functionArgs,
+                  result: errorResult,
+                  success: false,
+                  step,
+                });
+                return {
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify(errorResult),
+                };
+              }
+            }
+
             await onToolStart?.({ name: functionName, args: functionArgs, step });
             const result = await executeTool(functionName, functionArgs);
             await onToolFinish?.({
@@ -404,8 +465,8 @@ export async function agentLoop(
 
       // If it's a rate limit, wait and retry
       if ((error as { status?: number }).status === 429) {
-        log("agent", "Rate limited, waiting 30s...");
-        await sleep(30000);
+        log("agent", `Rate limited, waiting ${TIMEOUT.API_TIMEOUT_MS / TIME.SECOND}s...`);
+        await sleep(TIMEOUT.API_TIMEOUT_MS);
         continue;
       }
 

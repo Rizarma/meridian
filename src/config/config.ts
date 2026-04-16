@@ -9,6 +9,7 @@ import type {
   UserConfigPartial,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
+import { LLM, RISK, SCREENING } from "./constants.js";
 import { USER_CONFIG_PATH } from "./paths.js";
 
 /**
@@ -131,8 +132,8 @@ export function registerCronRestarter(fn: () => void): void {
 export const config: Config = {
   // ─── Risk Limits ─────────────────────────
   risk: {
-    maxPositions: u.maxPositions ?? 3,
-    maxDeployAmount: u.maxDeployAmount ?? 50,
+    maxPositions: u.maxPositions ?? SCREENING.DEFAULT_MAX_POSITIONS,
+    maxDeployAmount: u.maxDeployAmount ?? RISK.DEFAULT_MAX_DEPLOY_AMOUNT,
   },
 
   // ─── Pool Screening Thresholds ───────────
@@ -145,21 +146,21 @@ export const config: Config = {
     minHolders: u.minHolders ?? 500,
     minMcap: u.minMcap ?? 150_000,
     maxMcap: u.maxMcap ?? 10_000_000,
-    minBinStep: u.minBinStep ?? 80,
-    maxBinStep: u.maxBinStep ?? 125,
+    minBinStep: u.minBinStep ?? SCREENING.DEFAULT_MIN_BIN_STEP,
+    maxBinStep: u.maxBinStep ?? SCREENING.DEFAULT_MAX_BIN_STEP,
     maxVolatility: u.maxVolatility ?? null, // null = no max volatility ceiling
     timeframe: u.timeframe ?? "5m",
     category: u.category ?? "trending",
     minTokenFeesSol: u.minTokenFeesSol ?? 30, // global fees paid (priority+jito tips). below = bundled/scam
     maxBundlePct: u.maxBundlePct ?? 30, // max bundle holding % (OKX advanced-info)
-    maxBotHoldersPct: u.maxBotHoldersPct ?? 30, // max bot holder addresses % (Jupiter audit)
+    maxBotHoldersPct: u.maxBotHoldersPct ?? SCREENING.DEFAULT_MAX_BOT_HOLDERS_PCT, // max bot holder addresses % (Jupiter audit)
     maxTop10Pct: u.maxTop10Pct ?? 60, // max top 10 holders concentration
     blockedLaunchpads: u.blockedLaunchpads ?? [], // e.g. ["letsbonk.fun", "pump.fun"]
     allowedLaunchpads: u.allowedLaunchpads ?? [], // e.g. ["pump.fun"] - if set, only allow these
     minTokenAgeHours: u.minTokenAgeHours ?? null, // null = no minimum
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
-    maxCandidatesEnriched: u.maxCandidatesEnriched ?? 10, // max pools to enrich with OKX + sent to recon per cycle
+    maxCandidatesEnriched: u.maxCandidatesEnriched ?? SCREENING.DEFAULT_MAX_CANDIDATES_ENRICHED, // max pools to enrich with OKX + sent to recon per cycle
   },
 
   // ─── Position Management ────────────────
@@ -177,8 +178,8 @@ export const config: Config = {
     minAgeBeforeYieldCheck: u.minAgeBeforeYieldCheck ?? 60, // minutes before low yield can trigger close
     minSolToOpen: u.minSolToOpen ?? 0.55,
     deployAmountSol: u.deployAmountSol ?? 0.5,
-    gasReserve: u.gasReserve ?? 0.2,
-    positionSizePct: u.positionSizePct ?? 0.35,
+    gasReserve: u.gasReserve ?? RISK.DEFAULT_GAS_RESERVE,
+    positionSizePct: u.positionSizePct ?? RISK.DEFAULT_POSITION_SIZE_PCT,
     // Trailing take-profit settings (feature flag in features.trailingTakeProfit)
     trailingTriggerPct: u.trailingTriggerPct ?? 3, // activate trailing at X% PnL
     trailingDropPct: u.trailingDropPct ?? 1.5, // close when drops X% from peak
@@ -200,10 +201,10 @@ export const config: Config = {
 
   // ─── LLM Settings ──────────────────────
   llm: {
-    temperature: u.temperature ?? 0.373,
-    maxTokens: u.maxTokens ?? 4096,
-    maxSteps: u.maxSteps ?? 20,
-    // Precedence: .env LLM_MODEL (global override) > user-config role-specific (tuning) > defaults
+    temperature: u.temperature ?? LLM.DEFAULT_TEMPERATURE,
+    maxTokens: u.maxTokens ?? LLM.DEFAULT_MAX_TOKENS,
+    maxSteps: u.maxSteps ?? LLM.DEFAULT_MAX_STEPS,
+    // Precedence: .env LLM_MODEL > user-config role-specific > user-config llmModel > defaults
     // Default models updated after healer-alpha/hunter-alpha were removed from OpenRouter
     managementModel: process.env.LLM_MODEL ?? u.managementModel ?? "xiaomi/mimo-v2-omni",
     screeningModel: process.env.LLM_MODEL ?? u.screeningModel ?? "xiaomi/mimo-v2-omni",

@@ -32,3 +32,4 @@ export const ENV_PATH = path.join(PROJECT_ROOT, ".env");
 export const LESSONS_FILE = path.join(PROJECT_ROOT, "lessons.json");
 export const POOL_MEMORY_FILE = path.join(PROJECT_ROOT, "pool-memory.json");
 export const SMART_WALLETS_FILE = path.join(PROJECT_ROOT, "smart-wallets.json");
+export const DB_PATH = path.join(PROJECT_ROOT, "meridian.db");
