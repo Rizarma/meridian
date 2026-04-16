@@ -207,6 +207,7 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lessons_pool ON lessons(pool);
     CREATE INDEX IF NOT EXISTS idx_lessons_outcome ON lessons(outcome);
     CREATE INDEX IF NOT EXISTS idx_lessons_created_at ON lessons(created_at);
+    CREATE INDEX IF NOT EXISTS idx_signal_weight_history_signal ON signal_weight_history(signal);
   `);
 
   // Migration log - track migration attempts for rollback

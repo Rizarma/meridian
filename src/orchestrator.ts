@@ -11,6 +11,7 @@ import {
 import { runScreeningCycle as runScreeningCycleImpl } from "./cycles/screening.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
+import { closeDb } from "./infrastructure/db.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
 import { closeLogStreams, log } from "./infrastructure/logger.js";
 import {
@@ -357,6 +358,7 @@ export async function shutdown(signal: string): Promise<void> {
 
         // Close log streams properly
         closeLogStreams();
+        closeDb();
 
         // Small delay to let final logs flush
         await new Promise((resolve) => setTimeout(resolve, TIMEOUT.LOG_FLUSH_MS));
