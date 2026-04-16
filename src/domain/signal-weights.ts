@@ -10,8 +10,13 @@
  * the right screening criteria.
  */
 
-import { get, query, run, transaction } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
+
+function getDb() {
+  return getInfrastructure().db;
+}
+
 import type {
   PerformanceRecord,
   SignalWeights,
@@ -81,7 +86,9 @@ interface SignalWeightHistoryRow {
 export function loadWeights(): SignalWeights {
   try {
     // Query all signal weights from database
-    const rows = query<SignalWeightRow>("SELECT signal, weight, updated_at FROM signal_weights");
+    const rows = getDb().query<SignalWeightRow>(
+      "SELECT signal, weight, updated_at FROM signal_weights"
+    );
 
     // Build weights record from database rows
     const weights: Record<string, number> = { ...DEFAULT_WEIGHTS };
@@ -95,17 +102,17 @@ export function loadWeights(): SignalWeights {
     }
 
     // Get metadata from most recent history entry
-    const latestHistory = get<{ changed_at: string }>(
+    const latestHistory = getDb().get<{ changed_at: string }>(
       "SELECT changed_at FROM signal_weight_history ORDER BY changed_at DESC LIMIT 1"
     );
 
     // Get recalc count from history entries with window_size (recalc events)
-    const recalcRow = get<{ count: number }>(
+    const recalcRow = getDb().get<{ count: number }>(
       "SELECT COUNT(DISTINCT changed_at) as count FROM signal_weight_history WHERE window_size IS NOT NULL"
     );
 
     // Load recent history entries (last 20 recalc events)
-    const historyRows = query<SignalWeightHistoryRow>(
+    const historyRows = getDb().query<SignalWeightHistoryRow>(
       `SELECT DISTINCT changed_at, window_size, win_count, loss_count
        FROM signal_weight_history
        WHERE window_size IS NOT NULL
@@ -116,7 +123,7 @@ export function loadWeights(): SignalWeights {
     // Build history entries from database
     const history: WeightHistoryEntry[] = historyRows.map((row) => {
       // Get all changes for this recalc event
-      const changeRows = query<SignalWeightHistoryRow>(
+      const changeRows = getDb().query<SignalWeightHistoryRow>(
         `SELECT signal, weight_from, weight_to, lift, action
          FROM signal_weight_history
          WHERE changed_at = ? AND action IS NOT NULL`,
@@ -165,10 +172,10 @@ export function loadWeights(): SignalWeights {
 
 export function saveWeights(data: SignalWeights): void {
   try {
-    transaction(() => {
+    getDb().transaction(() => {
       // Save each signal weight using INSERT OR REPLACE
       for (const [signal, weight] of Object.entries(data.weights)) {
-        run(
+        getDb().run(
           `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
            VALUES (?, ?, datetime('now'))`,
           signal,
@@ -303,10 +310,10 @@ export function recalculateWeights(
   const now = new Date().toISOString();
 
   try {
-    transaction(() => {
+    getDb().transaction(() => {
       // Save updated weights
       for (const [signal, weight] of Object.entries(weights)) {
-        run(
+        getDb().run(
           `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
            VALUES (?, ?, ?)`,
           signal,
@@ -318,7 +325,7 @@ export function recalculateWeights(
       // Save history entries for each change
       if (changes.length > 0) {
         for (const change of changes) {
-          run(
+          getDb().run(
             `INSERT INTO signal_weight_history
              (signal, weight_from, weight_to, lift, action, window_size, win_count, loss_count, changed_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
