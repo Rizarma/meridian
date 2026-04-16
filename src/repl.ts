@@ -12,10 +12,11 @@ import { agentLoop } from "./agent/agent.js";
 import { colors } from "./cli/colors.js";
 import { config } from "./config/config.js";
 import { LESSONS_FILE } from "./config/paths.js";
-import { isScreeningBusy, sanitizeUntrustedPromptText } from "./cycles/screening.js";
+import { sanitizeUntrustedPromptText } from "./cycles/screening.js";
 import { getPerformanceSummary } from "./domain/lessons.js";
 import { evolveThresholds } from "./domain/threshold-evolution.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
+import { cycleState } from "./infrastructure/cycle-state.js";
 import { log } from "./infrastructure/logger.js";
 import {
   createLiveMessage,
@@ -366,7 +367,12 @@ function appendHistory(userMsg: string, assistantMsg: string): void {
 }
 
 async function drainTelegramQueue(deps: REPLDependencies): Promise<void> {
-  while (_telegramQueue.length > 0 && !deps.isManagementBusy() && !isScreeningBusy() && !busy) {
+  while (
+    _telegramQueue.length > 0 &&
+    !deps.isManagementBusy() &&
+    !cycleState.isScreeningBusy() &&
+    !busy
+  ) {
     const queued = _telegramQueue.shift();
     if (queued) await telegramHandler(queued, deps);
   }
@@ -375,7 +381,7 @@ async function drainTelegramQueue(deps: REPLDependencies): Promise<void> {
 async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Promise<void> {
   const text = msg?.text?.trim();
   if (!text) return;
-  if (deps.isManagementBusy() || isScreeningBusy() || busy) {
+  if (deps.isManagementBusy() || cycleState.isScreeningBusy() || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
       sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(

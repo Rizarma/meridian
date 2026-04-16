@@ -1,4 +1,3 @@
-import { Mutex } from "async-mutex";
 import { getActiveBin, getMyPositions } from "../../tools/dlmm.js";
 import { getTopCandidates } from "../../tools/screening.js";
 import { getTokenInfo, getTokenNarrative } from "../../tools/token.js";
@@ -8,6 +7,7 @@ import { computeDeployAmount, config } from "../config/config.js";
 import { recallForPool } from "../domain/pool-memory.js";
 import { loadWeights } from "../domain/signal-weights.js";
 import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
+import { cycleState } from "../infrastructure/cycle-state.js";
 import { log } from "../infrastructure/logger.js";
 import {
   createLiveMessage,
@@ -23,11 +23,13 @@ import type {
   ReconCandidate,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
-
-// Module-level state for race condition guards
-let _screeningBusy = false;
-let _screeningLastTriggered = 0;
-const screeningMutex = new Mutex();
+import {
+  isValidBalanceResponse,
+  isValidNarrativeResponse,
+  isValidPositionsResponse,
+  isValidSmartWalletResponse,
+  isValidTokenInfoResponse,
+} from "../utils/validation-args.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Weighted Candidate Scoring
@@ -84,14 +86,15 @@ function computeCandidateScore(candidate: ReconCandidate, weights: Record<string
     score += volScore * (weights.volatility ?? 1.0);
   }
 
-  // Boolean signals
-  const smartWalletResult = sw as { in_pool?: Array<{ name: string }> } | null;
+  // Boolean signals - validate before using
+  const smartWalletResult = isValidSmartWalletResponse(sw) ? sw : null;
   if (smartWalletResult?.in_pool?.length) {
     score += (weights.smart_wallets_present ?? 1.0) * 0.5; // bonus for smart wallets
   }
 
-  // Narrative quality (categorical)
-  const narrative = (n as { narrative?: string; quality?: string } | null)?.narrative;
+  // Narrative quality (categorical) - validate before using
+  const narrativeResult = isValidNarrativeResponse(n) ? n : null;
+  const narrative = narrativeResult?.narrative;
   if (narrative && narrative.length > 50) {
     // Simple heuristic: longer, specific narrative = better
     score += (weights.narrative_quality ?? 1.0) * 0.3;
@@ -131,16 +134,17 @@ export function sanitizeUntrustedPromptText(
 }
 
 // Race guard accessors for external modules (e.g., management.ts)
+// NOTE: These are now delegated to cycleState for centralized state management
 export function getScreeningLastTriggered(): number {
-  return _screeningLastTriggered;
+  return cycleState.getScreeningLastTriggered();
 }
 
 export function setScreeningLastTriggered(time: number): void {
-  _screeningLastTriggered = time;
+  cycleState.setScreeningLastTriggered(time);
 }
 
 export function isScreeningBusy(): boolean {
-  return _screeningBusy;
+  return cycleState.isScreeningBusy();
 }
 
 export async function runScreeningCycle(
@@ -153,19 +157,19 @@ export async function runScreeningCycle(
     setScreeningLastTriggered?: (time: number) => void;
   }
 ): Promise<string | null> {
-  return screeningMutex.runExclusive(async () => {
+  return cycleState.getScreeningMutex().runExclusive(async () => {
     const { silent = false } = options;
 
-    // Use deps functions if provided, otherwise use module-level state
+    // Use deps functions if provided, otherwise use cycleState
     const setBusy =
       deps?.setScreeningBusy ??
       ((busy: boolean) => {
-        _screeningBusy = busy;
+        cycleState.setScreeningBusy(busy);
       });
     const setLastTriggered =
       deps?.setScreeningLastTriggered ??
       ((time: number) => {
-        _screeningLastTriggered = time;
+        cycleState.setScreeningLastTriggered(time);
       });
 
     setBusy(true); // set immediately — mutex ensures atomic check-and-set
@@ -181,11 +185,26 @@ export async function runScreeningCycle(
         getMyPositions({ force: true }),
         getWalletBalances(),
       ]);
+
+      // Validate API responses before type assertions
+      if (!isValidPositionsResponse(positionsResult)) {
+        log("cron_error", "Invalid positions response format from getMyPositions");
+        screenReport = "Screening failed: Invalid positions data format.";
+        setBusy(false);
+        return screenReport;
+      }
+      if (!isValidBalanceResponse(balanceResult)) {
+        log("cron_error", "Invalid balance response format from getWalletBalances");
+        screenReport = "Screening failed: Invalid balance data format.";
+        setBusy(false);
+        return screenReport;
+      }
+
       prePositions = positionsResult as unknown as {
         total_positions: number;
         positions?: EnrichedPosition[];
       };
-      preBalance = balanceResult as { sol: number };
+      preBalance = balanceResult;
       if (prePositions.total_positions >= config.risk.maxPositions) {
         log(
           "cron",
@@ -277,12 +296,8 @@ export async function runScreeningCycle(
 
       // Hard filters after token recon — block launchpads and excessive Jupiter bot holders
       const passing = allCandidates.filter(({ pool, ti }) => {
-        const tokenInfo = ti as {
-          results?: Array<{
-            launchpad?: string;
-            audit?: { bot_holders_pct?: number };
-          }>;
-        } | null;
+        // Validate token info response before using
+        const tokenInfo = isValidTokenInfoResponse(ti) ? ti : null;
         const launchpad = tokenInfo?.results?.[0]?.launchpad ?? null;
 
         // Launchpad allow filter
