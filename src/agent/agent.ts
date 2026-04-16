@@ -27,6 +27,13 @@ import type {
 import { getErrorMessage } from "../utils/errors.js";
 import { recordActivity } from "../utils/health-check.js";
 import { rateLimiters, withRateLimit } from "../utils/rate-limiter.js";
+import {
+  validateAddLiquidityParams,
+  validateClosePositionArgs,
+  validateDeployPositionArgs,
+  validateSwapTokenArgs,
+  validateWithdrawLiquidityParams,
+} from "../utils/validation-args.js";
 import { INTENTS } from "./intent.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
@@ -198,6 +205,7 @@ export async function agentLoop(
           if (toolChoice !== null) {
             requestParams.tool_choice = toolChoice;
           }
+          // biome-ignore lint/performance/noAwaitInLoops: intentional retry loop
           response = await withRateLimit(rateLimiters.openrouter, () =>
             client.chat.completions.create(requestParams)
           );
@@ -360,6 +368,59 @@ export async function agentLoop(
                   reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
                 }),
               };
+            }
+
+            // Validate tool arguments before execution for write operations
+            const writeToolsRequiringValidation = [
+              "swap_token",
+              "deploy_position",
+              "close_position",
+              "add_liquidity",
+              "withdraw_liquidity",
+            ];
+
+            if (writeToolsRequiringValidation.includes(functionName)) {
+              let validation: { success: true; data: unknown } | { success: false; error: string };
+              switch (functionName) {
+                case "swap_token":
+                  validation = validateSwapTokenArgs(functionArgs);
+                  break;
+                case "deploy_position":
+                  validation = validateDeployPositionArgs(functionArgs);
+                  break;
+                case "close_position":
+                  validation = validateClosePositionArgs(functionArgs);
+                  break;
+                case "add_liquidity":
+                  validation = validateAddLiquidityParams(functionArgs);
+                  break;
+                case "withdraw_liquidity":
+                  validation = validateWithdrawLiquidityParams(functionArgs);
+                  break;
+                default:
+                  validation = { success: true, data: functionArgs };
+              }
+
+              if (!validation.success) {
+                log("agent", `Validation failed for ${functionName}: ${validation.error}`);
+                const errorResult = {
+                  error: `Invalid arguments: ${validation.error}`,
+                  success: false,
+                  blocked: true,
+                };
+                await onToolFinish?.({
+                  name: functionName,
+                  args: functionArgs,
+                  result: errorResult,
+                  success: false,
+                  step,
+                });
+                return {
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify(errorResult),
+                };
+              }
             }
 
             await onToolStart?.({ name: functionName, args: functionArgs, step });

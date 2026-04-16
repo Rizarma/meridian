@@ -17,18 +17,20 @@ import { getActiveStrategy } from "../src/domain/strategy-library.js";
 import { log, logAction } from "../src/infrastructure/logger.js";
 import { recordClaim, recordClose, trackPosition } from "../src/infrastructure/state.js";
 import { notifyClose, notifyDeploy, notifySwap } from "../src/infrastructure/telegram.js";
-import type {
-  ClosePositionArgs,
-  DeployPositionArgs,
-  SafetyCheckResult,
-  SwapTokenArgs,
-} from "../src/types/executor.js";
+import type { DeployPositionArgs, SafetyCheckResult } from "../src/types/executor.js";
 import type { AgentType } from "../src/types/index.js";
 import type { PositionPerformance } from "../src/types/lessons.js";
 import type { MyPositionsResult } from "../src/types/position.js";
 import type { TokenBalance } from "../src/types/wallet.js";
 import { getErrorMessage } from "../src/utils/errors.js";
 import { isWalletBalances } from "../src/utils/validation.js";
+import {
+  validateAddLiquidityParams,
+  validateClosePositionArgs,
+  validateDeployPositionArgs,
+  validateSwapTokenArgs,
+  validateWithdrawLiquidityParams,
+} from "../src/utils/validation-args.js";
 import { getMyPositions } from "./dlmm.js";
 import type { ToolHandler, ToolRegistration } from "./registry.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
@@ -143,6 +145,7 @@ export const loggingMiddleware: MiddlewareFn = async (tool, args, _role, next) =
  * Notification middleware.
  * Sends Telegram alerts for write tools after successful execution.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: notification routing inherently branches per tool
 export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, next) => {
   const rawResult = await next();
   const result = validateResultObject(rawResult);
@@ -154,7 +157,12 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
 
   // Handle specific tool notifications
   if (tool.name === "swap_token" && result?.tx) {
-    const swapArgs = args as SwapTokenArgs;
+    const validation = validateSwapTokenArgs(args);
+    if (!validation.success) {
+      log("notify_error", `Invalid swap_token args: ${validation.error}`);
+      return result;
+    }
+    const swapArgs = validation.data;
     notifySwap({
       inputSymbol: swapArgs.input_mint?.slice(0, 8),
       outputSymbol:
@@ -167,7 +175,12 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
       tx: (result.tx as string) || undefined,
     }).catch((e) => log("notify_error", getErrorMessage(e)));
   } else if (tool.name === "deploy_position") {
-    const deployArgs = args as DeployPositionArgs & { pool_name?: string };
+    const validation = validateDeployPositionArgs(args);
+    if (!validation.success) {
+      log("notify_error", `Invalid deploy_position args: ${validation.error}`);
+      return result;
+    }
+    const deployArgs = validation.data as DeployPositionArgs & { pool_name?: string };
     notifyDeploy({
       pair:
         (result.pool_name as string) ||
@@ -182,7 +195,12 @@ export const notificationMiddleware: MiddlewareFn = async (tool, args, _role, ne
       baseFee: (result.base_fee as number) || undefined,
     }).catch((e) => log("notify_error", getErrorMessage(e)));
   } else if (tool.name === "close_position") {
-    const closeArgs = args as ClosePositionArgs;
+    const validation = validateClosePositionArgs(args);
+    if (!validation.success) {
+      log("notify_error", `Invalid close_position args: ${validation.error}`);
+      return result;
+    }
+    const closeArgs = validation.data;
     notifyClose({
       pair: (result.pool_name as string) || closeArgs.position_address?.slice(0, 8) || "unknown",
       pnlUsd: (result.pnl_usd as number) ?? 0,
@@ -231,7 +249,12 @@ export const persistenceMiddleware: MiddlewareFn = async (tool, args, _role, nex
 
   // After deploy_position: track the new position
   if (tool.name === "deploy_position") {
-    const deployArgs = args as DeployPositionArgs & { pool_name?: string };
+    const validation = validateDeployPositionArgs(args);
+    if (!validation.success) {
+      log("middleware_warn", `Invalid deploy_position args for persistence: ${validation.error}`);
+      return result;
+    }
+    const deployArgs = validation.data as DeployPositionArgs & { pool_name?: string };
 
     // Load full strategy config to store with position
     const activeStrategy = await getActiveStrategy();
@@ -436,10 +459,16 @@ async function validateStrategyCompliance(
 /**
  * Run safety checks before executing write operations.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: safety checks inherently branch per tool
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: safety checks are consolidated for atomicity
 async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheckResult> {
   switch (name) {
     case "deploy_position": {
-      const deployArgs = args as DeployPositionArgs;
+      const validation = validateDeployPositionArgs(args);
+      if (!validation.success) {
+        return { pass: false, reason: `Invalid deploy_position args: ${validation.error}` };
+      }
+      const deployArgs = validation.data;
 
       // Reject pools with bin_step out of configured range
       const minStep = config.screening.minBinStep;
@@ -555,16 +584,11 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
     }
 
     case "add_liquidity": {
-      const addArgs = args as {
-        position_address?: string;
-        pool_address?: string;
-        amount_x?: number;
-        amount_y?: number;
-      };
-
-      if (!addArgs.position_address || !addArgs.pool_address) {
-        return { pass: false, reason: "position_address and pool_address are required" };
+      const validation = validateAddLiquidityParams(args);
+      if (!validation.success) {
+        return { pass: false, reason: `Invalid add_liquidity args: ${validation.error}` };
       }
+      const addArgs = validation.data;
 
       const addAmountY = addArgs.amount_y ?? 0;
       const addAmountX = addArgs.amount_x ?? 0;
@@ -597,15 +621,11 @@ async function runSafetyChecks(name: string, args: unknown): Promise<SafetyCheck
     }
 
     case "withdraw_liquidity": {
-      const withdrawArgs = args as {
-        position_address?: string;
-        pool_address?: string;
-        bps?: number;
-      };
-
-      if (!withdrawArgs.position_address || !withdrawArgs.pool_address) {
-        return { pass: false, reason: "position_address and pool_address are required" };
+      const validation = validateWithdrawLiquidityParams(args);
+      if (!validation.success) {
+        return { pass: false, reason: `Invalid withdraw_liquidity args: ${validation.error}` };
       }
+      const withdrawArgs = validation.data;
 
       const bps = withdrawArgs.bps ?? 10000;
       if (bps < 1 || bps > 10000) {
