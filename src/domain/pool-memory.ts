@@ -8,8 +8,13 @@
 import fs from "node:fs";
 import { registerTool } from "../../tools/registry.js";
 import { config } from "../config/config.js";
-import { get, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
+
+function getDb() {
+  return getInfrastructure().db;
+}
+
 import type {
   PoolMemoryDB,
   PoolMemoryEntry,
@@ -131,16 +136,16 @@ interface SnapshotRow {
  * Get or create a pool record in the database.
  */
 function getOrCreatePool(poolAddress: string, name?: string): PoolRow {
-  let pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
+  let pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
 
   if (!pool) {
-    run(
+    getDb().run(
       `INSERT INTO pools (address, name, total_deploys, created_at, updated_at)
        VALUES (?, ?, 0, datetime('now'), datetime('now'))`,
       poolAddress,
       name || poolAddress.slice(0, 8)
     );
-    pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress) as PoolRow;
+    pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress)!;
   }
 
   return pool;
@@ -150,9 +155,9 @@ function getOrCreatePool(poolAddress: string, name?: string): PoolRow {
  * Get snapshots for a pool by looking up position addresses that contain the pool address.
  */
 function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
-  const rows = query<SnapshotRow>(
-    `SELECT * FROM position_snapshots 
-     WHERE position_address LIKE ? 
+  const rows = getDb().query<SnapshotRow>(
+    `SELECT * FROM position_snapshots
+     WHERE position_address LIKE ?
      ORDER BY ts DESC LIMIT 48`,
     `${poolAddress}%`
   );
@@ -175,19 +180,16 @@ function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
  * Record a closed deploy into the database.
  * Called automatically from recordPerformance() in lessons.js.
  */
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: large transaction block
 export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): void {
   if (!poolAddress) return;
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: large transaction block
-  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: large transaction block
-  transaction(() => {
+  getDb().transaction(() => {
     // Get or create pool
     const pool = getOrCreatePool(poolAddress, deployData.pool_name);
 
     // Update pool base_mint if provided
     if (deployData.base_mint && !pool.base_mint) {
-      run(
+      getDb().run(
         "UPDATE pools SET base_mint = ?, updated_at = datetime('now') WHERE address = ?",
         deployData.base_mint,
         poolAddress
@@ -196,9 +198,9 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
 
     // Insert the deploy record
     const closedAt = deployData.closed_at || new Date().toISOString();
-    run(
-      `INSERT INTO pool_deploys 
-       (pool_address, deployed_at, closed_at, pnl_pct, pnl_usd, range_efficiency, 
+    getDb().run(
+      `INSERT INTO pool_deploys
+       (pool_address, deployed_at, closed_at, pnl_pct, pnl_usd, range_efficiency,
         minutes_held, close_reason, strategy, volatility_at_deploy, data_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       poolAddress,
@@ -211,11 +213,11 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       deployData.close_reason || null,
       deployData.strategy || null,
       deployData.volatility ?? null,
-      stringifyJson(deployData)
+      getDb().stringifyJson(deployData)
     );
 
     // Get all deploys to recalculate aggregates
-    const deploys = query<PoolDeployRow>(
+    const deploys = getDb().query<PoolDeployRow>(
       "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
       poolAddress
     );
@@ -244,8 +246,8 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     }
 
     // Update pool aggregates
-    run(
-      `UPDATE pools SET 
+    getDb().run(
+      `UPDATE pools SET
         total_deploys = ?,
         avg_pnl_pct = ?,
         win_rate = ?,
@@ -266,7 +268,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     if (deployData.close_reason === "low yield") {
       const cooldownHours = 4;
       const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000).toISOString();
-      run(
+      getDb().run(
         `UPDATE pools SET cooldown_until = ?, cooldown_reason = ?, updated_at = datetime('now') WHERE address = ?`,
         cooldownUntil,
         "low yield",
@@ -288,7 +290,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       const cooldownUntil = new Date(Date.now() + oorCooldownHours * 60 * 60 * 1000).toISOString();
 
       // Set pool cooldown
-      run(
+      getDb().run(
         `UPDATE pools SET cooldown_until = ?, cooldown_reason = ?, updated_at = datetime('now') WHERE address = ?`,
         cooldownUntil,
         reason,
@@ -299,7 +301,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       // Set base mint cooldown for all pools with same base mint
       if (deployData.base_mint || pool.base_mint) {
         const baseMint = deployData.base_mint || pool.base_mint;
-        run(
+        getDb().run(
           `UPDATE pools SET base_mint_cooldown_until = ?, base_mint_cooldown_reason = ?, updated_at = datetime('now') WHERE base_mint = ?`,
           cooldownUntil,
           reason,
@@ -307,7 +309,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
         );
         log(
           "pool-memory",
-          `Base mint cooldown set for ${baseMint?.slice(0, 8)} until ${cooldownUntil} (${reason})`
+          `Base mint cooldown set for ${baseMint!.slice(0, 8)} until ${cooldownUntil} (${reason})`
         );
       }
     }
@@ -359,25 +361,13 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
 export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSnapshotInput): void {
   if (!poolAddress) return;
 
-  const positionAddr = snapshot.position;
-  if (!positionAddr) return;
-
-  transaction(() => {
+  getDb().transaction(() => {
     // Ensure pool exists
     getOrCreatePool(poolAddress, snapshot.pair);
 
-    // Skip if position is not tracked in position_state (FK constraint requires it)
-    const tracked = get<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM position_state WHERE position = ?",
-      positionAddr
-    );
-    if (!tracked || tracked.cnt === 0) {
-      // Position exists on-chain but not in our state — skip snapshot
-      return;
-    }
-
     // Insert snapshot
-    run(
+    const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
+    getDb().run(
       `INSERT INTO position_snapshots
        (position_address, ts, pnl_pct, pnl_usd, in_range, unclaimed_fees_usd,
         minutes_out_of_range, age_minutes, data_json)
@@ -389,23 +379,23 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
       snapshot.unclaimed_fees_usd ?? null,
       snapshot.minutes_out_of_range ?? null,
       snapshot.age_minutes ?? null,
-      stringifyJson(snapshot)
+      getDb().stringifyJson(snapshot)
     );
 
     // Keep only last 48 snapshots for this position
-    const count = get<{ cnt: number }>(
+    const count = getDb().get<{ cnt: number }>(
       "SELECT COUNT(*) as cnt FROM position_snapshots WHERE position_address = ?",
       positionAddr
     );
 
     if (count && count.cnt > 48) {
-      run(
-        `DELETE FROM position_snapshots 
-         WHERE position_address = ? 
+      getDb().run(
+        `DELETE FROM position_snapshots
+         WHERE position_address = ?
          AND id IN (
-           SELECT id FROM position_snapshots 
-           WHERE position_address = ? 
-           ORDER BY ts ASC 
+           SELECT id FROM position_snapshots
+           WHERE position_address = ?
+           ORDER BY ts ASC
            LIMIT ?
          )`,
         positionAddr,
@@ -421,7 +411,10 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
 export function isPoolOnCooldown(poolAddress: string): boolean {
   if (!poolAddress) return false;
 
-  const pool = get<PoolRow>("SELECT cooldown_until FROM pools WHERE address = ?", poolAddress);
+  const pool = getDb().get<PoolRow>(
+    "SELECT cooldown_until FROM pools WHERE address = ?",
+    poolAddress
+  );
 
   if (!pool?.cooldown_until) return false;
   return new Date(pool.cooldown_until) > new Date();
@@ -430,8 +423,8 @@ export function isPoolOnCooldown(poolAddress: string): boolean {
 export function isBaseMintOnCooldown(baseMint: string): boolean {
   if (!baseMint) return false;
 
-  const pool = get<PoolRow>(
-    `SELECT base_mint_cooldown_until FROM pools 
+  const pool = getDb().get<PoolRow>(
+    `SELECT base_mint_cooldown_until FROM pools
      WHERE base_mint = ? AND base_mint_cooldown_until IS NOT NULL
      LIMIT 1`,
     baseMint
@@ -448,7 +441,7 @@ export function isBaseMintOnCooldown(baseMint: string): boolean {
 export function getPoolMemory({ pool_address }: { pool_address: string }): PoolMemoryResult {
   if (!pool_address) return { error: "pool_address required", pool_address: "", known: false };
 
-  const pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", pool_address);
+  const pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", pool_address);
 
   if (!pool) {
     return {
@@ -458,12 +451,12 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
     };
   }
 
-  const deploys = query<PoolDeployRow>(
+  const deploys = getDb().query<PoolDeployRow>(
     "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
     pool_address
   );
 
-  const noteEvents = query<PoolNoteRow>(
+  const noteEvents = getDb().query<PoolNoteRow>(
     "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
     pool_address
   );
@@ -518,88 +511,21 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
 }
 
 /**
- * Get all pool deploys across all pools — used for hive-mind sync.
- * Returns flattened deploy history with pool metadata.
- */
-export function getAllPoolDeploys(): Array<{
-  pool_address: string;
-  pool_name: string | null;
-  deployed_at: string | null;
-  closed_at: string | null;
-  pnl_pct: number | null;
-  pnl_usd: number | null;
-  range_efficiency: number | null;
-  minutes_held: number | null;
-  close_reason: string | null;
-  strategy: string | null;
-  volatility: number | null;
-  base_mint: string | null;
-}> {
-  const rows = query<{
-    pool_address: string;
-    name: string | null;
-    base_mint: string | null;
-    deployed_at: string | null;
-    closed_at: string | null;
-    pnl_pct: number | null;
-    pnl_usd: number | null;
-    range_efficiency: number | null;
-    minutes_held: number | null;
-    close_reason: string | null;
-    strategy: string | null;
-    volatility_at_deploy: number | null;
-  }>(
-    `SELECT
-      pd.pool_address,
-      p.name,
-      p.base_mint,
-      pd.deployed_at,
-      pd.closed_at,
-      pd.pnl_pct,
-      pd.pnl_usd,
-      pd.range_efficiency,
-      pd.minutes_held,
-      pd.close_reason,
-      pd.strategy,
-      pd.volatility_at_deploy
-    FROM pool_deploys pd
-    JOIN pools p ON pd.pool_address = p.address
-    ORDER BY pd.closed_at DESC`
-  );
-
-  return rows.map((row) => ({
-    pool_address: row.pool_address,
-    pool_name: row.name,
-    base_mint: row.base_mint,
-    deployed_at: row.deployed_at,
-    closed_at: row.closed_at,
-    pnl_pct: row.pnl_pct,
-    pnl_usd: row.pnl_usd,
-    range_efficiency: row.range_efficiency,
-    minutes_held: row.minutes_held,
-    close_reason: row.close_reason,
-    strategy: row.strategy,
-    volatility: row.volatility_at_deploy,
-  }));
-}
-
-/**
  * Recall focused context for a specific pool — used before screening or management.
  * Returns a short formatted string ready for injection into the agent goal.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pool recall aggregates multiple data sources
 export function recallForPool(poolAddress: string): string | null {
   if (!poolAddress) return null;
 
-  const pool = get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
+  const pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
   if (!pool) return null;
 
-  const deploys = query<PoolDeployRow>(
+  const deploys = getDb().query<PoolDeployRow>(
     "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
     poolAddress
   );
 
-  const noteEvents = query<PoolNoteRow>(
+  const noteEvents = getDb().query<PoolNoteRow>(
     "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
     poolAddress
   );
@@ -689,16 +615,16 @@ export function addPoolNote({
   const safeNote = sanitizeStoredNote(note);
   if (!safeNote) return { error: "note required", saved: false, pool_address, note: "" };
 
-  transaction(() => {
+  getDb().transaction(() => {
     // Ensure pool exists
     getOrCreatePool(pool_address);
 
     // Insert note as position event
-    run(
+    getDb().run(
       `INSERT INTO position_events (position_address, event_type, ts, data_json) VALUES (?, ?, datetime('now'), ?)`,
       pool_address,
       "pool_note",
-      stringifyJson({ note: safeNote, added_at: new Date().toISOString() })
+      getDb().stringifyJson({ note: safeNote, added_at: new Date().toISOString() })
     );
 
     // Dual-write to JSON if enabled
