@@ -266,6 +266,16 @@ export function initSchema(): void {
     )
   `);
 
+  // Dev blocklist - blocked deployer wallets
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dev_blocklist (
+      wallet TEXT PRIMARY KEY,
+      label TEXT NOT NULL DEFAULT 'unknown',
+      reason TEXT NOT NULL DEFAULT 'no reason provided',
+      added_at TEXT NOT NULL
+    )
+  `);
+
   // Strategies - stored strategy definitions
   db.exec(`
     CREATE TABLE IF NOT EXISTS strategies (
@@ -972,6 +982,7 @@ export function validateSchema(): { valid: boolean; missingTables: string[] } {
     "position_state_events",
     "state_metadata",
     "token_blacklist",
+    "dev_blocklist",
     "strategies",
     "active_strategy",
     "threshold_suggestions",
