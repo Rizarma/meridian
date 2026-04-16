@@ -7,8 +7,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { query, run, transaction, parseJson, stringifyJson } from "./db.js";
 import { PROJECT_ROOT } from "../config/paths.js";
+import { parseJson, query, run, stringifyJson, transaction } from "./db.js";
 import { log } from "./logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────

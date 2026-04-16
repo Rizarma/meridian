@@ -10,8 +10,8 @@
  * the right screening criteria.
  */
 
+import { get, query, run, transaction } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
-import { query, run, transaction, get } from "../infrastructure/db.js";
 import type {
   PerformanceRecord,
   SignalWeights,

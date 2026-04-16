@@ -1,5 +1,5 @@
-import Database from "better-sqlite3";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { PROJECT_ROOT } from "../config/paths.js";
 
 /**

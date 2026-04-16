@@ -13,23 +13,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import {
-  exportPositionsToJson,
-  exportPoolsToJson,
-  exportLessonsToJson,
-  exportAllToJson,
-  exportToLegacyFormat,
-  importPositionsFromJson,
-  importPoolsFromJson,
-  importLessonsFromJson,
-  validateImportData,
-  resetDatabase,
-  listBackups,
-  type ExportResult,
-  type ImportResult,
-  type BackupResult,
-} from "../infrastructure/db-backup.js";
 import { PROJECT_ROOT } from "../config/paths.js";
+import {
+  type BackupResult,
+  type ExportResult,
+  exportAllToJson,
+  exportLessonsToJson,
+  exportPoolsToJson,
+  exportPositionsToJson,
+  exportToLegacyFormat,
+  type ImportResult,
+  importLessonsFromJson,
+  importPoolsFromJson,
+  importPositionsFromJson,
+  listBackups,
+  resetDatabase,
+  validateImportData,
+} from "../infrastructure/db-backup.js";
 
 // ─── Output Helpers ──────────────────────────────────────────────
 
