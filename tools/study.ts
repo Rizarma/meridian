@@ -10,6 +10,7 @@ import type {
   StudyOptions,
   StudyResult,
 } from "../src/types/index.js";
+
 import { registerTool } from "./registry.js";
 
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
@@ -53,11 +54,19 @@ export async function studyTopLPers({
 
   if (!topRes.ok) {
     if (topRes.status === 429) {
-      throw new Error(
-        "Rate limit exceeded. Please wait 60 seconds before studying this pool again."
-      );
+      return {
+        pool: pool_address,
+        message: "Rate limit exceeded. Please wait 60 seconds before studying this pool again.",
+        patterns: {},
+        lpers: [],
+      };
     }
-    throw new Error(`top-lpers API error: ${topRes.status}`);
+    return {
+      pool: pool_address,
+      message: `top-lpers API error: ${topRes.status}`,
+      patterns: {},
+      lpers: [],
+    };
   }
 
   const topData = (await topRes.json()) as { data?: LPerSummary[] };

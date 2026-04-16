@@ -8,6 +8,7 @@
  *   { success: true, data: T } | { success: false, error: string }
  */
 
+import { BPS, LIMITS, SOLANA } from "../config/constants.js";
 import type { AddLiquidityParams, WithdrawLiquidityParams } from "../types/dlmm.js";
 import type { ClosePositionArgs, DeployPositionArgs, SwapTokenArgs } from "../types/executor.js";
 
@@ -46,7 +47,7 @@ function isSolanaAddress(value: unknown): boolean {
   const base58Regex = /^[A-HJ-NP-Za-km-z1-9]+$/;
   if (!base58Regex.test(value)) return false;
   // Length check: Solana pubkeys are 32 bytes = ~43-44 chars in base58
-  return value.length >= 32 && value.length <= 44;
+  return value.length >= SOLANA.MIN_ADDRESS_LENGTH && value.length <= SOLANA.MAX_ADDRESS_LENGTH;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -82,8 +83,11 @@ export function validateSwapTokenArgs(args: unknown): ValidationResult<SwapToken
     if (!isNumber(a.slippage_bps)) {
       return { success: false, error: "slippage_bps must be a number" };
     }
-    if (a.slippage_bps < 0 || a.slippage_bps > 10000) {
-      return { success: false, error: "slippage_bps must be between 0 and 10000" };
+    if (a.slippage_bps < LIMITS.MIN_SLIPPAGE_BPS || a.slippage_bps > LIMITS.MAX_SLIPPAGE_BPS) {
+      return {
+        success: false,
+        error: `slippage_bps must be between ${LIMITS.MIN_SLIPPAGE_BPS} and ${LIMITS.MAX_SLIPPAGE_BPS}`,
+      };
     }
   }
 
@@ -125,7 +129,7 @@ export function validateDeployPositionArgs(args: unknown): ValidationResult<Depl
       return { success: false, error: "bin_step must be a number" };
     }
     if (a.bin_step < 1 || a.bin_step > 1000) {
-      return { success: false, error: "bin_step must be between 1 and 1000" };
+      return { success: false, error: `bin_step must be between 1 and 1000` };
     }
   }
 
@@ -236,8 +240,11 @@ export function validateClosePositionArgs(args: unknown): ValidationResult<Close
     if (!isString(a.reason)) {
       return { success: false, error: "reason must be a string" };
     }
-    if (a.reason.length > 500) {
-      return { success: false, error: "reason must be 500 characters or less" };
+    if (a.reason.length > LIMITS.MAX_NOTE_LENGTH) {
+      return {
+        success: false,
+        error: `reason must be ${LIMITS.MAX_NOTE_LENGTH} characters or less`,
+      };
     }
   }
 
@@ -386,8 +393,8 @@ export function validateWithdrawLiquidityParams(
     if (!isNumber(a.bps)) {
       return { success: false, error: "bps must be a number" };
     }
-    if (a.bps < 1 || a.bps > 10000) {
-      return { success: false, error: "bps must be between 1 and 10000" };
+    if (a.bps < BPS.MIN || a.bps > BPS.MAX) {
+      return { success: false, error: `bps must be between ${BPS.MIN} and ${BPS.MAX}` };
     }
   }
 

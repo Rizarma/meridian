@@ -2,6 +2,7 @@ import * as cron from "node-cron";
 import { getMyPositions, stopPoolCache } from "../tools/dlmm.js";
 import { agentLoop } from "./agent/agent.js";
 import { config, registerCronRestarter } from "./config/config.js";
+import { CYCLE, RETRY, TIME, TIMEOUT } from "./config/constants.js";
 import {
   runManagementCycle as runManagementCycleImpl,
   schedulePeakConfirmation,
@@ -95,7 +96,7 @@ export async function maybeRunMissedBriefing(): Promise<void> {
 
   // Only fire if it's past the scheduled time (1:00 AM UTC)
   const nowUtc = new Date();
-  const briefingHourUtc = 1;
+  const briefingHourUtc = CYCLE.BRIEFING_HOUR_UTC;
   if (nowUtc.getUTCHours() < briefingHourUtc) return; // too early, cron will handle it
 
   log("cron", `Missed briefing detected (last sent: ${lastSent || "never"}) — sending now`);
@@ -114,7 +115,7 @@ export function stopCronJobs(): void {
 }
 
 export async function runManagementCycle(options: CycleOptions = {}): Promise<string | null> {
-  const screeningCooldownMs = 5 * 60 * 1000;
+  const screeningCooldownMs = CYCLE.SCREENING_COOLDOWN_MS;
   const result = await runManagementCycleImpl(options, {
     timers: cycleState.getTimers(),
     setManagementBusy: (busy: boolean) => {
@@ -205,17 +206,16 @@ Summarize the current portfolio health, total fees earned, and performance of al
 
   // Every 6h — catch up if briefing was missed (agent restart, crash, etc.)
   const briefingWatchdog = cron.schedule(
-    `0 */6 * * *`,
+    `0 */${CYCLE.BRIEFING_WATCHDOG_INTERVAL_HOURS} * * *`,
     async () => {
       await maybeRunMissedBriefing();
     },
     { timezone: "UTC" }
   );
 
-  // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
+  // Lightweight PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
   let _pnlPollConsecutiveFailures = 0;
-  const MAX_PNL_POLL_FAILURES = 5;
   const pnlPollInterval = setInterval(() => {
     (async () => {
       if (cycleState.isManagementBusy() || cycleState.isScreeningBusy() || _pnlPollBusy) return;
@@ -224,7 +224,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
         const result = await getMyPositions({ force: true, silent: true }).catch((err): null => {
           log("poll_error", `getMyPositions failed: ${getErrorMessage(err)}`);
           _pnlPollConsecutiveFailures++;
-          if (_pnlPollConsecutiveFailures >= MAX_PNL_POLL_FAILURES) {
+          if (_pnlPollConsecutiveFailures >= RETRY.MAX_PNL_POLL_FAILURES) {
             log("poll_error", "PnL poll failing consistently - backing off");
             // Could disable polling here if needed
           }
@@ -276,7 +276,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
                 }
                 continue;
               }
-              const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
+              const cooldownMs = config.schedule.managementIntervalMin * TIME.MINUTE;
               const sinceLastTrigger = Date.now() - cycleState.getPollTriggeredAt();
               if (sinceLastTrigger >= cooldownMs) {
                 cycleState.setPollTriggeredAt(Date.now());
@@ -318,7 +318,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
       log("poll_error", `Unhandled PnL poll error: ${getErrorMessage(e)}`);
       _pnlPollBusy = false;
     });
-  }, 30_000);
+  }, CYCLE.PNL_POLL_INTERVAL_MS);
 
   cycleState.setCronTasks([mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog]);
   // Store interval ref so stopCronJobs can clear it
@@ -332,7 +332,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
 // ═══════════════════════════════════════════
 //  GRACEFUL SHUTDOWN
 // ═══════════════════════════════════════════
-const SHUTDOWN_TIMEOUT_MS = 5000;
+const SHUTDOWN_TIMEOUT_MS = TIMEOUT.SHUTDOWN_MS;
 
 export async function shutdown(signal: string): Promise<void> {
   log("shutdown", `Received ${signal}. Shutting down gracefully...`);
@@ -359,7 +359,7 @@ export async function shutdown(signal: string): Promise<void> {
         closeLogStreams();
 
         // Small delay to let final logs flush
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, TIMEOUT.LOG_FLUSH_MS));
       })(),
       timeoutPromise,
     ]);
@@ -415,7 +415,7 @@ export async function start(): Promise<void> {
   if (!validationResult.allCriticalHealthy) {
     log("startup_warn", "Some critical services are unhealthy — agent may not function correctly");
     // Small delay so user can see the warning
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, TIMEOUT.STARTUP_WARN_MS));
   }
 
   // Start REPL or non-TTY mode
