@@ -55,6 +55,7 @@ export type CLISubcommand =
   | "performance"
   | "withdraw-liquidity"
   | "add-liquidity"
+  | "db"
   | "help";
 
 /** Enriched candidate with full metadata */
