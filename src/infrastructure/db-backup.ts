@@ -92,6 +92,123 @@ function readJsonFile<T>(filePath: string): T {
   return JSON.parse(content) as T;
 }
 
+// ─── Pool Export Helpers ───────────────────────────────────────
+
+interface PoolRecord extends Record<string, unknown> {
+  address: string;
+  data_json: string | null;
+}
+
+interface DeployRecord extends Record<string, unknown> {
+  data_json: string | null;
+}
+
+interface SnapshotRecord extends Record<string, unknown> {
+  in_range: number;
+  data_json: string | null;
+}
+
+interface NoteRecord extends Record<string, unknown> {
+  data_json: string | null;
+  ts: string;
+}
+
+/**
+ * Fetch all pools from database ordered by total_deploys
+ */
+function fetchPoolData(): PoolRecord[] {
+  return query<PoolRecord>("SELECT * FROM pools ORDER BY total_deploys DESC, address");
+}
+
+/**
+ * Fetch deploys for a specific pool
+ */
+function fetchPoolDeploys(poolAddress: string): DeployRecord[] {
+  return query<DeployRecord>(
+    "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY deployed_at",
+    poolAddress
+  );
+}
+
+/**
+ * Fetch snapshots for a specific pool
+ */
+function fetchPoolSnapshots(poolAddress: string): SnapshotRecord[] {
+  return query<SnapshotRecord>(
+    "SELECT * FROM position_snapshots WHERE position_address LIKE ? ORDER BY ts",
+    `${poolAddress}%`
+  );
+}
+
+/**
+ * Fetch notes for a specific pool
+ */
+function fetchPoolNotes(poolAddress: string): NoteRecord[] {
+  return query<NoteRecord>(
+    "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
+    poolAddress
+  );
+}
+
+/**
+ * Assemble the export object for a single pool with all related data
+ */
+function assemblePoolExport(
+  pool: PoolRecord,
+  deploys: DeployRecord[],
+  snapshots: SnapshotRecord[],
+  notes: NoteRecord[],
+  includeDataJson: boolean
+): Record<string, unknown> {
+  const poolData: Record<string, unknown> = { ...pool };
+
+  // Parse pool JSON data
+  if (pool.data_json) {
+    poolData.parsed_data = parseJson(pool.data_json);
+  }
+
+  // Process deploys
+  poolData.deploys = deploys.map((d) => {
+    const deploy: Record<string, unknown> = { ...d };
+    if (includeDataJson && d.data_json) {
+      deploy.parsed_data = parseJson(d.data_json);
+    }
+    if (!includeDataJson) {
+      delete deploy.data_json;
+    }
+    return deploy;
+  });
+
+  // Process snapshots
+  poolData.snapshots = snapshots.map((s) => {
+    const snapshot: Record<string, unknown> = { ...s };
+    snapshot.in_range = s.in_range === 1;
+    if (includeDataJson && s.data_json) {
+      snapshot.parsed_data = parseJson(s.data_json);
+    }
+    if (!includeDataJson) {
+      delete snapshot.data_json;
+    }
+    return snapshot;
+  });
+
+  // Process notes
+  poolData.notes = notes.map((n) => {
+    const noteData = parseJson<{ note?: string; added_at?: string }>(n.data_json as string);
+    return {
+      note: noteData?.note,
+      added_at: noteData?.added_at || n.ts,
+    };
+  });
+
+  // Remove raw data_json if not requested
+  if (!includeDataJson) {
+    delete poolData.data_json;
+  }
+
+  return poolData;
+}
+
 // ─── Export Functions ────────────────────────────────────────────
 
 /**
@@ -177,87 +294,21 @@ export function exportPoolsToJson(outputPath?: string, options: ExportOptions = 
   try {
     const { pretty = true, includeDataJson = true } = options;
 
-    const pools = query<
-      Record<string, unknown> & {
-        address: string;
-        data_json: string | null;
-      }
-    >("SELECT * FROM pools ORDER BY total_deploys DESC, address");
-
+    const pools = fetchPoolData();
     const exportedPools: Record<string, unknown> = {};
 
     for (const pool of pools) {
-      const poolData: Record<string, unknown> = { ...pool };
+      const deploys = fetchPoolDeploys(pool.address);
+      const snapshots = fetchPoolSnapshots(pool.address);
+      const notes = fetchPoolNotes(pool.address);
 
-      // Get deploys for this pool
-      const deploys = query<
-        Record<string, unknown> & {
-          data_json: string | null;
-        }
-      >("SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY deployed_at", pool.address);
-
-      // Get snapshots for this pool
-      const snapshots = query<
-        Record<string, unknown> & {
-          in_range: number;
-          data_json: string | null;
-        }
-      >(
-        "SELECT * FROM position_snapshots WHERE position_address LIKE ? ORDER BY ts",
-        `${pool.address}%`
+      exportedPools[pool.address] = assemblePoolExport(
+        pool,
+        deploys,
+        snapshots,
+        notes,
+        includeDataJson
       );
-
-      // Get notes for this pool
-      const notes = query<
-        Record<string, unknown> & {
-          data_json: string | null;
-        }
-      >(
-        "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
-        pool.address
-      );
-
-      // Parse JSON columns
-      if (pool.data_json) {
-        poolData.parsed_data = parseJson(pool.data_json);
-      }
-
-      poolData.deploys = deploys.map((d) => {
-        const deploy: Record<string, unknown> = { ...d };
-        if (includeDataJson && d.data_json) {
-          deploy.parsed_data = parseJson(d.data_json);
-        }
-        if (!includeDataJson) {
-          delete deploy.data_json;
-        }
-        return deploy;
-      });
-
-      poolData.snapshots = snapshots.map((s) => {
-        const snapshot: Record<string, unknown> = { ...s };
-        snapshot.in_range = s.in_range === 1;
-        if (includeDataJson && s.data_json) {
-          snapshot.parsed_data = parseJson(s.data_json);
-        }
-        if (!includeDataJson) {
-          delete snapshot.data_json;
-        }
-        return snapshot;
-      });
-
-      poolData.notes = notes.map((n) => {
-        const noteData = parseJson<{ note?: string; added_at?: string }>(n.data_json as string);
-        return {
-          note: noteData?.note,
-          added_at: noteData?.added_at || n.ts,
-        };
-      });
-
-      if (!includeDataJson) {
-        delete poolData.data_json;
-      }
-
-      exportedPools[pool.address] = poolData;
     }
 
     const filePath =

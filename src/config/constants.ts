@@ -98,8 +98,6 @@ export const SCREENING = {
 // ═══════════════════════════════════════════
 
 export const RISK = {
-  /** Default max positions */
-  DEFAULT_MAX_POSITIONS: 5,
   /** Default max deploy amount (SOL) */
   DEFAULT_MAX_DEPLOY_AMOUNT: 50,
   /** Default min deploy amount (SOL) */
