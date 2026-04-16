@@ -7,13 +7,9 @@ import {
   schedulePeakConfirmation,
   scheduleTrailingDropConfirmation,
 } from "./cycles/management.js";
-import {
-  getScreeningLastTriggered,
-  isScreeningBusy,
-  runScreeningCycle as runScreeningCycleImpl,
-  setScreeningLastTriggered,
-} from "./cycles/screening.js";
+import { runScreeningCycle as runScreeningCycleImpl } from "./cycles/screening.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
+import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
 import { closeLogStreams, log } from "./infrastructure/logger.js";
 import {
@@ -26,7 +22,7 @@ import {
 } from "./infrastructure/state.js";
 import { sendHTML, stopPolling, isEnabled as telegramEnabled } from "./infrastructure/telegram.js";
 import { startNonTTY, startREPL } from "./repl.js";
-import type { CronTaskList, CycleOptions, CycleTimers } from "./types/index.js";
+import type { CycleOptions, CycleTimers } from "./types/index.js";
 import { cache } from "./utils/cache.js";
 import { getErrorMessage } from "./utils/errors.js";
 import { recordActivity } from "./utils/health-check.js";
@@ -53,36 +49,22 @@ function sanitizeModelName(model: string): string {
 }
 
 // ═══════════════════════════════════════════
-//  GLOBAL STATE
-// ═══════════════════════════════════════════
-let _cronTasks: CronTaskList = [];
-let _pnlPollInterval: NodeJS.Timeout | undefined;
-let _managementBusy = false;
-let _pollTriggeredAt = 0;
-let cronStarted = false;
-
-const timers: CycleTimers = {
-  managementLastRun: null,
-  screeningLastRun: null,
-};
-
-// ═══════════════════════════════════════════
-//  STATE ACCESSORS
+//  STATE ACCESSORS (delegated to cycleState)
 // ═══════════════════════════════════════════
 export function isManagementBusy(): boolean {
-  return _managementBusy;
+  return cycleState.isManagementBusy();
 }
 
 export function setManagementBusy(busy: boolean): void {
-  _managementBusy = busy;
+  cycleState.setManagementBusy(busy);
 }
 
 export function getTimers(): CycleTimers {
-  return timers;
+  return cycleState.getTimers();
 }
 
 function setCronStarted(started: boolean): void {
-  cronStarted = started;
+  cycleState.setCronStarted(started);
 }
 
 // ═══════════════════════════════════════════
@@ -124,20 +106,21 @@ export async function maybeRunMissedBriefing(): Promise<void> {
 //  CRON JOB MANAGEMENT
 // ═══════════════════════════════════════════
 export function stopCronJobs(): void {
-  for (const task of _cronTasks) task.stop();
-  if (_pnlPollInterval) clearInterval(_pnlPollInterval);
-  _cronTasks = [];
-  _pnlPollInterval = undefined;
+  for (const task of cycleState.getCronTasks()) task.stop();
+  const pnlPollInterval = cycleState.getPnlPollInterval();
+  if (pnlPollInterval) clearInterval(pnlPollInterval);
+  cycleState.setCronTasks([]);
+  cycleState.setPnlPollInterval(undefined);
 }
 
 export async function runManagementCycle(options: CycleOptions = {}): Promise<string | null> {
   const screeningCooldownMs = 5 * 60 * 1000;
   const result = await runManagementCycleImpl(options, {
-    timers,
+    timers: cycleState.getTimers(),
     setManagementBusy: (busy: boolean) => {
-      _managementBusy = busy;
+      cycleState.setManagementBusy(busy);
     },
-    isManagementBusy: () => _managementBusy,
+    isManagementBusy: () => cycleState.isManagementBusy(),
     triggerScreening: async (positionCount?: number): Promise<void> => {
       const afterCount =
         positionCount ??
@@ -145,7 +128,7 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
         0;
       if (
         afterCount < config.risk.maxPositions &&
-        Date.now() - getScreeningLastTriggered() > screeningCooldownMs
+        Date.now() - cycleState.getScreeningLastTriggered() > screeningCooldownMs
       ) {
         await runScreeningCycle();
       }
@@ -163,10 +146,10 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
 
 export async function runScreeningCycle(options: CycleOptions = {}): Promise<string | null> {
   return runScreeningCycleImpl(options, {
-    timers,
-    isScreeningBusy,
-    getScreeningLastTriggered,
-    setScreeningLastTriggered,
+    timers: cycleState.getTimers(),
+    isScreeningBusy: () => cycleState.isScreeningBusy(),
+    getScreeningLastTriggered: () => cycleState.getScreeningLastTriggered(),
+    setScreeningLastTriggered: (time: number) => cycleState.setScreeningLastTriggered(time),
   });
 }
 
@@ -176,8 +159,8 @@ export function startCronJobs(): void {
   const mgmtTask = cron.schedule(
     `*/${Math.max(1, config.schedule.managementIntervalMin)} * * * *`,
     async () => {
-      if (_managementBusy) return;
-      timers.managementLastRun = Date.now();
+      if (cycleState.isManagementBusy()) return;
+      cycleState.getTimers().managementLastRun = Date.now();
       await runManagementCycle();
     }
   );
@@ -190,8 +173,8 @@ export function startCronJobs(): void {
   );
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
-    if (_managementBusy) return;
-    _managementBusy = true;
+    if (cycleState.isManagementBusy()) return;
+    cycleState.setManagementBusy(true);
     log("cron", "Starting health check");
     try {
       await agentLoop(
@@ -207,7 +190,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     } catch (error) {
       log("cron_error", `Health check failed: ${getErrorMessage(error)}`);
     } finally {
-      _managementBusy = false;
+      cycleState.setManagementBusy(false);
     }
   });
 
@@ -235,7 +218,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
   const MAX_PNL_POLL_FAILURES = 5;
   const pnlPollInterval = setInterval(() => {
     (async () => {
-      if (_managementBusy || isScreeningBusy() || _pnlPollBusy) return;
+      if (cycleState.isManagementBusy() || cycleState.isScreeningBusy() || _pnlPollBusy) return;
       _pnlPollBusy = true;
       try {
         const result = await getMyPositions({ force: true, silent: true }).catch((err): null => {
@@ -294,9 +277,9 @@ Summarize the current portfolio health, total fees earned, and performance of al
                 continue;
               }
               const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-              const sinceLastTrigger = Date.now() - _pollTriggeredAt;
+              const sinceLastTrigger = Date.now() - cycleState.getPollTriggeredAt();
               if (sinceLastTrigger >= cooldownMs) {
-                _pollTriggeredAt = Date.now();
+                cycleState.setPollTriggeredAt(Date.now());
                 log(
                   "state",
                   `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`
@@ -337,9 +320,9 @@ Summarize the current portfolio health, total fees earned, and performance of al
     });
   }, 30_000);
 
-  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
+  cycleState.setCronTasks([mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog]);
   // Store interval ref so stopCronJobs can clear it
-  _pnlPollInterval = pnlPollInterval;
+  cycleState.setPnlPollInterval(pnlPollInterval);
   log(
     "cron",
     `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m`
@@ -400,18 +383,18 @@ process.on("SIGTERM", async () => {
 //  MAIN ENTRY POINT
 // ═══════════════════════════════════════════
 function launchCron(): void {
-  if (!cronStarted) {
-    cronStarted = true;
+  if (!cycleState.isCronStarted()) {
+    cycleState.setCronStarted(true);
     // Seed timers so countdown starts from now
-    timers.managementLastRun = Date.now();
-    timers.screeningLastRun = Date.now();
+    cycleState.getTimers().managementLastRun = Date.now();
+    cycleState.getTimers().screeningLastRun = Date.now();
     startCronJobs();
   }
 }
 
 // Register restarter — when update_config changes intervals, running cron jobs get replaced
 registerCronRestarter(() => {
-  if (cronStarted) startCronJobs();
+  if (cycleState.isCronStarted()) startCronJobs();
 });
 
 export async function start(): Promise<void> {
@@ -441,11 +424,11 @@ export async function start(): Promise<void> {
   const replDeps = {
     launchCron,
     shutdown,
-    timers,
-    isCronStarted: () => cronStarted,
+    timers: cycleState.getTimers(),
+    isCronStarted: () => cycleState.isCronStarted(),
     setCronStarted,
     isManagementBusy,
-    isScreeningBusy,
+    isScreeningBusy: () => cycleState.isScreeningBusy(),
     runManagementCycle,
     runScreeningCycle,
     startCronJobs,
