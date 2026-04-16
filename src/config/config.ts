@@ -132,7 +132,7 @@ export function registerCronRestarter(fn: () => void): void {
 export const config: Config = {
   // ─── Risk Limits ─────────────────────────
   risk: {
-    maxPositions: u.maxPositions ?? RISK.DEFAULT_MAX_POSITIONS,
+    maxPositions: u.maxPositions ?? SCREENING.DEFAULT_MAX_POSITIONS,
     maxDeployAmount: u.maxDeployAmount ?? RISK.DEFAULT_MAX_DEPLOY_AMOUNT,
   },
 
