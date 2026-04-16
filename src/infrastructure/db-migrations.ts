@@ -595,7 +595,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
                 }
 
                 run(
-                  `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
+                  `INSERT OR IGNORE INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
                     unclaimed_fees_usd, minutes_out_of_range, age_minutes, data_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                   positionAddr,
@@ -618,7 +618,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
                 const n = note as Record<string, unknown>;
                 // Store as a pool event in position_events with special type
                 run(
-                  `INSERT INTO position_events (position_address, event_type, ts, data_json)
+                  `INSERT OR IGNORE INTO position_events (position_address, event_type, ts, data_json)
                    VALUES (?, ?, ?, ?)`,
                   poolAddress,
                   "pool_note",
