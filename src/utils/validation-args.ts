@@ -201,7 +201,15 @@ export function validateDeployPositionArgs(args: unknown): ValidationResult<Depl
 
   return {
     success: true,
-    data: args as DeployPositionArgs,
+    data: {
+      pool_address: a.pool_address,
+      ...(a.bin_step !== undefined && { bin_step: a.bin_step }),
+      ...(a.amount_x !== undefined && { amount_x: a.amount_x }),
+      ...(a.amount_y !== undefined && { amount_y: a.amount_y }),
+      ...(a.amount_sol !== undefined && { amount_sol: a.amount_sol }),
+      ...(a.base_mint !== undefined && { base_mint: a.base_mint }),
+      ...(a.strategy !== undefined && { strategy: a.strategy }),
+    } as DeployPositionArgs,
   };
 }
 
@@ -257,7 +265,12 @@ export function validateClosePositionArgs(args: unknown): ValidationResult<Close
 
   return {
     success: true,
-    data: args as ClosePositionArgs,
+    data: {
+      position_address: a.position_address,
+      ...(a.pool_address !== undefined && { pool_address: a.pool_address }),
+      ...(a.reason !== undefined && { reason: a.reason }),
+      ...(a.skip_swap !== undefined && { skip_swap: a.skip_swap }),
+    } as ClosePositionArgs,
   };
 }
 
@@ -353,7 +366,14 @@ export function validateAddLiquidityParams(args: unknown): ValidationResult<AddL
 
   return {
     success: true,
-    data: args as AddLiquidityParams,
+    data: {
+      position_address: a.position_address,
+      pool_address: a.pool_address,
+      ...(a.amount_x !== undefined && { amount_x: a.amount_x }),
+      ...(a.amount_y !== undefined && { amount_y: a.amount_y }),
+      ...(a.strategy !== undefined && { strategy: a.strategy }),
+      ...(a.single_sided_x !== undefined && { single_sided_x: a.single_sided_x }),
+    } as AddLiquidityParams,
   };
 }
 
@@ -407,7 +427,12 @@ export function validateWithdrawLiquidityParams(
 
   return {
     success: true,
-    data: args as WithdrawLiquidityParams,
+    data: {
+      position_address: a.position_address,
+      pool_address: a.pool_address,
+      ...(a.bps !== undefined && { bps: a.bps }),
+      ...(a.claim_fees !== undefined && { claim_fees: a.claim_fees }),
+    } as WithdrawLiquidityParams,
   };
 }
 

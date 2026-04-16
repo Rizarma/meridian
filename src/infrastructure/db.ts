@@ -25,6 +25,8 @@ export function getDb(): Database.Database {
     dbInstance = new Database(DB_PATH);
     // Enable WAL mode for better concurrency
     dbInstance.pragma("journal_mode = WAL");
+    // Auto-checkpoint every 1000 pages to prevent unbounded WAL growth
+    dbInstance.pragma("wal_autocheckpoint = 1000");
     // Enable foreign key constraints
     dbInstance.pragma("foreign_keys = ON");
   }
