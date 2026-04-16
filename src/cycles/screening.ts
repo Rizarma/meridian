@@ -4,6 +4,7 @@ import { getTokenInfo, getTokenNarrative } from "../../tools/token.js";
 import { getWalletBalances } from "../../tools/wallet.js";
 import { agentLoop } from "../agent/agent.js";
 import { computeDeployAmount, config } from "../config/config.js";
+import { LIMITS, LLM, SCREENING } from "../config/constants.js";
 import { recallForPool } from "../domain/pool-memory.js";
 import { loadWeights } from "../domain/signal-weights.js";
 import { checkSmartWalletsOnPool } from "../domain/smart-wallets.js";
@@ -149,7 +150,7 @@ function stripThink(text: string | null | undefined): string {
  */
 export function sanitizeUntrustedPromptText(
   text: string | null | undefined,
-  maxLen = 500
+  maxLen = LIMITS.MAX_PROMPT_SANITIZE_LENGTH
 ): string | null {
   if (!text) return null;
   const cleaned = String(text)
@@ -273,7 +274,7 @@ async function fetchAndEnrichCandidates(limit: number): Promise<CandidateFetchRe
     });
 
     // Small delay to avoid rate limiting
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, SCREENING.RECON_DELAY_MS));
   }
 
   return { candidates: enrichedCandidates, earlyFiltered };
@@ -449,9 +450,11 @@ function buildCandidateBlocks(scoredCandidates: ScoredCandidate[], topN: number)
         ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}`
         : null,
       n && (n as { narrative?: string }).narrative
-        ? `  narrative_untrusted: ${sanitizeUntrustedPromptText((n as { narrative?: string }).narrative, 500)}`
+        ? `  narrative_untrusted: ${sanitizeUntrustedPromptText((n as { narrative?: string }).narrative, LIMITS.MAX_PROMPT_SANITIZE_LENGTH)}`
         : `  narrative_untrusted: none`,
-      mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
+      mem
+        ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, LIMITS.MAX_PROMPT_SANITIZE_LENGTH)}`
+        : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -677,7 +680,7 @@ export async function runScreeningCycle(
         [],
         "SCREENER",
         config.llm.screeningModel,
-        2048,
+        LLM.DEFAULT_SCREENING_MAX_TOKENS,
         {
           onToolStart: async ({ name }: { name: string }) => {
             await liveMessage?.toolStart(name);

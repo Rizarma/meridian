@@ -13,6 +13,7 @@
  * Refactored to use Dependency Injection - no direct imports from domain/infrastructure.
  */
 
+import { LIMITS } from "../src/config/constants.js";
 import type { DeployResult } from "../src/infrastructure/persistence.js";
 import type { Config } from "../src/types/config.js";
 import type {
@@ -173,8 +174,8 @@ function validateResultObject(result: unknown): Record<string, unknown> {
  */
 function summarizeResult(result: unknown): unknown {
   const str = JSON.stringify(result);
-  if (str.length > 1000) {
-    return `${str.slice(0, 1000)}...(truncated)`;
+  if (str.length > LIMITS.MAX_LOG_LENGTH) {
+    return `${str.slice(0, LIMITS.MAX_LOG_LENGTH)}...(truncated)`;
   }
   return result;
 }
