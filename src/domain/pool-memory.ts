@@ -135,17 +135,25 @@ interface SnapshotRow {
 /**
  * Get or create a pool record in the database.
  */
-function getOrCreatePool(poolAddress: string, name?: string): PoolRow {
-  let pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
+function getOrCreatePool(poolAddress: string, name?: string): PoolRow | null {
+  // Validate pool address - must be non-empty string
+  if (!poolAddress || typeof poolAddress !== "string" || poolAddress.trim() === "") {
+    log("pool-memory_warn", `Invalid pool address provided: ${JSON.stringify(poolAddress)}`);
+    return null;
+  }
+
+  const trimmedAddress = poolAddress.trim();
+  let pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress);
 
   if (!pool) {
     getDb().run(
       `INSERT INTO pools (address, name, total_deploys, created_at, updated_at)
        VALUES (?, ?, 0, datetime('now'), datetime('now'))`,
-      poolAddress,
-      name || poolAddress.slice(0, 8)
+      trimmedAddress,
+      name || trimmedAddress.slice(0, 8)
     );
-    pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress)!;
+    pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress)!;
+    log("pool-memory", `Created new pool record: ${trimmedAddress.slice(0, 8)}`);
   }
 
   return pool;
@@ -186,6 +194,13 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
   getDb().transaction(() => {
     // Get or create pool
     const pool = getOrCreatePool(poolAddress, deployData.pool_name);
+    if (!pool) {
+      log(
+        "pool-memory_warn",
+        `Cannot record deploy - failed to get/create pool: ${poolAddress.slice(0, 8)}`
+      );
+      return;
+    }
 
     // Update pool base_mint if provided
     if (deployData.base_mint && !pool.base_mint) {
@@ -363,7 +378,14 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
 
   getDb().transaction(() => {
     // Ensure pool exists
-    getOrCreatePool(poolAddress, snapshot.pair);
+    const pool = getOrCreatePool(poolAddress, snapshot.pair);
+    if (!pool) {
+      log(
+        "pool-memory_warn",
+        `Cannot record snapshot - failed to get/create pool: ${poolAddress.slice(0, 8)}`
+      );
+      return;
+    }
 
     const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
     getDb().run(
@@ -632,7 +654,10 @@ export function addPoolNote({
 
   getDb().transaction(() => {
     // Ensure pool exists
-    getOrCreatePool(pool_address);
+    const pool = getOrCreatePool(pool_address);
+    if (!pool) {
+      return;
+    }
 
     // Insert note as position event (position_events FK constraint removed — also stores pool notes)
     getDb().run(
