@@ -266,6 +266,16 @@ export function initSchema(): void {
     )
   `);
 
+  // Dev blocklist - blocked deployer wallets
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dev_blocklist (
+      wallet TEXT PRIMARY KEY,
+      label TEXT NOT NULL DEFAULT 'unknown',
+      reason TEXT NOT NULL DEFAULT 'no reason provided',
+      added_at TEXT NOT NULL
+    )
+  `);
+
   // Strategies - stored strategy definitions
   db.exec(`
     CREATE TABLE IF NOT EXISTS strategies (
@@ -585,7 +595,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
                 }
 
                 run(
-                  `INSERT INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
+                  `INSERT OR IGNORE INTO position_snapshots (position_address, ts, pnl_pct, pnl_usd, in_range,
                     unclaimed_fees_usd, minutes_out_of_range, age_minutes, data_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                   positionAddr,
@@ -608,7 +618,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
                 const n = note as Record<string, unknown>;
                 // Store as a pool event in position_events with special type
                 run(
-                  `INSERT INTO position_events (position_address, event_type, ts, data_json)
+                  `INSERT OR IGNORE INTO position_events (position_address, event_type, ts, data_json)
                    VALUES (?, ?, ?, ?)`,
                   poolAddress,
                   "pool_note",
@@ -972,6 +982,7 @@ export function validateSchema(): { valid: boolean; missingTables: string[] } {
     "position_state_events",
     "state_metadata",
     "token_blacklist",
+    "dev_blocklist",
     "strategies",
     "active_strategy",
     "threshold_suggestions",
