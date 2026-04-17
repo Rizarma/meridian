@@ -535,7 +535,11 @@ export async function createLiveMessage(
       }
       if (state.flushPromise) await state.flushPromise;
       state.footer = finalText;
-      await flushNow();
+      try {
+        await flushNow();
+      } catch {
+        // Edit failed, message might be deleted - will create new next cycle
+      }
       _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
       typing.stop();
     },
@@ -546,7 +550,11 @@ export async function createLiveMessage(
       }
       if (state.flushPromise) await state.flushPromise;
       state.footer = `❌ ${errorText}`;
-      await flushNow();
+      try {
+        await flushNow();
+      } catch {
+        // Edit failed
+      }
       _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
       typing.stop();
     },
