@@ -742,12 +742,18 @@ export async function runScreeningCycle(
       if (!silent && telegramEnabled()) {
         if (screenReport) {
           const formattedReport = formatReportWithTimestamp(stripThink(screenReport));
+          const isDeployed = formattedReport.includes("🚀 DEPLOYED");
+
           if (liveMessage) {
             await liveMessage
               .finalize(formattedReport)
               .catch((e) => log("telegram_error", getErrorMessage(e)));
-            // Message ID is already tracked by createLiveMessage
-            // For updateExistingLiveMessage, the ID was already known and remains valid
+
+            // If screening deployed successfully, clear message ID so next cycle creates fresh
+            // If screening was skipped/no deploy, keep message ID for reuse
+            if (isDeployed) {
+              setLastScreeningMessageId(null);
+            }
           } else {
             // No live message handler - check if we have an existing message to update
             const existingMessageId = getLastScreeningMessageId();
