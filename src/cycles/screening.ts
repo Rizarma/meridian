@@ -62,12 +62,17 @@ interface LateFilterResult {
 }
 
 /**
- * Format a report with divider and timestamp footer (like management cycle).
+ * Format a report with divider, timestamp, and next screening time footer.
  */
-function formatReportWithTimestamp(report: string): string {
+function formatReportWithTimestamp(report: string, scheduled = false): string {
   const now = new Date();
   const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-  return `${report}\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp}`;
+
+  // Calculate next screening time
+  const nextScreening = new Date(now.getTime() + config.schedule.screeningIntervalMin * 60 * 1000);
+  const nextScreeningTime = `⏭️ Next: ${nextScreening.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][nextScreening.getMonth()]} ${nextScreening.getHours().toString().padStart(2, "0")}:${nextScreening.getMinutes().toString().padStart(2, "0")} (${scheduled ? "scheduled" : "manual"})`;
+
+  return `${report}\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp} | ${nextScreeningTime}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -618,7 +623,7 @@ export async function runScreeningCycle(
   }
 ): Promise<string | null> {
   return cycleState.getScreeningMutex().runExclusive(async () => {
-    const { silent = false } = options;
+    const { silent = false, scheduled = false } = options;
 
     // Use deps functions if provided, otherwise use cycleState
     const setBusy =
@@ -644,6 +649,30 @@ export async function runScreeningCycle(
       if ("error" in preFlightResult) {
         screenReport = preFlightResult.error;
         setBusy(false);
+        // Format with timestamp even for early returns
+        if (!silent && telegramEnabled()) {
+          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
+          // ... rest of message handling
+          const existingMessageId = getLastScreeningMessageId();
+          if (existingMessageId) {
+            const updated = await updateExistingLiveMessage(
+              "🔍 Screening Cycle",
+              formattedReport,
+              existingMessageId
+            );
+            if (!updated) {
+              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+              if (sent && typeof sent === "object" && "message_id" in sent) {
+                setLastScreeningMessageId((sent as { message_id: number }).message_id);
+              }
+            }
+          } else {
+            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+            if (sent && typeof sent === "object" && "message_id" in sent) {
+              setLastScreeningMessageId((sent as { message_id: number }).message_id);
+            }
+          }
+        }
         return screenReport;
       }
 
@@ -741,7 +770,7 @@ export async function runScreeningCycle(
       setBusy(false);
       if (!silent && telegramEnabled()) {
         if (screenReport) {
-          const formattedReport = formatReportWithTimestamp(stripThink(screenReport));
+          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
           const isDeployed = formattedReport.includes("🚀 DEPLOYED");
 
           if (liveMessage) {
