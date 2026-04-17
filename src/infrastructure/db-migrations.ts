@@ -417,61 +417,62 @@ function removePositionFkConstraints(): void {
   db.transaction(() => {
     // Disable FK enforcement during migration
     db.pragma("foreign_keys = OFF");
+    try {
+      if (snapshotsHasFk) {
+        // Recreate position_snapshots without FK constraint
+        db.exec(`
+          CREATE TABLE position_snapshots_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_address TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            pnl_pct REAL,
+            pnl_usd REAL,
+            in_range INTEGER,
+            unclaimed_fees_usd REAL,
+            minutes_out_of_range INTEGER,
+            age_minutes INTEGER,
+            data_json TEXT
+          )
+        `);
+        db.exec(`
+          INSERT INTO position_snapshots_new
+          SELECT * FROM position_snapshots
+        `);
+        db.exec("DROP TABLE position_snapshots");
+        db.exec("ALTER TABLE position_snapshots_new RENAME TO position_snapshots");
+        // Recreate index
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_snapshots_position ON position_snapshots(position_address)"
+        );
+        db.exec("CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON position_snapshots(ts)");
+      }
 
-    if (snapshotsHasFk) {
-      // Recreate position_snapshots without FK constraint
-      db.exec(`
-        CREATE TABLE position_snapshots_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          position_address TEXT NOT NULL,
-          ts TEXT NOT NULL,
-          pnl_pct REAL,
-          pnl_usd REAL,
-          in_range INTEGER,
-          unclaimed_fees_usd REAL,
-          minutes_out_of_range INTEGER,
-          age_minutes INTEGER,
-          data_json TEXT
-        )
-      `);
-      db.exec(`
-        INSERT INTO position_snapshots_new
-        SELECT * FROM position_snapshots
-      `);
-      db.exec("DROP TABLE position_snapshots");
-      db.exec("ALTER TABLE position_snapshots_new RENAME TO position_snapshots");
-      // Recreate index
-      db.exec(
-        "CREATE INDEX IF NOT EXISTS idx_snapshots_position ON position_snapshots(position_address)"
-      );
-      db.exec("CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON position_snapshots(ts)");
+      if (eventsHasFk) {
+        // Recreate position_events without FK constraint
+        db.exec(`
+          CREATE TABLE position_events_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_address TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            ts TEXT NOT NULL DEFAULT (datetime('now')),
+            data_json TEXT
+          )
+        `);
+        db.exec(`
+          INSERT INTO position_events_new
+          SELECT * FROM position_events
+        `);
+        db.exec("DROP TABLE position_events");
+        db.exec("ALTER TABLE position_events_new RENAME TO position_events");
+        // Recreate index
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_events_position ON position_events(position_address)"
+        );
+      }
+    } finally {
+      // Re-enable FK enforcement — always, even if migration throws
+      db.pragma("foreign_keys = ON");
     }
-
-    if (eventsHasFk) {
-      // Recreate position_events without FK constraint
-      db.exec(`
-        CREATE TABLE position_events_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          position_address TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          ts TEXT NOT NULL DEFAULT (datetime('now')),
-          data_json TEXT
-        )
-      `);
-      db.exec(`
-        INSERT INTO position_events_new
-        SELECT * FROM position_events
-      `);
-      db.exec("DROP TABLE position_events");
-      db.exec("ALTER TABLE position_events_new RENAME TO position_events");
-      // Recreate index
-      db.exec(
-        "CREATE INDEX IF NOT EXISTS idx_events_position ON position_events(position_address)"
-      );
-    }
-
-    // Re-enable FK enforcement
-    db.pragma("foreign_keys = ON");
   });
 
   log("db_migration", "FK constraints removed successfully");
