@@ -53,6 +53,7 @@ export function initSchema(): void {
   `);
 
   // Position snapshots - periodic state captures
+  // FK removed: positions may be tracked in position_state before they appear in positions table
   db.exec(`
     CREATE TABLE IF NOT EXISTS position_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,20 +65,19 @@ export function initSchema(): void {
       unclaimed_fees_usd REAL,
       minutes_out_of_range INTEGER,
       age_minutes INTEGER,
-      data_json TEXT,
-      FOREIGN KEY (position_address) REFERENCES positions(address) ON DELETE CASCADE
+      data_json TEXT
     )
   `);
 
-  // Position events - significant events (claims, rebalances, etc.)
+  // Position events - significant events (claims, rebalances, pool notes, etc.)
+  // FK removed: also stores pool-level notes where position_address is a pool address
   db.exec(`
     CREATE TABLE IF NOT EXISTS position_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       position_address TEXT NOT NULL,
       event_type TEXT NOT NULL,
       ts TEXT NOT NULL DEFAULT (datetime('now')),
-      data_json TEXT,
-      FOREIGN KEY (position_address) REFERENCES positions(address) ON DELETE CASCADE
+      data_json TEXT
     )
   `);
 
@@ -385,6 +385,97 @@ export function initSchema(): void {
   if (!versionRow.length) {
     run("INSERT INTO schema_version (version) VALUES (?)", SCHEMA_VERSION);
   }
+}
+
+/**
+ * Remove FK constraints from position_snapshots and position_events tables.
+ * SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the tables.
+ * This migration is idempotent — skips if FK constraints are already removed.
+ */
+function removePositionFkConstraints(): void {
+  const db = getDb();
+
+  // Clean up any leftover _new tables from failed migrations
+  db.exec("DROP TABLE IF EXISTS position_snapshots_new");
+  db.exec("DROP TABLE IF EXISTS position_events_new");
+
+  // Check if FK constraints exist by inspecting the table SQL
+  const snapshotsSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='position_snapshots'")
+    .get() as { sql: string } | undefined;
+  const eventsSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='position_events'")
+    .get() as { sql: string } | undefined;
+
+  const snapshotsHasFk = snapshotsSql?.sql?.includes("FOREIGN KEY") ?? false;
+  const eventsHasFk = eventsSql?.sql?.includes("FOREIGN KEY") ?? false;
+
+  if (!snapshotsHasFk && !eventsHasFk) return; // Already migrated
+
+  log("db_migration", "Removing FK constraints from position_snapshots and position_events...");
+
+  db.transaction(() => {
+    // Disable FK enforcement during migration
+    db.pragma("foreign_keys = OFF");
+    try {
+      if (snapshotsHasFk) {
+        // Recreate position_snapshots without FK constraint
+        db.exec(`
+          CREATE TABLE position_snapshots_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_address TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            pnl_pct REAL,
+            pnl_usd REAL,
+            in_range INTEGER,
+            unclaimed_fees_usd REAL,
+            minutes_out_of_range INTEGER,
+            age_minutes INTEGER,
+            data_json TEXT
+          )
+        `);
+        db.exec(`
+          INSERT INTO position_snapshots_new
+          SELECT * FROM position_snapshots
+        `);
+        db.exec("DROP TABLE position_snapshots");
+        db.exec("ALTER TABLE position_snapshots_new RENAME TO position_snapshots");
+        // Recreate index
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_snapshots_position ON position_snapshots(position_address)"
+        );
+        db.exec("CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON position_snapshots(ts)");
+      }
+
+      if (eventsHasFk) {
+        // Recreate position_events without FK constraint
+        db.exec(`
+          CREATE TABLE position_events_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_address TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            ts TEXT NOT NULL DEFAULT (datetime('now')),
+            data_json TEXT
+          )
+        `);
+        db.exec(`
+          INSERT INTO position_events_new
+          SELECT * FROM position_events
+        `);
+        db.exec("DROP TABLE position_events");
+        db.exec("ALTER TABLE position_events_new RENAME TO position_events");
+        // Recreate index
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_events_position ON position_events(position_address)"
+        );
+      }
+    } finally {
+      // Re-enable FK enforcement — always, even if migration throws
+      db.pragma("foreign_keys = ON");
+    }
+  });
+
+  log("db_migration", "FK constraints removed successfully");
 }
 
 /**
@@ -1006,6 +1097,7 @@ export function setupDatabase(): { success: boolean; message: string } {
   try {
     initSchema();
     initThresholdEvolutionTables();
+    removePositionFkConstraints(); // Remove overly restrictive FK constraints
 
     if (needsJsonImport()) {
       const result = migrateFromJson();

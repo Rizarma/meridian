@@ -132,7 +132,7 @@ export async function runManagementCycle(options: CycleOptions = {}): Promise<st
         afterCount < config.risk.maxPositions &&
         Date.now() - cycleState.getScreeningLastTriggered() > screeningCooldownMs
       ) {
-        await runScreeningCycle();
+        await runScreeningCycle({ scheduled: true });
       }
     },
     triggerScreeningImmediate: async () => {
@@ -163,14 +163,14 @@ export function startCronJobs(): void {
     async () => {
       if (cycleState.isManagementBusy()) return;
       cycleState.getTimers().managementLastRun = Date.now();
-      await runManagementCycle();
+      await runManagementCycle({ scheduled: true });
     }
   );
 
   const screenTask = cron.schedule(
     `*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`,
     (): void => {
-      void runScreeningCycle();
+      void runScreeningCycle({ scheduled: true });
     }
   );
 

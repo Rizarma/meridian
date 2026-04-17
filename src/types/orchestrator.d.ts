@@ -95,6 +95,7 @@ export interface TokenInfoResult {
 /** Cycle run options */
 export interface CycleOptions {
   silent?: boolean;
+  scheduled?: boolean;
 }
 
 /** Management cycle report */
