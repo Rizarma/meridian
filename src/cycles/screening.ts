@@ -12,8 +12,11 @@ import { cycleState } from "../infrastructure/cycle-state.js";
 import { log } from "../infrastructure/logger.js";
 import {
   createLiveMessage,
+  getLastScreeningMessageId,
   sendMessage,
+  setLastScreeningMessageId,
   isEnabled as telegramEnabled,
+  updateExistingLiveMessage,
 } from "../infrastructure/telegram.js";
 import type {
   CondensedPool,
@@ -23,6 +26,7 @@ import type {
   LiveMessageHandler,
   ReconCandidate,
 } from "../types/index.js";
+import type { TelegramMessage } from "../types/telegram.js";
 import { getErrorMessage } from "../utils/errors.js";
 import {
   isValidBalanceResponse,
@@ -35,6 +39,16 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 // Type Definitions
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** Type guard: checks if a sendMessage return value carries a message_id. */
+function hasMessageId(value: unknown): value is TelegramMessage & { message_id: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "message_id" in value &&
+    typeof (value as TelegramMessage).message_id === "number"
+  );
+}
 
 interface ScoredCandidate {
   candidate: ReconCandidate;
@@ -56,6 +70,24 @@ interface CandidateFetchResult {
 interface LateFilterResult {
   passing: ReconCandidate[];
   lateFiltered: FilteredExample[];
+}
+
+/**
+ * Format a report with divider, timestamp, and next screening time footer.
+ */
+function formatReportWithTimestamp(report: string, scheduled = false): string {
+  const now = new Date();
+  const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+  // Calculate next screening time (validate interval with fallback to 10 min default)
+  const intervalMin = config.schedule.screeningIntervalMin ?? 10;
+  if (intervalMin <= 0) {
+    throw new Error(`Invalid screeningIntervalMin: ${config.schedule.screeningIntervalMin}`);
+  }
+  const nextScreening = new Date(now.getTime() + intervalMin * 60 * 1000);
+  const nextScreeningTime = `⏭️ Next: ${nextScreening.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][nextScreening.getMonth()]} ${nextScreening.getHours().toString().padStart(2, "0")}:${nextScreening.getMinutes().toString().padStart(2, "0")} (${scheduled ? "scheduled" : "manual"})`;
+
+  return `${report}\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp} | ${nextScreeningTime}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -218,9 +250,32 @@ async function runPreFlightChecks(silent: boolean): Promise<PreFlightData | { er
       };
     }
 
-    // Create live message if Telegram is enabled
+    // Create or update live message if Telegram is enabled
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
+      const existingMessageId = getLastScreeningMessageId();
+      if (existingMessageId) {
+        // Try to update existing message
+        liveMessage = await updateExistingLiveMessage(
+          "🔍 Screening Cycle",
+          "Scanning candidates...",
+          existingMessageId
+        );
+        if (!liveMessage) {
+          // Failed to update (message deleted or too old), create new
+          liveMessage = await createLiveMessage(
+            "🔍 Screening Cycle",
+            "Scanning candidates...",
+            "screening"
+          );
+        }
+      } else {
+        // No existing message or too old, create new
+        liveMessage = await createLiveMessage(
+          "🔍 Screening Cycle",
+          "Scanning candidates...",
+          "screening"
+        );
+      }
     }
 
     return { prePositions, preBalance, liveMessage };
@@ -583,7 +638,7 @@ export async function runScreeningCycle(
   }
 ): Promise<string | null> {
   return cycleState.getScreeningMutex().runExclusive(async () => {
-    const { silent = false } = options;
+    const { silent = false, scheduled = false } = options;
 
     // Use deps functions if provided, otherwise use cycleState
     const setBusy =
@@ -609,6 +664,32 @@ export async function runScreeningCycle(
       if ("error" in preFlightResult) {
         screenReport = preFlightResult.error;
         setBusy(false);
+        // Format with timestamp even for early returns
+        if (!silent && telegramEnabled()) {
+          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
+          // NOTE: The read → update → write pattern on message ID is safe because the
+          // screening cycle mutex (runScreening is wrapped in setBusy) ensures only one
+          // screening cycle runs at a time, preventing concurrent mutation of the ID.
+          const existingMessageId = getLastScreeningMessageId();
+          if (existingMessageId) {
+            const updated = await updateExistingLiveMessage(
+              "🔍 Screening Cycle",
+              formattedReport,
+              existingMessageId
+            );
+            if (!updated) {
+              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+              if (hasMessageId(sent)) {
+                setLastScreeningMessageId(sent.message_id);
+              }
+            }
+          } else {
+            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+            if (hasMessageId(sent)) {
+              setLastScreeningMessageId(sent.message_id);
+            }
+          }
+        }
         return screenReport;
       }
 
@@ -706,14 +787,45 @@ export async function runScreeningCycle(
       setBusy(false);
       if (!silent && telegramEnabled()) {
         if (screenReport) {
-          if (liveMessage)
+          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
+          const isDeployed = formattedReport.includes("🚀 DEPLOYED");
+
+          if (liveMessage) {
             await liveMessage
-              .finalize(stripThink(screenReport))
+              .finalize(formattedReport)
               .catch((e) => log("telegram_error", getErrorMessage(e)));
-          else
-            sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch((e) =>
-              log("telegram_error", getErrorMessage(e))
-            );
+
+            // If screening deployed successfully, clear message ID so next cycle creates fresh
+            // If screening was skipped/no deploy, keep message ID for reuse
+            if (isDeployed) {
+              setLastScreeningMessageId(null);
+            }
+          } else {
+            // No live message handler - check if we have an existing message to update.
+            // Safe from race conditions: screening cycle mutex prevents concurrent access.
+            const existingMessageId = getLastScreeningMessageId();
+            if (existingMessageId) {
+              // Try to update existing message
+              const updated = await updateExistingLiveMessage(
+                "🔍 Screening Cycle",
+                formattedReport,
+                existingMessageId
+              );
+              if (!updated) {
+                // Update failed (message deleted or too old), create new
+                const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+                if (hasMessageId(sent)) {
+                  setLastScreeningMessageId(sent.message_id);
+                }
+              }
+            } else {
+              // No existing message, create new
+              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+              if (hasMessageId(sent)) {
+                setLastScreeningMessageId(sent.message_id);
+              }
+            }
+          }
         }
       }
     }

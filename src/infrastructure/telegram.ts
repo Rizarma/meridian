@@ -125,6 +125,23 @@ export function setLastManagementMessageId(id: number | null): void {
   _lastManagementMessageTime = id ? Date.now() : 0;
 }
 
+// ─── Screening cycle message reuse ──────────────────────────────────
+let _lastScreeningMessageId: number | null = null;
+let _lastScreeningMessageTime: number = 0;
+
+export function getLastScreeningMessageId(): number | null {
+  // Check if message is too old (Telegram 48h edit limit)
+  if (Date.now() - _lastScreeningMessageTime > MESSAGE_EDIT_MAX_AGE_MS) {
+    return null;
+  }
+  return _lastScreeningMessageId;
+}
+
+export function setLastScreeningMessageId(id: number | null): void {
+  _lastScreeningMessageId = id;
+  _lastScreeningMessageTime = id ? Date.now() : 0;
+}
+
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId(): void {
   try {
@@ -429,7 +446,8 @@ function summarizeToolResult(name: string, result: ToolResult | null): string {
 
 export async function createLiveMessage(
   title: string,
-  intro = "Starting..."
+  intro = "Starting...",
+  cycleType: "management" | "screening" = "management"
 ): Promise<LiveMessageAPI | null> {
   if (!bot || !chatId) return null;
   const typing = createTypingIndicator();
@@ -460,9 +478,13 @@ export async function createLiveMessage(
     if (!state.messageId) {
       const sent = (await sendMessage(text)) as { message_id?: number } | null;
       state.messageId = sent?.message_id ?? null;
-      // Track this message ID for management cycle reuse
+      // Track this message ID for cycle reuse
       if (state.messageId) {
-        setLastManagementMessageId(state.messageId);
+        if (cycleType === "screening") {
+          setLastScreeningMessageId(state.messageId);
+        } else {
+          setLastManagementMessageId(state.messageId);
+        }
       }
       return;
     }
