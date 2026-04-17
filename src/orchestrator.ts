@@ -170,6 +170,11 @@ export function startCronJobs(): void {
   const screenTask = cron.schedule(
     `*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`,
     (): void => {
+      // Cross-protection: Screening yields to time-sensitive management
+      if (cycleState.isManagementBusy()) {
+        log("cron", "Screening skipped — management cycle running");
+        return;
+      }
       void runScreeningCycle({ scheduled: true });
     }
   );
