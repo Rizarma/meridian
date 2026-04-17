@@ -39,6 +39,7 @@ import type {
   ActionDecision,
   CycleOptions,
   EnrichedPosition,
+  ExitAction,
   LiveMessageHandler,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
@@ -257,7 +258,7 @@ export async function runManagementCycle(
     });
 
     // JS trailing TP check
-    const exitMap = new Map<string, string>();
+    const exitMap = new Map<string, ExitAction>();
     for (const p of positionData) {
       if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
         schedulePeakConfirmation(p.position);
@@ -290,8 +291,8 @@ export async function runManagementCycle(
           }
           continue;
         }
-        exitMap.set(p.position, exit.reason);
-        log("state", `Exit alert for ${p.pair}: ${exit.reason}`);
+        exitMap.set(p.position, exit);
+        log("state", `Exit alert for ${p.pair}: ${exit.action} - ${exit.reason}`);
       }
     }
 
@@ -300,11 +301,12 @@ export async function runManagementCycle(
     const actionMap = new Map<string, ActionDecision>();
     for (const p of positionData) {
       // Hard exit — highest priority
-      if (exitMap.has(p.position)) {
+      const exitAction = exitMap.get(p.position);
+      if (exitAction) {
         actionMap.set(p.position, {
           action: "CLOSE",
-          rule: "exit",
-          reason: exitMap.get(p.position),
+          rule: exitAction.action,
+          reason: exitAction.reason,
         });
         continue;
       }
@@ -376,9 +378,14 @@ export async function runManagementCycle(
       line += `→ ${statusLabel}`;
 
       if (p.instruction) line += `\n📝 "${p.instruction}"`;
-      if (act?.action === "CLOSE" && act.rule === "exit") line += `\n⚡ Trailing TP: ${act.reason}`;
-      if (act?.action === "CLOSE" && act.rule && act.rule !== "exit")
-        line += `\n📋 Rule ${act.rule}: ${act.reason}`;
+      if (act?.action === "CLOSE" && act.rule === "TRAILING_TP")
+        line += `\n⚡ Trailing TP: ${act.reason}`;
+      if (act?.action === "CLOSE" && act.rule === "STOP_LOSS")
+        line += `\n🛑 Stop Loss: ${act.reason}`;
+      if (act?.action === "CLOSE" && act.rule === "OUT_OF_RANGE")
+        line += `\n📍 Out of Range: ${act.reason}`;
+      if (act?.action === "CLOSE" && act.rule === "LOW_YIELD")
+        line += `\n📉 Low Yield: ${act.reason}`;
       if (act?.action === "CLAIM") line += `\n💵 Claiming fees...`;
       return line;
     });
@@ -422,10 +429,21 @@ export async function runManagementCycle(
       const actionBlocks = actionPositions
         .map((p) => {
           const act = actionMap.get(p.position);
+          const ruleLabel = act?.rule
+            ? act.rule === "TRAILING_TP"
+              ? `⚡ Trailing TP: ${act.reason}`
+              : act.rule === "STOP_LOSS"
+                ? `🛑 Stop Loss: ${act.reason}`
+                : act.rule === "OUT_OF_RANGE"
+                  ? `📍 Out of Range: ${act.reason}`
+                  : act.rule === "LOW_YIELD"
+                    ? `📉 Low Yield: ${act.reason}`
+                    : `Rule ${act.rule}: ${act.reason}`
+            : "";
           return [
             `POSITION: ${p.pair} (${p.position})`,
             `  pool: ${p.pool}`,
-            `  action: ${act?.action}${act?.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act?.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
+            `  action: ${act?.action}${ruleLabel ? ` — ${ruleLabel}` : ""}`,
             `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
             `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
             p.instruction ? `  instruction: "${p.instruction}"` : null,
