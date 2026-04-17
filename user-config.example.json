@@ -77,6 +77,5 @@
     "decayFactor": 0.95,
     "weightFloor": 0.5,
     "weightCeiling": 2.0
-  },
-  "telegramChatId": ""
+  }
 }
