@@ -395,6 +395,10 @@ export function initSchema(): void {
 function removePositionFkConstraints(): void {
   const db = getDb();
 
+  // Clean up any leftover _new tables from failed migrations
+  db.exec("DROP TABLE IF EXISTS position_snapshots_new");
+  db.exec("DROP TABLE IF EXISTS position_events_new");
+
   // Check if FK constraints exist by inspecting the table SQL
   const snapshotsSql = db
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='position_snapshots'")
