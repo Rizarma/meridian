@@ -163,7 +163,7 @@ export function startCronJobs(): void {
     async () => {
       if (cycleState.isManagementBusy()) return;
       cycleState.getTimers().managementLastRun = Date.now();
-      await runManagementCycle();
+      await runManagementCycle({ scheduled: true });
     }
   );
 

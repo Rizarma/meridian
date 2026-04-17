@@ -60,6 +60,34 @@ function formatDuration(minutes: number | null | undefined): string {
   return `${hours}h ${mins}m`;
 }
 
+/** Format timestamp with next management prediction */
+function formatTimestampWithNextManagement(scheduled = false): string {
+  const now = new Date();
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${months[now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+  // Calculate next management time
+  const intervalMin = config.schedule.managementIntervalMin ?? 10;
+  const nextRun = new Date(now.getTime() + intervalMin * 60 * 1000);
+  const nextTime = `${nextRun.getDate().toString().padStart(2, "0")} ${months[nextRun.getMonth()]} ${nextRun.getHours().toString().padStart(2, "0")}:${nextRun.getMinutes().toString().padStart(2, "0")}`;
+  const indicator = scheduled ? "scheduled" : "manual";
+
+  return `${timestamp} | ⏭️ Next: ${nextTime} (${indicator})`;
+}
+
 /** Format currency value with 2 decimal places */
 function formatCurrency(value: number | null | undefined, solMode: boolean): string {
   if (value == null) return "?";
@@ -172,7 +200,7 @@ export async function runManagementCycle(
     triggerManagement?: () => Promise<void>;
   }
 ): Promise<string | null> {
-  const { silent = false } = options;
+  const { silent = false, scheduled = false } = options;
   if (deps.isManagementBusy()) return null;
   deps.setManagementBusy(true);
   deps.timers.managementLastRun = Date.now();
@@ -368,8 +396,7 @@ export async function runManagementCycle(
         : "✅ All positions stable — no action needed";
 
     const cur = config.features.solMode ? "◎" : "$";
-    const now = new Date();
-    const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const timestamp = formatTimestampWithNextManagement(scheduled);
 
     // Build cleaner summary (3 lines)
     const totalValStr = formatCurrency(totalValue, config.features.solMode);
