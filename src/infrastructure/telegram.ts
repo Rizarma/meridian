@@ -515,7 +515,8 @@ export async function createLiveMessage(
   _liveMessageDepth += 1;
   try {
     await flushNow();
-  } catch {
+  } catch (e) {
+    log("telegram_warn", `Live message creation failed: ${getErrorMessage(e)}`);
     typing.stop();
     _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
     return null;
@@ -635,7 +636,8 @@ export async function updateExistingLiveMessage(
   _liveMessageDepth += 1;
   try {
     await flushNow();
-  } catch {
+  } catch (e) {
+    log("telegram_warn", `Live message update failed: ${getErrorMessage(e)}`);
     typing.stop();
     _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
     return null;
