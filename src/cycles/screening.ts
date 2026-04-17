@@ -12,8 +12,11 @@ import { cycleState } from "../infrastructure/cycle-state.js";
 import { log } from "../infrastructure/logger.js";
 import {
   createLiveMessage,
+  getLastScreeningMessageId,
   sendMessage,
+  setLastScreeningMessageId,
   isEnabled as telegramEnabled,
+  updateExistingLiveMessage,
 } from "../infrastructure/telegram.js";
 import type {
   CondensedPool,
@@ -56,6 +59,15 @@ interface CandidateFetchResult {
 interface LateFilterResult {
   passing: ReconCandidate[];
   lateFiltered: FilteredExample[];
+}
+
+/**
+ * Format a report with divider and timestamp footer (like management cycle).
+ */
+function formatReportWithTimestamp(report: string): string {
+  const now = new Date();
+  const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+  return `${report}\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -218,9 +230,32 @@ async function runPreFlightChecks(silent: boolean): Promise<PreFlightData | { er
       };
     }
 
-    // Create live message if Telegram is enabled
+    // Create or update live message if Telegram is enabled
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
+      const existingMessageId = getLastScreeningMessageId();
+      if (existingMessageId) {
+        // Try to update existing message
+        liveMessage = await updateExistingLiveMessage(
+          "🔍 Screening Cycle",
+          "Scanning candidates...",
+          existingMessageId
+        );
+        if (!liveMessage) {
+          // Failed to update (message deleted or too old), create new
+          liveMessage = await createLiveMessage(
+            "🔍 Screening Cycle",
+            "Scanning candidates...",
+            "screening"
+          );
+        }
+      } else {
+        // No existing message or too old, create new
+        liveMessage = await createLiveMessage(
+          "🔍 Screening Cycle",
+          "Scanning candidates...",
+          "screening"
+        );
+      }
     }
 
     return { prePositions, preBalance, liveMessage };
@@ -706,14 +741,20 @@ export async function runScreeningCycle(
       setBusy(false);
       if (!silent && telegramEnabled()) {
         if (screenReport) {
-          if (liveMessage)
+          const formattedReport = formatReportWithTimestamp(stripThink(screenReport));
+          if (liveMessage) {
             await liveMessage
-              .finalize(stripThink(screenReport))
+              .finalize(formattedReport)
               .catch((e) => log("telegram_error", getErrorMessage(e)));
-          else
-            sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch((e) =>
-              log("telegram_error", getErrorMessage(e))
-            );
+            // Message ID is already tracked by createLiveMessage
+            // For updateExistingLiveMessage, the ID was already known and remains valid
+          } else {
+            // Fallback: send new message and track it
+            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+            if (sent && typeof sent === "object" && "message_id" in sent) {
+              setLastScreeningMessageId((sent as { message_id: number }).message_id);
+            }
+          }
         }
       }
     }
