@@ -513,7 +513,13 @@ export async function createLiveMessage(
   }
 
   _liveMessageDepth += 1;
-  await flushNow();
+  try {
+    await flushNow();
+  } catch {
+    typing.stop();
+    _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+    return null;
+  }
 
   return {
     async toolStart(name: string): Promise<void> {
