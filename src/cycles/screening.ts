@@ -749,10 +749,28 @@ export async function runScreeningCycle(
             // Message ID is already tracked by createLiveMessage
             // For updateExistingLiveMessage, the ID was already known and remains valid
           } else {
-            // Fallback: send new message and track it
-            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
-            if (sent && typeof sent === "object" && "message_id" in sent) {
-              setLastScreeningMessageId((sent as { message_id: number }).message_id);
+            // No live message handler - check if we have an existing message to update
+            const existingMessageId = getLastScreeningMessageId();
+            if (existingMessageId) {
+              // Try to update existing message
+              const updated = await updateExistingLiveMessage(
+                "🔍 Screening Cycle",
+                formattedReport,
+                existingMessageId
+              );
+              if (!updated) {
+                // Update failed (message deleted or too old), create new
+                const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+                if (sent && typeof sent === "object" && "message_id" in sent) {
+                  setLastScreeningMessageId((sent as { message_id: number }).message_id);
+                }
+              }
+            } else {
+              // No existing message, create new
+              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
+              if (sent && typeof sent === "object" && "message_id" in sent) {
+                setLastScreeningMessageId((sent as { message_id: number }).message_id);
+              }
             }
           }
         }
