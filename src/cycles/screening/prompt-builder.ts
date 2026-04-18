@@ -39,7 +39,8 @@ export function sanitizeUntrustedPromptText(
 export function buildCandidateBlocks(scoredCandidates: ScoredCandidate[], topN: number): string[] {
   const topCandidates = scoredCandidates.slice(0, Math.min(topN, scoredCandidates.length));
 
-  return topCandidates.map(({ candidate: { pool, sw, n, ti, mem }, score, activeBin }) => {
+  return topCandidates.map(({ candidate, score, activeBin }) => {
+    const { pool, sw, n, ti, mem } = candidate;
     const tokenInfo = ti as {
       results?: Array<{
         audit?: { bot_holders_pct?: number; top_holders_pct?: number };
@@ -102,6 +103,9 @@ export function buildCandidateBlocks(scoredCandidates: ScoredCandidate[], topN: 
       mem
         ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, LIMITS.MAX_PROMPT_SANITIZE_LENGTH)}`
         : null,
+      candidate.hive_consensus != null
+        ? `  hive: ${candidate.hive_consensus.toFixed(1)}% win rate (consensus)`
+        : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -119,6 +123,7 @@ export function buildCandidateBlocks(scoredCandidates: ScoredCandidate[], topN: 
  * @param scoredCandidates - All scored candidates for ranking display
  * @param candidateBlocks - Formatted candidate blocks for top candidates
  * @param preBalanceSol - Current SOL balance for display
+ * @param hiveConsensusBlock - Optional HiveMind consensus text block (empty string when unavailable)
  * @returns Complete prompt string for the screening agent
  */
 export function buildScreeningPrompt(
@@ -127,13 +132,16 @@ export function buildScreeningPrompt(
   deployAmount: number,
   scoredCandidates: ScoredCandidate[],
   candidateBlocks: string[],
-  preBalanceSol: number
+  preBalanceSol: number,
+  hiveConsensusBlock?: string
 ): string {
+  const hiveSection = hiveConsensusBlock?.trim() ? `\n${hiveConsensusBlock}\n` : "";
+
   return `
 SCREENING CYCLE
 ${strategyBlock}
 Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${preBalanceSol.toFixed(3)} | Deploy: ${deployAmount} SOL
-
+${hiveSection}
 CANDIDATE RANKING (by weighted score from historical performance):
 ${scoredCandidates.map((s, i) => `${i + 1}. ${s.candidate.pool.name}: ${s.score}`).join("\n")}
 

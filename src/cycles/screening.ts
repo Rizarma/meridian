@@ -1,7 +1,9 @@
 import { agentLoop } from "../agent/agent.js";
 import { computeDeployAmount, config } from "../config/config.js";
 import { LLM } from "../config/constants.js";
+import { stageSignals } from "../domain/signal-tracker.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
+import { formatPoolConsensusForPrompt } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import {
   getLastScreeningMessageId,
@@ -223,6 +225,31 @@ export async function runScreeningCycle(
       // Take top N candidates for LLM evaluation (from edge-passing candidates)
       const topCandidatesForLLM = edgePassing.slice(0, Math.min(5, edgePassing.length));
 
+      // Stage signals for all edge-passing candidates (for Darwinian capture at deploy time)
+      for (const sc of edgePassing) {
+        const { pool, sw, n, hive_consensus } = sc.candidate;
+        stageSignals(pool.pool, {
+          organic_score: pool.organic_score,
+          fee_tvl_ratio: pool.fee_active_tvl_ratio ?? undefined,
+          volume: pool.volume_window ?? undefined,
+          mcap: pool.mcap ?? undefined,
+          holder_count: pool.holders,
+          smart_wallets_present:
+            (sw as { in_pool?: unknown[] } | null)?.in_pool != null &&
+            ((sw as { in_pool?: unknown[] }).in_pool?.length ?? 0) > 0
+              ? true
+              : undefined,
+          narrative_quality: (n as { narrative?: string } | null)?.narrative ?? undefined,
+          hive_consensus: hive_consensus ?? undefined,
+          volatility: pool.volatility ?? undefined,
+        });
+      }
+
+      // Obtain HiveMind consensus block for top candidate pool addresses
+      const hiveConsensusBlock = await formatPoolConsensusForPrompt(
+        topCandidatesForLLM.map((sc) => sc.candidate.pool.pool)
+      );
+
       // Build candidate blocks
       const candidateBlocks = buildCandidateBlocks(topCandidatesForLLM, 5);
 
@@ -233,7 +260,8 @@ export async function runScreeningCycle(
         deployAmount,
         edgePassing,
         candidateBlocks,
-        balance.sol
+        balance.sol,
+        hiveConsensusBlock
       );
 
       const { content } = await agentLoop(

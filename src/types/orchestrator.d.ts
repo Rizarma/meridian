@@ -46,6 +46,8 @@ export interface ReconCandidate {
   n: unknown;
   ti: unknown;
   mem: string | null;
+  /** Hive Mind weighted win rate (0-100 scale) or null when unavailable */
+  hive_consensus?: number | null;
 }
 
 /** Active bin result from promise settlement */
