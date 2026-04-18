@@ -35,6 +35,7 @@ export interface CycleState {
 
   // Mutex
   getScreeningMutex(): Mutex;
+  getManagementMutex(): Mutex;
 }
 
 export function createCycleState(): CycleState {
@@ -51,6 +52,7 @@ export function createCycleState(): CycleState {
     screeningLastRun: null,
   };
   const _screeningMutex = new Mutex();
+  const _managementMutex = new Mutex();
 
   return {
     // Cron tasks
@@ -113,6 +115,9 @@ export function createCycleState(): CycleState {
     // Mutex
     getScreeningMutex(): Mutex {
       return _screeningMutex;
+    },
+    getManagementMutex(): Mutex {
+      return _managementMutex;
     },
   };
 }
