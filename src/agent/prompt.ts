@@ -43,7 +43,7 @@ BEHAVIORAL CORE:
 2. GAS EFFICIENCY: close_position costs gas — only close for clear reasons. After close, swap_token is MANDATORY for any token worth >= $0.10 (dust < $0.10 = skip). Always check token USD value before swapping.
 3. DATA-DRIVEN AUTONOMY: You have full autonomy. Guidelines are heuristics.
 
- ${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}${sharedLessons ? `\n${sharedLessons}\n` : ""}Timestamp: ${new Date().toISOString()}
+${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}${sharedLessons ? `\n${sharedLessons}\n` : ""}Timestamp: ${new Date().toISOString()}
 `;
   }
 
@@ -79,7 +79,7 @@ ${lessons}`
 }
 ${sharedLessons ? `\n${sharedLessons}` : ""}
 
-════════════════════════════════════════════
+═══════════════════════════════════════════
  BEHAVIORAL CORE
 ═══════════════════════════════════════════
 
@@ -158,7 +158,7 @@ DEPLOY RULES:
 - Bin steps must be [80-125].
 - Pick ONE pool. Deploy or explain why none qualify.
 
- ${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}${sharedLessons ? `\n${sharedLessons}\n` : ""}Timestamp: ${new Date().toISOString()}
+${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}${sharedLessons ? `\n${sharedLessons}\n` : ""}Timestamp: ${new Date().toISOString()}
 `;
   } else {
     basePrompt += `

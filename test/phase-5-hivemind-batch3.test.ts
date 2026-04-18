@@ -243,18 +243,25 @@ describe("buildSystemPrompt — sharedLessons parameter", () => {
 // Test Suite: Advisory does not override — structural guarantee
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("Advisory integration — structural guarantees", () => {
-  test("formatThresholdConsensusForAdvisory is async and returns string type", () => {
-    // Verifies the function signature is () => Promise<string>
-    // It NEVER returns a numeric value that could be used as a threshold directly
-    const result = formatThresholdConsensusForAdvisory();
-    expect(result instanceof Promise).toBe(true);
-  });
+describeAsync("Advisory integration — structural guarantees", async () => {
+  testAsync(
+    "formatThresholdConsensusForAdvisory resolves to a plain string, not a numeric value",
+    withHiveDisabled(async () => {
+      // Verifies the function resolves to a string — never a numeric threshold
+      const result = await formatThresholdConsensusForAdvisory();
+      expect(typeof result).toBe("string");
+      expect(result).toBe("");
+    })
+  );
 
-  test("formatSharedLessonsForPrompt is async and returns string type", () => {
-    const result = formatSharedLessonsForPrompt();
-    expect(result instanceof Promise).toBe(true);
-  });
+  testAsync(
+    "formatSharedLessonsForPrompt resolves to a plain string",
+    withHiveDisabled(async () => {
+      const result = await formatSharedLessonsForPrompt();
+      expect(typeof result).toBe("string");
+      expect(result).toBe("");
+    })
+  );
 });
 
 // Run tests
