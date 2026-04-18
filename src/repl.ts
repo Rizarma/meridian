@@ -12,7 +12,7 @@ import { agentLoop } from "./agent/agent.js";
 import { colors } from "./cli/colors.js";
 import { config } from "./config/config.js";
 import { LESSONS_FILE } from "./config/paths.js";
-import { sanitizeUntrustedPromptText } from "./cycles/screening.js";
+import { sanitizeUntrustedPromptText } from "./cycles/screening/prompt-builder.js";
 import { getPerformanceSummary } from "./domain/lessons.js";
 import { evolveThresholds } from "./domain/threshold-evolution.js";
 import { generateBriefing } from "./infrastructure/briefing.js";
