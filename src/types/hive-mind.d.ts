@@ -151,3 +151,61 @@ export interface RegistrationResult {
   agent_id: string;
   api_key: string;
 }
+
+// ─── Original-Compatible Registration (Phase 1) ──────────────────────
+
+/** Capabilities declared during original-compatible registration. */
+export interface AgentCapabilities {
+  telegram: boolean;
+  lpagent: boolean;
+  dryRun: boolean;
+}
+
+/** Payload for POST /api/hivemind/agents/register */
+export interface AgentRegistrationPayload {
+  agentId: string;
+  version: string;
+  timestamp: string;
+  reason: string;
+  capabilities: AgentCapabilities;
+}
+
+/** Response from POST /api/hivemind/agents/register */
+export interface AgentRegistrationResponse {
+  agentId: string;
+  registered: boolean;
+  message?: string;
+}
+
+// ─── Push Types (Phase 1) ──────────────────────────────────────────
+
+/** Payload for pushing a single lesson to the hive. */
+export interface LessonPushPayload {
+  agentId: string;
+  lesson: {
+    rule: string;
+    tags: string[];
+    outcome: string;
+    context?: string;
+  };
+}
+
+/** Payload for pushing a performance record to the hive. */
+export interface PerformancePushPayload {
+  agentId: string;
+  performance: {
+    poolAddress: string;
+    pnlPct: number;
+    pnlUsd: number;
+    holdTimeMinutes: number;
+    closeReason: string;
+    rangeEfficiency?: number;
+    strategy?: string;
+  };
+}
+
+/** Generic push response. */
+export interface PushResponse {
+  accepted: boolean;
+  message?: string;
+}

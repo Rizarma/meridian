@@ -23,10 +23,16 @@ export {
   queryPoolConsensus,
   queryThresholdConsensus,
 } from "./consensus.js";
-// Registration & sync
+// Registration & sync (legacy + phase-1 originals)
 export {
   bootstrapSync,
+  buildLessonPayload,
+  buildPerformancePayload,
+  buildRegistrationPayload,
   heartbeat,
+  pushLesson,
+  pushPerformance,
   register,
+  registerAgent,
   syncToHive,
 } from "./sync.js";
