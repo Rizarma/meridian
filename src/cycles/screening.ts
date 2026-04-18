@@ -56,6 +56,12 @@ interface ScoredCandidate {
   activeBin: number | null;
 }
 
+/** Edge proximity filter constants */
+const EDGE_PROXIMITY = {
+  /** Minimum bins_above to ensure adequate upside buffer */
+  MIN_BINS_ABOVE: 10,
+} as const;
+
 interface PreFlightData {
   prePositions: { total_positions: number; positions?: EnrichedPosition[] };
   preBalance: { sol: number };
@@ -396,6 +402,64 @@ function applyLateFilters(candidates: ReconCandidate[]): LateFilterResult {
   });
 
   return { passing, lateFiltered };
+}
+
+/**
+ * Apply edge proximity filter to scored candidates.
+ * Prevents deploying positions where active_bin is at or near the edge
+ * of the proposed range, which leaves zero upside buffer.
+ *
+ * Rejects candidates where:
+ * - active_bin is null (can't determine position safety)
+ * - Strategy's bins_above is below the minimum threshold (insufficient upside buffer)
+ *
+ * @param scoredCandidates - Scored candidates with active_bin data
+ * @param binsAbove - Strategy's bins_above value (from active strategy config)
+ * @returns Passing candidates and filtered examples with reasons
+ */
+function applyEdgeProximityFilter(
+  scoredCandidates: ScoredCandidate[],
+  binsAbove: number
+): { passing: ScoredCandidate[]; edgeFiltered: FilteredExample[] } {
+  const edgeFiltered: FilteredExample[] = [];
+
+  const passing = scoredCandidates.filter(({ candidate, activeBin }) => {
+    const poolName = candidate.pool.name || "Unknown";
+
+    // Reject if active_bin is unavailable — can't determine position safety
+    if (activeBin == null) {
+      log(
+        "screening",
+        `Edge proximity: rejected ${poolName} — active_bin unavailable, can't verify position`
+      );
+      edgeFiltered.push({
+        pool_address: candidate.pool.pool,
+        name: poolName,
+        filter_reason: "Edge deployment risk: active_bin unavailable, can't verify position safety",
+      });
+      return false;
+    }
+
+    // Reject if strategy provides insufficient upside buffer.
+    // With bins_below >> bins_above, the position is concentrated below active_bin
+    // and any upward price movement immediately exits the range.
+    if (binsAbove < EDGE_PROXIMITY.MIN_BINS_ABOVE) {
+      log(
+        "screening",
+        `Edge proximity: rejected ${poolName} — bins_above=${binsAbove} < ${EDGE_PROXIMITY.MIN_BINS_ABOVE} (insufficient upside buffer, active_bin=${activeBin})`
+      );
+      edgeFiltered.push({
+        pool_address: candidate.pool.pool,
+        name: poolName,
+        filter_reason: `Edge deployment risk: active_bin too close to range boundary (bins_above=${binsAbove} < ${EDGE_PROXIMITY.MIN_BINS_ABOVE})`,
+      });
+      return false;
+    }
+
+    return true;
+  });
+
+  return { passing, edgeFiltered };
 }
 
 /**
@@ -740,8 +804,34 @@ export async function runScreeningCycle(
       // Score and rank candidates
       const scoredCandidates = await scoreAndRankCandidates(passing);
 
-      // Take top N candidates for LLM evaluation
-      const topCandidatesForLLM = scoredCandidates.slice(0, Math.min(5, scoredCandidates.length));
+      // Apply edge proximity filter — reject candidates at range boundary
+      const binsAbove = activeStrategy
+        ? ((activeStrategy.range as { bins_above?: number })?.bins_above ?? 0)
+        : 0;
+      const { passing: edgePassing, edgeFiltered } = applyEdgeProximityFilter(
+        scoredCandidates,
+        binsAbove
+      );
+
+      // Add edge-filtered examples to the report (highest priority — survived all prior checks)
+      if (edgeFiltered.length > 0) {
+        examplesToShow.unshift(...edgeFiltered.slice(0, 2));
+      }
+
+      if (edgePassing.length === 0) {
+        let message = "No candidates passed screening.";
+        if (examplesToShow.length > 0) {
+          message += "\n\nFiltered examples:\n";
+          for (const ex of examplesToShow.slice(0, 4)) {
+            message += `- ${ex.name} (${ex.pool_address.slice(0, 8)}...): ${ex.filter_reason}\n`;
+          }
+        }
+        screenReport = message;
+        return screenReport;
+      }
+
+      // Take top N candidates for LLM evaluation (from edge-passing candidates)
+      const topCandidatesForLLM = edgePassing.slice(0, Math.min(5, edgePassing.length));
 
       // Build candidate blocks
       const candidateBlocks = buildCandidateBlocks(topCandidatesForLLM, 5);
@@ -751,7 +841,7 @@ export async function runScreeningCycle(
         strategyBlock,
         prePositions,
         deployAmount,
-        scoredCandidates,
+        edgePassing,
         candidateBlocks
       );
 
