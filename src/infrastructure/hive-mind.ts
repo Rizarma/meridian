@@ -20,6 +20,7 @@ export {
   getHivePulse,
   heartbeat,
   isEnabled,
+  isLegacyBatchSyncEnabled,
   pushLesson,
   pushPerformance,
   queryLessonConsensus,

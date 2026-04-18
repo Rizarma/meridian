@@ -14,7 +14,7 @@ export {
 // Cache management
 export { destroyConsensusCache } from "./cache.js";
 // Config & feature flag
-export { isEnabled } from "./config.js";
+export { isEnabled, isLegacyBatchSyncEnabled } from "./config.js";
 // Raw consensus queries
 export {
   getHivePulse,
