@@ -540,30 +540,36 @@ export async function createLiveMessage(
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
       }
-      if (state.flushPromise) await state.flushPromise;
-      state.footer = finalText;
       try {
-        await flushNow();
-      } catch {
-        // Edit failed, message might be deleted - will create new next cycle
+        if (state.flushPromise) await state.flushPromise;
+        state.footer = finalText;
+        try {
+          await flushNow();
+        } catch {
+          // Edit failed, message might be deleted - will create new next cycle
+        }
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
       }
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
     },
     async fail(errorText: string): Promise<void> {
       if (state.flushTimer) {
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
       }
-      if (state.flushPromise) await state.flushPromise;
-      state.footer = `❌ ${errorText}`;
       try {
-        await flushNow();
-      } catch {
-        // Edit failed
+        if (state.flushPromise) await state.flushPromise;
+        state.footer = `❌ ${errorText}`;
+        try {
+          await flushNow();
+        } catch {
+          // Edit failed
+        }
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
       }
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
     },
   };
 }
@@ -661,30 +667,36 @@ export async function updateExistingLiveMessage(
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
       }
-      if (state.flushPromise) await state.flushPromise;
-      state.footer = finalText;
       try {
-        await flushNow();
-      } catch {
-        // Edit failed, message might be deleted - will create new next cycle
+        if (state.flushPromise) await state.flushPromise;
+        state.footer = finalText;
+        try {
+          await flushNow();
+        } catch {
+          // Edit failed, message might be deleted - will create new next cycle
+        }
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
       }
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
     },
     async fail(errorText: string): Promise<void> {
       if (state.flushTimer) {
         clearTimeout(state.flushTimer);
         state.flushTimer = null;
       }
-      if (state.flushPromise) await state.flushPromise;
-      state.footer = `❌ ${errorText}`;
       try {
-        await flushNow();
-      } catch {
-        // Edit failed
+        if (state.flushPromise) await state.flushPromise;
+        state.footer = `❌ ${errorText}`;
+        try {
+          await flushNow();
+        } catch {
+          // Edit failed
+        }
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
       }
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
     },
   };
 }
