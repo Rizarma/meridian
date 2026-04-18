@@ -4,6 +4,10 @@
  * Handles data upload (syncToHive), one-time registration,
  * bootstrap sync, periodic heartbeat, and original-compatible
  * push functions (pushLesson, pushPerformance).
+ *
+ * Phase 4: Legacy functions (syncToHive, bootstrapSync, register, getHivePulse)
+ * are soft-deprecated with JSDoc and one-time runtime warnings.
+ * Path telemetry records usage of legacy batch sync and registration paths.
  */
 
 import { listLessons } from "../../domain/lessons.js";
@@ -26,8 +30,10 @@ import {
   isLegacyBatchSyncEnabled,
   POST_TIMEOUT_MS,
   readConfig,
+  recordPathUsage,
   SYNC_DEBOUNCE_MS,
   setLastSyncTime,
+  warnDeprecation,
 } from "./config.js";
 import { getHivePulse } from "./consensus.js";
 
@@ -219,8 +225,13 @@ export async function pushPerformance(params: {
  *
  * @legacy This uses the legacy /api/register endpoint and Authorization: Bearer header.
  *         For new code, prefer registerAgent() which uses the original-compatible contract.
+ * @deprecated Phase 4: Legacy registration path. Prefer registerAgent() for new code.
+ *             This function is preserved for backward compatibility.
  */
 export async function register(url: string, registrationToken: string): Promise<string> {
+  warnDeprecation("register");
+  recordPathUsage("legacy_register");
+
   if (!registrationToken) {
     throw new Error("Registration token required. Get it from the hive operator.");
   }
@@ -277,14 +288,22 @@ export async function register(url: string, registrationToken: string): Promise<
  * to prevent duplicate sends. Event-driven pushes (pushLesson,
  * pushPerformance) deliver the same data in real time. Set
  * HIVE_MIND_LEGACY_BATCH_SYNC=true in .env to re-enable.
+ *
+ * @deprecated Phase 4: Legacy batch sync path. Prefer event-driven pushes
+ *             (pushLesson, pushPerformance). This function is preserved for
+ *             backward compatibility and is a no-op by default.
  */
 export async function syncToHive(): Promise<void> {
   try {
+    warnDeprecation("syncToHive");
+
     // Phase 2 guard: skip legacy batch sync when event-driven pushes
     // are active (the default). Prevents duplicate sends.
     if (!isLegacyBatchSyncEnabled()) {
       return;
     }
+
+    recordPathUsage("legacy_batch_sync");
 
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return;
@@ -382,8 +401,12 @@ export async function syncToHive(): Promise<void> {
  * Safe to call at app startup; failure does not block or crash the app.
  *
  * Note: No-ops when HIVE_MIND_LEGACY_BATCH_SYNC is not set (Phase 2 default).
+ *
+ * @deprecated Phase 4: Legacy bootstrap sync. Prefer event-driven pushes.
+ *             This function is preserved for backward compatibility.
  */
 export function bootstrapSync(): void {
+  warnDeprecation("bootstrapSync");
   if (!isEnabled()) return;
   if (!isLegacyBatchSyncEnabled()) {
     console.log(
@@ -394,6 +417,7 @@ export function bootstrapSync(): void {
   }
 
   console.log("[hive]", "Bootstrap sync starting (non-blocking)...");
+  recordPathUsage("legacy_batch_sync");
   syncToHive().catch((e) => {
     console.log("[hive]", `Bootstrap sync failed (non-fatal): ${getErrorMessage(e)}`);
   });

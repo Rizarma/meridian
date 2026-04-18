@@ -1,4 +1,11 @@
 import { getSharedConnection } from "../infrastructure/connection.js";
+import {
+  getActivePathsSummary,
+  getPathTelemetry,
+  isEnabled as isHiveMindEnabled,
+  isLegacyBatchSyncEnabled,
+  isStrictCompatEnabled,
+} from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import { getWallet } from "../utils/wallet.js";
 import { getErrorMessage } from "./errors.js";
@@ -11,6 +18,14 @@ export interface HealthStatus {
     jupiter: { healthy: boolean; latencyMs: number; error?: string };
     helius: { healthy: boolean; latencyMs: number; error?: string };
     datapi: { healthy: boolean; latencyMs: number; error?: string };
+  };
+  hiveMind: {
+    enabled: boolean;
+    strictCompat: boolean;
+    legacyBatchSync: boolean;
+    configured: boolean;
+    activePaths: string[];
+    pathTelemetry: Record<string, { lastUsed: number; useCount: number }>;
   };
   lastActivity: number; // timestamp
   uptimeSeconds: number;
@@ -99,6 +114,25 @@ async function checkApi(
 }
 
 /**
+ * Build HiveMind status info for health check output.
+ * Phase 4: Reports configuration + path telemetry without pretending
+ * server capabilities exist. All info is locally derived.
+ */
+function buildHiveMindStatus(): HealthStatus["hiveMind"] {
+  const enabled = isHiveMindEnabled();
+  const configured = Boolean(process.env.HIVE_MIND_URL && process.env.HIVE_MIND_API_KEY);
+
+  return {
+    enabled,
+    strictCompat: isStrictCompatEnabled(),
+    legacyBatchSync: isLegacyBatchSyncEnabled(),
+    configured,
+    activePaths: enabled ? getActivePathsSummary() : [],
+    pathTelemetry: enabled ? getPathTelemetry() : {},
+  };
+}
+
+/**
  * Run full health check
  */
 export async function runHealthCheck(): Promise<HealthStatus> {
@@ -127,6 +161,7 @@ export async function runHealthCheck(): Promise<HealthStatus> {
       helius,
       datapi,
     },
+    hiveMind: buildHiveMindStatus(),
     lastActivity: _lastActivity,
     uptimeSeconds: Math.floor((Date.now() - _startTime) / 1000),
   };
@@ -160,7 +195,37 @@ export function formatHealthStatus(status: HealthStatus): string {
     `  Jupiter: ${status.checks.jupiter.healthy ? "✅" : "❌"} ${status.checks.jupiter.latencyMs}ms`,
     `  Helius: ${status.checks.helius.healthy ? "✅" : "❌"} ${status.checks.helius.latencyMs}ms`,
     `  Datapi: ${status.checks.datapi.healthy ? "✅" : "❌"} ${status.checks.datapi.latencyMs}ms`,
+    "",
+    "HiveMind:",
+    `  Enabled: ${status.hiveMind.enabled ? "✅" : "❌"}`,
+    `  Configured: ${status.hiveMind.configured ? "✅" : "❌"}`,
+    `  Strict Compat: ${status.hiveMind.strictCompat ? "ON" : "off (default)"}`,
+    `  Legacy Batch Sync: ${status.hiveMind.legacyBatchSync ? "ON" : "off (default)"}`,
   ];
 
+  if (status.hiveMind.activePaths.length > 0) {
+    lines.push(`  Active Paths: ${status.hiveMind.activePaths.join(", ")}`);
+  } else if (status.hiveMind.enabled) {
+    lines.push("  Active Paths: (none yet this session)");
+  } else {
+    lines.push("  Active Paths: (disabled)");
+  }
+
   return lines.join("\n");
+}
+
+/**
+ * Get a concise HiveMind-only status summary.
+ * Useful for quick diagnostics without running a full health check.
+ * Phase 4: Provides configuration + path telemetry at a glance.
+ */
+export function getHiveMindStatus(): {
+  enabled: boolean;
+  configured: boolean;
+  strictCompat: boolean;
+  legacyBatchSync: boolean;
+  activePaths: string[];
+  pathTelemetry: Record<string, { lastUsed: number; useCount: number }>;
+} {
+  return buildHiveMindStatus();
 }

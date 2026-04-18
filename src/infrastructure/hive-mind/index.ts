@@ -3,6 +3,8 @@
  *
  * All consumer imports resolve through this file (or through the
  * backward-compatible `../hive-mind.js` shim).
+ *
+ * Phase 4: Added strict compat flag, path telemetry, and deprecation helpers.
  */
 
 // Prompt adapters (Phase 3: lessons + threshold now use pull endpoints)
@@ -13,8 +15,17 @@ export {
 } from "./adapters.js";
 // Cache management
 export { destroyConsensusCache } from "./cache.js";
-// Config & feature flag
-export { isEnabled, isLegacyBatchSyncEnabled } from "./config.js";
+// Config & feature flag (Phase 4: added strict compat + telemetry + deprecation)
+export {
+  getActivePathsSummary,
+  getPathTelemetry,
+  isEnabled,
+  isLegacyBatchSyncEnabled,
+  isStrictCompatEnabled,
+  recordPathUsage,
+  resetDeprecationWarnings,
+  resetPathTelemetry,
+} from "./config.js";
 // Raw consensus queries (legacy, preserved for backward compat)
 export {
   getHivePulse,
