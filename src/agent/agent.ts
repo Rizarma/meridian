@@ -12,6 +12,7 @@ import { getWalletBalances } from "../../tools/wallet.js";
 import { config } from "../config/config.js";
 import { FALLBACK_MODELS, MAX_REACT_STEPS, RETRY, TIME, TIMEOUT } from "../config/constants.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "../domain/lessons.js";
+import { formatSharedLessonsForPrompt } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import { getStateSummary } from "../infrastructure/state.js";
 import type {
@@ -150,14 +151,17 @@ export async function agentLoop(
   const stateSummary = getStateSummary();
   const lessons = getLessonsForPrompt({ agentType });
   const perfSummary = getPerformanceSummary();
-  const systemPrompt = buildSystemPrompt(
+  // Fetch shared hive lessons — fail-open, returns "" if disabled or error
+  const sharedLessons = await formatSharedLessonsForPrompt();
+  const systemPrompt = buildSystemPrompt({
     agentType,
     portfolio,
     positions,
     stateSummary,
     lessons,
-    perfSummary
-  );
+    perfSummary,
+    sharedLessons: sharedLessons || null,
+  });
 
   let providerMode: ProviderMode = "system";
   let messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
