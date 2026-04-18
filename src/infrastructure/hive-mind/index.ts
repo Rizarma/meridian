@@ -5,7 +5,7 @@
  * backward-compatible `../hive-mind.js` shim).
  */
 
-// Prompt adapters
+// Prompt adapters (Phase 3: lessons + threshold now use pull endpoints)
 export {
   formatPoolConsensusForPrompt,
   formatSharedLessonsForPrompt,
@@ -15,7 +15,7 @@ export {
 export { destroyConsensusCache } from "./cache.js";
 // Config & feature flag
 export { isEnabled, isLegacyBatchSyncEnabled } from "./config.js";
-// Raw consensus queries
+// Raw consensus queries (legacy, preserved for backward compat)
 export {
   getHivePulse,
   queryLessonConsensus,
@@ -23,6 +23,13 @@ export {
   queryPoolConsensus,
   queryThresholdConsensus,
 } from "./consensus.js";
+// Pull endpoints (Phase 3 — original-compatible read functions)
+export {
+  normalisePulledLesson,
+  normalisePulledLessons,
+  pullLessons,
+  pullPresets,
+} from "./pull.js";
 // Registration & sync (legacy + phase-1 originals)
 export {
   bootstrapSync,

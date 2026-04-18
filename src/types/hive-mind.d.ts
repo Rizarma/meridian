@@ -215,3 +215,57 @@ export interface PushResponse {
   accepted: boolean;
   message?: string;
 }
+
+// ─── Pull Types (Phase 3) ────────────────────────────────────────────
+
+/**
+ * A single pulled lesson from the hive, normalised from original JS fields:
+ *   id | lessonId, rule, tags, role, outcome, sourceType | source, score, created_at | createdAt
+ *
+ * All fields are optional to handle server schema variation safely.
+ * Consumers must validate before relying on any field.
+ */
+export interface PulledLesson {
+  /** Normalised id (from `id` or `lessonId`). */
+  id?: string;
+  /** The lesson rule text. */
+  rule: string;
+  /** Tags associated with this lesson. */
+  tags?: string[];
+  /** Role context (e.g. "screener", "manager"). */
+  role?: string;
+  /** Outcome that produced this lesson (e.g. "positive", "negative"). */
+  outcome?: string;
+  /** Source type (from `sourceType` or `source`). */
+  sourceType?: string;
+  /** Numeric score / relevance. */
+  score?: number;
+  /** Creation timestamp (from `created_at` or `createdAt`). */
+  createdAt?: string;
+}
+
+/**
+ * Response payload from GET /api/hivemind/lessons/pull.
+ * The original client expects `.lessons` under `payload`.
+ */
+export interface PullLessonsResponse {
+  lessons?: PulledLesson[];
+}
+
+/**
+ * A single pulled preset item from the hive.
+ * The schema is intentionally permissive — we only use fields that
+ * clearly exist in the original client usage pattern. If the shape
+ * is ambiguous, the adapter returns empty string rather than inventing meaning.
+ */
+export interface PulledPreset {
+  [key: string]: unknown;
+}
+
+/**
+ * Response payload from GET /api/hivemind/presets/pull.
+ * The original client expects `.presets` under `payload`.
+ */
+export interface PullPresetsResponse {
+  presets?: PulledPreset[];
+}
