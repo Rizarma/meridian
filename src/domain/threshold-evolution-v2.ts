@@ -18,7 +18,7 @@ import {
   rejectSuggestion,
   saveSuggestion,
 } from "../infrastructure/db-threshold-evolution.js";
-import { syncToHive } from "../infrastructure/hive-mind.js";
+import { formatThresholdConsensusForAdvisory, syncToHive } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import type { PerformanceRecord, PositionPerformance } from "../types/lessons.js";
 import { getErrorMessage } from "../utils/errors.js";
@@ -45,7 +45,8 @@ initThresholdEvolutionTables();
  * 2. Every 5 positions: Analyze & generate suggestions (pure) ✅
  * 3. Save suggestions to DB (pending approval) ✅
  * 4. Trigger Darwinian weight recalculation ✅
- * 5. Sync to hive mind ✅
+ * 5. Fetch HiveMind threshold advisory (advisory context) ✅
+ * 6. Sync to hive mind ✅
  *
  * Note: Threshold changes are NOT applied automatically. They require
  * manual approval via CLI or admin interface.
@@ -74,7 +75,15 @@ export async function runThresholdEvolution(
 
   // 2. Every N positions: Analyze and generate suggestions
   if (performanceHistory.length % MIN_EVOLVE_POSITIONS === 0) {
-    const result = generateAndSaveSuggestions(performanceHistory);
+    // 5. Fetch hive threshold advisory as supplementary context (fire-and-forget, fail-open)
+    let hiveAdvisory = "";
+    try {
+      hiveAdvisory = await formatThresholdConsensusForAdvisory();
+    } catch {
+      // Advisory fetch is non-critical — proceed without it
+    }
+
+    const result = await generateAndSaveSuggestions(performanceHistory, hiveAdvisory);
 
     if (result.suggestions.length > 0) {
       log(
@@ -92,7 +101,7 @@ export async function runThresholdEvolution(
     }
   }
 
-  // 4. Fire-and-forget sync to hive mind
+  // 6. Fire-and-forget sync to hive mind
   syncToHive().catch((e: unknown) => log("hive_error", getErrorMessage(e)));
 
   // Cleanup old suggestions periodically
@@ -101,10 +110,13 @@ export async function runThresholdEvolution(
 
 // ─── Suggestion Generation ──────────────────────────────────────────
 
-function generateAndSaveSuggestions(performanceHistory: PerformanceRecord[]): {
+async function generateAndSaveSuggestions(
+  performanceHistory: PerformanceRecord[],
+  hiveAdvisory = ""
+): Promise<{
   suggestions: AnalysisSuggestion[];
   analysis: ReturnType<typeof analyzeThresholdEvolution>["analysis"];
-} {
+}> {
   const currentConfig = {
     maxVolatility: config.screening.maxVolatility ?? 10,
     minFeeActiveTvlRatio: config.screening.minFeeActiveTvlRatio ?? 0.5,
@@ -115,13 +127,18 @@ function generateAndSaveSuggestions(performanceHistory: PerformanceRecord[]): {
   const { suggestions, analysis } = analyzeThresholdEvolution(performanceHistory, currentConfig);
 
   // Save suggestions to DB (still side effect, but isolated and auditable)
+  // If hive advisory is available, append it to the rationale as context
   for (const suggestion of suggestions) {
+    const rationale = hiveAdvisory
+      ? `${suggestion.rationale} [Hive advisory: ${hiveAdvisory.replace(/\n/g, " ")}]`
+      : suggestion.rationale;
+
     saveSuggestion({
       field: suggestion.field,
       currentValue: suggestion.currentValue,
       suggestedValue: suggestion.suggestedValue,
       confidence: suggestion.confidence,
-      rationale: suggestion.rationale,
+      rationale,
       sampleSize: suggestion.stats.totalSample,
       winnerCount: suggestion.stats.winnerCount,
       loserCount: suggestion.stats.loserCount,
