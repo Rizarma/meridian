@@ -10,6 +10,12 @@ export interface HiveMindConfig {
   hiveMindUrl?: string; // From process.env.HIVE_MIND_URL only
   hiveMindApiKey?: string; // From process.env.HIVE_MIND_API_KEY only
   hiveMindAgentId?: string; // From process.env.HIVE_MIND_AGENT_ID only
+  // Phase 2 migration guard: set HIVE_MIND_LEGACY_BATCH_SYNC=true to
+  // re-enable the legacy batch syncToHive() path. Defaults to false
+  // because event-driven pushes (pushLesson/pushPerformance) now cover
+  // the same data in real time, making batch sync redundant and creating
+  // duplicate sends if left active.
+  hiveMindLegacyBatchSync?: boolean; // From process.env.HIVE_MIND_LEGACY_BATCH_SYNC
   displayName?: string;
   // Screening thresholds (copied from config for sync)
   minFeeActiveTvlRatio?: number;

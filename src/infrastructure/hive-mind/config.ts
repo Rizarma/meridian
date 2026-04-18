@@ -52,6 +52,7 @@ export function readConfig(): HiveMindConfig {
     hiveMindUrl: process.env.HIVE_MIND_URL || "",
     hiveMindApiKey: process.env.HIVE_MIND_API_KEY || "",
     hiveMindAgentId: process.env.HIVE_MIND_AGENT_ID || "",
+    hiveMindLegacyBatchSync: process.env.HIVE_MIND_LEGACY_BATCH_SYNC === "true",
   };
 }
 
@@ -62,4 +63,20 @@ export function isEnabled(): boolean {
   if (!config.features.hiveMind) return false;
   const cfg = readConfig();
   return Boolean(cfg.hiveMindUrl && cfg.hiveMindApiKey);
+}
+
+/**
+ * Check whether legacy batch syncToHive() is explicitly enabled.
+ *
+ * Phase 2 migration guard — defaults to false because event-driven
+ * pushes (pushLesson/pushPerformance) now deliver the same data in
+ * real time. Set HIVE_MIND_LEGACY_BATCH_SYNC=true in .env to
+ * re-enable the batch path (e.g. for rollback or dual-write testing).
+ *
+ * When false, syncToHive() returns immediately (no-op). This prevents
+ * duplicate sends between event-driven pushes and the legacy batch path.
+ */
+export function isLegacyBatchSyncEnabled(): boolean {
+  const cfg = readConfig();
+  return cfg.hiveMindLegacyBatchSync === true;
 }

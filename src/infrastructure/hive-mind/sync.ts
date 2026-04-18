@@ -23,6 +23,7 @@ import { fetchWithTimeout, hivePost } from "./client.js";
 import {
   _lastSyncTime,
   isEnabled,
+  isLegacyBatchSyncEnabled,
   POST_TIMEOUT_MS,
   readConfig,
   SYNC_DEBOUNCE_MS,
@@ -271,9 +272,20 @@ export async function register(url: string, registrationToken: string): Promise<
 /**
  * Batch-upload local data to the hive mind server.
  * Debounced (5 min), fire-and-forget, never throws.
+ *
+ * Phase 2 migration guard: this function is now DISABLED by default
+ * to prevent duplicate sends. Event-driven pushes (pushLesson,
+ * pushPerformance) deliver the same data in real time. Set
+ * HIVE_MIND_LEGACY_BATCH_SYNC=true in .env to re-enable.
  */
 export async function syncToHive(): Promise<void> {
   try {
+    // Phase 2 guard: skip legacy batch sync when event-driven pushes
+    // are active (the default). Prevents duplicate sends.
+    if (!isLegacyBatchSyncEnabled()) {
+      return;
+    }
+
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return;
 
@@ -368,9 +380,18 @@ export async function syncToHive(): Promise<void> {
  * Fires a sync in the background without awaiting it.
  * Never throws — errors are caught and logged internally.
  * Safe to call at app startup; failure does not block or crash the app.
+ *
+ * Note: No-ops when HIVE_MIND_LEGACY_BATCH_SYNC is not set (Phase 2 default).
  */
 export function bootstrapSync(): void {
   if (!isEnabled()) return;
+  if (!isLegacyBatchSyncEnabled()) {
+    console.log(
+      "[hive]",
+      "Bootstrap sync skipped — legacy batch disabled (event-driven pushes active)"
+    );
+    return;
+  }
 
   console.log("[hive]", "Bootstrap sync starting (non-blocking)...");
   syncToHive().catch((e) => {
@@ -381,12 +402,18 @@ export function bootstrapSync(): void {
 /**
  * Periodic heartbeat — syncs local data to the hive and logs pulse status.
  * Called from cron on a regular interval. Never throws.
+ *
+ * Phase 2: only runs batch sync when HIVE_MIND_LEGACY_BATCH_SYNC=true.
+ * Pulse check always runs (independent of legacy batch setting).
  */
 export async function heartbeat(): Promise<void> {
   if (!isEnabled()) return;
 
   try {
-    await syncToHive();
+    // Only run legacy batch sync when explicitly enabled
+    if (isLegacyBatchSyncEnabled()) {
+      await syncToHive();
+    }
 
     const pulse = await getHivePulse();
     if (pulse) {
