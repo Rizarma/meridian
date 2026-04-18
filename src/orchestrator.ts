@@ -5,6 +5,7 @@ import { config } from "./config/config.js";
 import { TIMEOUT } from "./config/constants.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
+import { bootstrapSync } from "./infrastructure/hive-mind.js";
 import { log } from "./infrastructure/logger.js";
 // Orchestrator submodules
 import { maybeRunMissedBriefing } from "./orchestrator/briefing.js";
@@ -100,6 +101,9 @@ export async function start(): Promise<void> {
     // Small delay so user can see the warning
     await new Promise((resolve) => setTimeout(resolve, TIMEOUT.STARTUP_WARN_MS));
   }
+
+  // Hive Mind bootstrap sync — non-blocking, fail-open
+  bootstrapSync();
 
   // Start REPL or non-TTY mode
   const isTTY = process.stdin.isTTY;
