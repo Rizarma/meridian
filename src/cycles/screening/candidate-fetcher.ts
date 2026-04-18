@@ -6,6 +6,10 @@ import { config } from "../../config/config.js";
 import { SCREENING } from "../../config/constants.js";
 import { recallForPool } from "../../domain/pool-memory.js";
 import { checkSmartWalletsOnPool } from "../../domain/smart-wallets.js";
+import {
+  isEnabled as isHiveMindEnabled,
+  queryPoolConsensus,
+} from "../../infrastructure/hive-mind.js";
 import { log } from "../../infrastructure/logger.js";
 import {
   createLiveMessage,
@@ -163,6 +167,23 @@ export async function fetchAndEnrichCandidates(limit: number): Promise<Candidate
   };
 
   const candidates = initialCandidates ?? [];
+  // Pre-fetch HiveMind consensus for all candidates in parallel (fail-open)
+  const hiveEnabled = isHiveMindEnabled();
+  const hiveConsensusMap = new Map<string, number | null>();
+  if (hiveEnabled) {
+    const hiveResults = await Promise.allSettled(
+      candidates.map(async (pool) => {
+        const data = await queryPoolConsensus(pool.pool);
+        return { addr: pool.pool, winRate: data?.weighted_win_rate ?? null };
+      })
+    );
+    for (const r of hiveResults) {
+      if (r.status === "fulfilled") {
+        hiveConsensusMap.set(r.value.addr, r.value.winRate);
+      }
+    }
+  }
+
   const enrichedCandidates: ReconCandidate[] = [];
 
   // Enrich each candidate with additional data
@@ -180,6 +201,7 @@ export async function fetchAndEnrichCandidates(limit: number): Promise<Candidate
       n: narrative.status === "fulfilled" ? narrative.value : null,
       ti: tokenInfo.status === "fulfilled" ? tokenInfo.value : null,
       mem: recallForPool(pool.pool),
+      hive_consensus: hiveConsensusMap.get(pool.pool) ?? null,
     });
 
     // Small delay to avoid rate limiting
