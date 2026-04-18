@@ -87,6 +87,17 @@ export function evaluateExitConditions(
   const trailingExit = evaluateTrailingTP(position, currentPnlPct, pnl_pct_suspicious, mgmtConfig);
   if (trailingExit) return trailingExit;
 
+  // ── Emergency OOR stop loss ─────────────────────────────────────
+  // Close immediately if OOR and PnL has already dropped to 50% of the stop loss threshold.
+  // This prevents scenarios where waiting for the full OOR timeout allows further losses.
+  if (shouldEmergencyOORStopLoss(position, currentPnlPct, pnl_pct_suspicious, mgmtConfig)) {
+    const emergencyThreshold = (mgmtConfig.stopLossPct ?? -0.05) * 0.5;
+    return {
+      action: "STOP_LOSS",
+      reason: `Emergency OOR stop loss: PnL ${currentPnlPct?.toFixed(2)}% while OOR (threshold: ${(emergencyThreshold * 100).toFixed(1)}%)`,
+    };
+  }
+
   // ── Out of range too long ──────────────────────────────────────
   if (shouldCloseOOR(position, mgmtConfig)) {
     const minutesOOR = calculateMinutesOOR(position);
@@ -208,6 +219,29 @@ export function shouldCloseOOR(position: TrackedPosition, config: ManagementConf
   if (!position.out_of_range_since) return false;
   const minutesOOR = calculateMinutesOOR(position);
   return greaterThanOrEqual(minutesOOR, config.outOfRangeWaitMinutes ?? 30);
+}
+
+/**
+ * Check if emergency OOR stop loss should trigger.
+ * Closes immediately when position is OOR and PnL has already deteriorated
+ * to 50% of the normal stop loss threshold, preventing further losses while
+ * waiting for the full OOR timeout.
+ */
+export function shouldEmergencyOORStopLoss(
+  position: TrackedPosition,
+  pnlPct: number | null | undefined,
+  pnlSuspicious: boolean | undefined,
+  config: ManagementConfig
+): boolean {
+  // Must be currently out of range
+  if (!position.out_of_range_since) return false;
+  // PnL data must be available and reliable
+  if (pnlSuspicious) return false;
+  if (pnlPct == null) return false;
+  if (config.stopLossPct == null) return false;
+  // Emergency threshold is 50% of the normal stop loss (e.g. -8% → -4%)
+  const emergencyThreshold = config.stopLossPct * 0.5;
+  return lessThanOrEqual(pnlPct, emergencyThreshold);
 }
 
 /**
