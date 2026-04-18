@@ -1,12 +1,25 @@
 /**
  * Hive Mind — sync, registration, and heartbeat.
+ *
+ * Handles data upload (syncToHive), one-time registration,
+ * bootstrap sync, periodic heartbeat, and original-compatible
+ * push functions (pushLesson, pushPerformance).
  */
 
 import { listLessons } from "../../domain/lessons.js";
 import { getAllPoolDeploys } from "../../domain/pool-memory.js";
-import type { RegistrationResult, SyncPayload, SyncResult } from "../../types/hive-mind.js";
+import type {
+  AgentRegistrationPayload,
+  AgentRegistrationResponse,
+  LessonPushPayload,
+  PerformancePushPayload,
+  PushResponse,
+  RegistrationResult,
+  SyncPayload,
+  SyncResult,
+} from "../../types/hive-mind.js";
 import { getErrorMessage } from "../../utils/errors.js";
-import { fetchWithTimeout } from "./client.js";
+import { fetchWithTimeout, hivePost } from "./client.js";
 import {
   _lastSyncTime,
   isEnabled,
@@ -17,12 +30,194 @@ import {
 } from "./config.js";
 import { getHivePulse } from "./consensus.js";
 
+// ─── Original-Compatible Payload Builders ──────────────────────────
+
+/**
+ * Build an AgentRegistrationPayload matching the original JS contract.
+ */
+export function buildRegistrationPayload(params: {
+  agentId: string;
+  version: string;
+  reason: string;
+  capabilities: { telegram?: boolean; lpagent?: boolean; dryRun?: boolean };
+}): AgentRegistrationPayload {
+  return {
+    agentId: params.agentId,
+    version: params.version,
+    timestamp: new Date().toISOString(),
+    reason: params.reason,
+    capabilities: {
+      telegram: Boolean(params.capabilities.telegram),
+      lpagent: Boolean(params.capabilities.lpagent),
+      dryRun: Boolean(params.capabilities.dryRun),
+    },
+  };
+}
+
+/**
+ * Build a LessonPushPayload for a single lesson.
+ */
+export function buildLessonPayload(params: {
+  agentId: string;
+  rule: string;
+  tags: string[];
+  outcome: string;
+  context?: string;
+}): LessonPushPayload {
+  return {
+    agentId: params.agentId,
+    lesson: {
+      rule: params.rule,
+      tags: params.tags,
+      outcome: params.outcome,
+      context: params.context,
+    },
+  };
+}
+
+/**
+ * Build a PerformancePushPayload for a closed-position record.
+ */
+export function buildPerformancePayload(params: {
+  agentId: string;
+  poolAddress: string;
+  pnlPct: number;
+  pnlUsd: number;
+  holdTimeMinutes: number;
+  closeReason: string;
+  rangeEfficiency?: number;
+  strategy?: string;
+}): PerformancePushPayload {
+  return {
+    agentId: params.agentId,
+    performance: {
+      poolAddress: params.poolAddress,
+      pnlPct: params.pnlPct,
+      pnlUsd: params.pnlUsd,
+      holdTimeMinutes: params.holdTimeMinutes,
+      closeReason: params.closeReason,
+      rangeEfficiency: params.rangeEfficiency,
+      strategy: params.strategy,
+    },
+  };
+}
+
+// ─── Original-Compatible Registration ──────────────────────────────
+
+/**
+ * Register with the Hive Mind server using the original-compatible
+ * endpoint: POST /api/hivemind/agents/register
+ *
+ * This is the Phase 1 registration path aligned to the original JS contract.
+ * The legacy `register()` function is preserved for backward compatibility.
+ *
+ * Fail-open: returns null on any error instead of throwing.
+ */
+export async function registerAgent(params: {
+  agentId: string;
+  version: string;
+  reason: string;
+  capabilities: { telegram?: boolean; lpagent?: boolean; dryRun?: boolean };
+}): Promise<AgentRegistrationResponse | null> {
+  try {
+    const cfg = readConfig();
+    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+
+    const payload = buildRegistrationPayload(params);
+    const url = `${cfg.hiveMindUrl.replace(/\/+$/, "")}/api/hivemind/agents/register`;
+
+    console.log("[hive]", `Registering agent "${params.agentId}" v${params.version}...`);
+
+    const result = await hivePost<AgentRegistrationResponse>(
+      url,
+      cfg.hiveMindApiKey,
+      payload,
+      POST_TIMEOUT_MS
+    );
+
+    if (result) {
+      console.log(
+        "[hive]",
+        `Registration ${result.registered ? "confirmed" : "pending"} for agent ${result.agentId}`
+      );
+    }
+    return result;
+  } catch (e) {
+    console.log("[hive]", `registerAgent error (non-fatal): ${getErrorMessage(e)}`);
+    return null;
+  }
+}
+
+// ─── Original-Compatible Push Functions ────────────────────────────
+
+/**
+ * Push a single lesson to the Hive Mind server.
+ *
+ * Fail-open: logs and returns null on any error.
+ * Does NOT replace the legacy syncToHive batch path in Phase 1.
+ */
+export async function pushLesson(params: {
+  agentId: string;
+  rule: string;
+  tags: string[];
+  outcome: string;
+  context?: string;
+}): Promise<PushResponse | null> {
+  try {
+    const cfg = readConfig();
+    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+
+    const payload = buildLessonPayload(params);
+    const url = `${cfg.hiveMindUrl.replace(/\/+$/, "")}/api/hivemind/lessons`;
+
+    return await hivePost<PushResponse>(url, cfg.hiveMindApiKey, payload, POST_TIMEOUT_MS);
+  } catch (e) {
+    console.log("[hive]", `pushLesson error (non-fatal): ${getErrorMessage(e)}`);
+    return null;
+  }
+}
+
+/**
+ * Push a performance record to the Hive Mind server.
+ *
+ * Fail-open: logs and returns null on any error.
+ * Does NOT replace the legacy syncToHive batch path in Phase 1.
+ */
+export async function pushPerformance(params: {
+  agentId: string;
+  poolAddress: string;
+  pnlPct: number;
+  pnlUsd: number;
+  holdTimeMinutes: number;
+  closeReason: string;
+  rangeEfficiency?: number;
+  strategy?: string;
+}): Promise<PushResponse | null> {
+  try {
+    const cfg = readConfig();
+    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+
+    const payload = buildPerformancePayload(params);
+    const url = `${cfg.hiveMindUrl.replace(/\/+$/, "")}/api/hivemind/performance`;
+
+    return await hivePost<PushResponse>(url, cfg.hiveMindApiKey, payload, POST_TIMEOUT_MS);
+  } catch (e) {
+    console.log("[hive]", `pushPerformance error (non-fatal): ${getErrorMessage(e)}`);
+    return null;
+  }
+}
+
+// ─── Legacy Registration (preserved for backward compatibility) ────
+
 /**
  * One-time registration with a Hive Mind server.
  * IMPORTANT: You must manually add HIVE_MIND_URL, HIVE_MIND_API_KEY, and HIVE_MIND_AGENT_ID to your .env file.
  * @param url - Base URL of the hive server (e.g. "https://hive.example.com")
  * @param registrationToken - Token provided by the hive operator
  * @returns The raw API key (shown once, save it to .env!)
+ *
+ * @legacy This uses the legacy /api/register endpoint and Authorization: Bearer header.
+ *         For new code, prefer registerAgent() which uses the original-compatible contract.
  */
 export async function register(url: string, registrationToken: string): Promise<string> {
   if (!registrationToken) {
@@ -70,6 +265,8 @@ export async function register(url: string, registrationToken: string): Promise<
 
   return api_key;
 }
+
+// ─── Legacy Sync (preserved for backward compatibility) ────────
 
 /**
  * Batch-upload local data to the hive mind server.
