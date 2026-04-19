@@ -189,7 +189,8 @@ Summarize the current portfolio health, total fees earned, and performance of al
               p.position,
               p,
               config.management,
-              trackedP?.strategy_config
+              trackedP?.strategy_config,
+              trackedP
             );
             if (exit) {
               // Trailing TP needs confirmation - queue it and continue polling

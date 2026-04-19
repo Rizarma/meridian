@@ -926,10 +926,11 @@ export function updatePnlAndCheckExits(
   position_address: string,
   positionData: PositionData,
   mgmtConfig: ManagementConfig,
-  strategyConfig?: import("../types/strategy.js").Strategy | null
+  strategyConfig?: import("../types/strategy.js").Strategy | null,
+  preloaded?: TrackedPosition | null
 ): ExitAction | null {
   const { in_range } = positionData;
-  const pos = getTrackedPosition(position_address);
+  const pos = preloaded ?? getTrackedPosition(position_address);
   if (!pos || pos.closed) return null;
 
   // Check if we're in a confirmed trailing exit cooldown period
