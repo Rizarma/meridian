@@ -10,7 +10,13 @@
 
 import Database from "better-sqlite3";
 import { setInfrastructure } from "../src/di-container.js";
-import { recallForPool, recordPositionSnapshot } from "../src/domain/pool-memory.js";
+import {
+  getBaseMintsOnCooldown,
+  getKnownPoolAddresses,
+  getPoolsOnCooldown,
+  recallForPool,
+  recordPositionSnapshot,
+} from "../src/domain/pool-memory.js";
 import { describe, expect, runTests, test } from "./test-harness.js";
 
 // ─── In-memory DB Setup ─────────────────────────────────────────
@@ -472,6 +478,167 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
       expect(recall.includes("PRELOADED/SOL")).toBe(true);
       expect(recall.includes("RECENT TREND")).toBe(true);
     }
+  });
+});
+
+describe("Pool Memory - getKnownPoolAddresses", () => {
+  let testDb: Database.Database;
+
+  test("setup", () => {
+    testDb = createTestDb();
+    wireTestDb(testDb);
+
+    // Insert known pools
+    testDb
+      .prepare(`INSERT INTO pools (address, name, total_deploys) VALUES (?, ?, 0)`)
+      .run(POOL_ADDR, "KNOWN/SOL");
+    testDb
+      .prepare(`INSERT INTO pools (address, name, total_deploys) VALUES (?, ?, 0)`)
+      .run(POSITION_ADDR, "OTHER/SOL");
+
+    expect(true).toBe(true);
+  });
+
+  test("returns empty set for empty input", () => {
+    const result = getKnownPoolAddresses([]);
+    expect(result.size).toBe(0);
+  });
+
+  test("returns only addresses that exist in pools table", () => {
+    const result = getKnownPoolAddresses([
+      POOL_ADDR, // exists
+      POSITION_ADDR, // exists
+      "UnknownPool0000000000000000000000000", // does not exist
+    ]);
+    expect(result.size).toBe(2);
+    expect(result.has(POOL_ADDR)).toBe(true);
+    expect(result.has(POSITION_ADDR)).toBe(true);
+    expect(result.has("UnknownPool0000000000000000000000000")).toBe(false);
+  });
+
+  test("returns empty set when no addresses match", () => {
+    const result = getKnownPoolAddresses([
+      "UnknownA0000000000000000000000000000000",
+      "UnknownB0000000000000000000000000000000",
+    ]);
+    expect(result.size).toBe(0);
+  });
+
+  test("handles duplicate addresses gracefully", () => {
+    const result = getKnownPoolAddresses([POOL_ADDR, POOL_ADDR, POOL_ADDR]);
+    expect(result.size).toBe(1);
+    expect(result.has(POOL_ADDR)).toBe(true);
+  });
+});
+
+describe("Pool Memory - getPoolsOnCooldown (batch)", () => {
+  let testDb: Database.Database;
+  const POOL_A = "CooldownPoolA111111111111111111111111111111";
+  const POOL_B = "CooldownPoolB222222222222222222222222222222";
+  const POOL_C = "CooldownPoolC333333333333333333333333333333";
+
+  test("setup", () => {
+    testDb = createTestDb();
+    wireTestDb(testDb);
+
+    // Pool A: active cooldown (1 hour in the future)
+    testDb
+      .prepare(
+        `INSERT INTO pools (address, name, total_deploys, cooldown_until) VALUES (?, ?, 0, ?)`
+      )
+      .run(POOL_A, "ONCOOL/SOL", new Date(Date.now() + 3600_000).toISOString());
+
+    // Pool B: expired cooldown (1 hour in the past)
+    testDb
+      .prepare(
+        `INSERT INTO pools (address, name, total_deploys, cooldown_until) VALUES (?, ?, 0, ?)`
+      )
+      .run(POOL_B, "EXPIRED/SOL", new Date(Date.now() - 3600_000).toISOString());
+
+    // Pool C: no cooldown
+    testDb
+      .prepare(`INSERT INTO pools (address, name, total_deploys) VALUES (?, ?, 0)`)
+      .run(POOL_C, "NOCOOL/SOL");
+
+    expect(true).toBe(true);
+  });
+
+  test("returns only pools with active cooldown", () => {
+    const result = getPoolsOnCooldown([POOL_A, POOL_B, POOL_C]);
+    expect(result.size).toBe(1);
+    expect(result.has(POOL_A)).toBe(true);
+    expect(result.has(POOL_B)).toBe(false);
+    expect(result.has(POOL_C)).toBe(false);
+  });
+
+  test("returns empty set for empty input", () => {
+    const result = getPoolsOnCooldown([]);
+    expect(result.size).toBe(0);
+  });
+
+  test("returns empty set for unknown addresses", () => {
+    const result = getPoolsOnCooldown(["UnknownZZZ00000000000000000000000000"]);
+    expect(result.size).toBe(0);
+  });
+
+  test("handles duplicates gracefully", () => {
+    const result = getPoolsOnCooldown([POOL_A, POOL_A]);
+    expect(result.size).toBe(1);
+    expect(result.has(POOL_A)).toBe(true);
+  });
+});
+
+describe("Pool Memory - getBaseMintsOnCooldown (batch)", () => {
+  let testDb: Database.Database;
+  const MINT_X = "BaseMintX0000000000000000000000000000000000";
+  const MINT_Y = "BaseMintY0000000000000000000000000000000000";
+  const POOL_X = "PoolForMintX1111111111111111111111111111111";
+  const POOL_Y = "PoolForMintY2222222222222222222222222222222";
+
+  test("setup", () => {
+    testDb = createTestDb();
+    wireTestDb(testDb);
+
+    // Pool with active base mint cooldown
+    testDb
+      .prepare(
+        `INSERT INTO pools (address, name, base_mint, total_deploys, base_mint_cooldown_until)
+         VALUES (?, ?, ?, 0, ?)`
+      )
+      .run(POOL_X, "TOKEN_X/SOL", MINT_X, new Date(Date.now() + 3600_000).toISOString());
+
+    // Pool with expired base mint cooldown
+    testDb
+      .prepare(
+        `INSERT INTO pools (address, name, base_mint, total_deploys, base_mint_cooldown_until)
+         VALUES (?, ?, ?, 0, ?)`
+      )
+      .run(POOL_Y, "TOKEN_Y/SOL", MINT_Y, new Date(Date.now() - 3600_000).toISOString());
+
+    expect(true).toBe(true);
+  });
+
+  test("returns only mints with active cooldown", () => {
+    const result = getBaseMintsOnCooldown([MINT_X, MINT_Y]);
+    expect(result.size).toBe(1);
+    expect(result.has(MINT_X)).toBe(true);
+    expect(result.has(MINT_Y)).toBe(false);
+  });
+
+  test("returns empty set for empty input", () => {
+    const result = getBaseMintsOnCooldown([]);
+    expect(result.size).toBe(0);
+  });
+
+  test("returns empty set for unknown mints", () => {
+    const result = getBaseMintsOnCooldown(["UnknownMint000000000000000000000000000"]);
+    expect(result.size).toBe(0);
+  });
+
+  test("handles duplicates gracefully", () => {
+    const result = getBaseMintsOnCooldown([MINT_X, MINT_X]);
+    expect(result.size).toBe(1);
+    expect(result.has(MINT_X)).toBe(true);
   });
 });
 
