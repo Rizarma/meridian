@@ -550,6 +550,7 @@ describe("Exit Rules - evaluateManagementExitRules Stop Loss", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -585,6 +586,7 @@ describe("Exit Rules - evaluateManagementExitRules Stop Loss", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, true);
@@ -627,6 +629,7 @@ describe("Exit Rules - evaluateManagementExitRules Take Profit", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -662,6 +665,7 @@ describe("Exit Rules - evaluateManagementExitRules Take Profit", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -705,6 +709,7 @@ describe("Exit Rules - evaluateManagementExitRules Pumped Far Above Range (Rule 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -740,6 +745,7 @@ describe("Exit Rules - evaluateManagementExitRules Pumped Far Above Range (Rule 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -773,6 +779,7 @@ describe("Exit Rules - evaluateManagementExitRules Pumped Far Above Range (Rule 
       age_minutes: 90,
       minutes_out_of_range: 35, // Also exceeds OOR wait time
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -817,6 +824,7 @@ describe("Exit Rules - evaluateManagementExitRules Out of Range (Rule 4)", () =>
       age_minutes: 90,
       minutes_out_of_range: 35,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -852,6 +860,7 @@ describe("Exit Rules - evaluateManagementExitRules Out of Range (Rule 4)", () =>
       age_minutes: 90,
       minutes_out_of_range: 15,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -885,6 +894,7 @@ describe("Exit Rules - evaluateManagementExitRules Out of Range (Rule 4)", () =>
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -918,6 +928,7 @@ describe("Exit Rules - evaluateManagementExitRules Out of Range (Rule 4)", () =>
       age_minutes: 90,
       minutes_out_of_range: 30,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -962,6 +973,7 @@ describe("Exit Rules - evaluateManagementExitRules Low Yield", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -997,6 +1009,7 @@ describe("Exit Rules - evaluateManagementExitRules Low Yield", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1030,6 +1043,7 @@ describe("Exit Rules - evaluateManagementExitRules Low Yield", () => {
       age_minutes: 30,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1063,6 +1077,7 @@ describe("Exit Rules - evaluateManagementExitRules Low Yield", () => {
       age_minutes: 60,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1108,6 +1123,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1141,6 +1157,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1174,6 +1191,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1207,6 +1225,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1241,6 +1260,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90, // Above min age
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1276,6 +1296,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1317,6 +1338,7 @@ describe("Exit Rules - evaluateManagementExitRules Claim Fees", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, configWithoutMinClaim, false);
@@ -1360,6 +1382,7 @@ describe("Exit Rules - evaluateManagementExitRules Healthy Position (No Exit)", 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1393,6 +1416,7 @@ describe("Exit Rules - evaluateManagementExitRules Healthy Position (No Exit)", 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1426,6 +1450,7 @@ describe("Exit Rules - evaluateManagementExitRules Healthy Position (No Exit)", 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1459,6 +1484,7 @@ describe("Exit Rules - evaluateManagementExitRules Healthy Position (No Exit)", 
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1505,6 +1531,7 @@ describe("Exit Rules - evaluateManagementExitRules Priority Order", () => {
       age_minutes: 90,
       minutes_out_of_range: 0,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);
@@ -1540,6 +1567,7 @@ describe("Exit Rules - evaluateManagementExitRules Priority Order", () => {
       age_minutes: 90,
       minutes_out_of_range: 35,
       instruction: null,
+      tracked_state: null,
     };
 
     const result = evaluateManagementExitRules(position, baseConfig, false);

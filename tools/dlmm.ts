@@ -822,8 +822,9 @@ export async function getMyPositions({
           const tracked = getTrackedPosition(positionAddress);
           const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 
-          if (isOOR) markOutOfRange(positionAddress);
-          else markInRange(positionAddress);
+          // Mark OOR state and capture the effective out_of_range_since to
+          // avoid a duplicate DB read in minutesOutOfRange below.
+          const oorSince = isOOR ? markOutOfRange(positionAddress) : markInRange(positionAddress);
 
           // Bin data: from supplemental PnL call (OOR) or tracked state (in-range)
           const binData = binDataByPool[pool.poolAddress]?.[positionAddress];
@@ -926,8 +927,9 @@ export async function getMyPositions({
             age_minutes: binData?.createdAt
               ? Math.floor((Date.now() - binData.createdAt * 1000) / 60000)
               : ageFromState,
-            minutes_out_of_range: minutesOutOfRange(positionAddress),
+            minutes_out_of_range: minutesOutOfRange(positionAddress, oorSince),
             instruction: tracked?.instruction ?? null,
+            tracked_state: tracked,
           });
         }
       }
