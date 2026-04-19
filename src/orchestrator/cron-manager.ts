@@ -16,7 +16,6 @@ import { cycleState } from "../infrastructure/cycle-state.js";
 import { heartbeat as hiveHeartbeat } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import {
-  getTrackedPosition,
   queuePeakConfirmation,
   queueTrailingDropConfirmation,
   updatePnlAndCheckExits,
@@ -181,7 +180,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
         // Process each position with individual error handling
         for (const p of rawPositions) {
           try {
-            const trackedP = getTrackedPosition(p.position);
+            const trackedP = p.tracked_state;
             if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
               schedulePeakConfirmation(p.position);
             }

@@ -3,6 +3,7 @@
 
 import type BN from "bn.js";
 import type { PublicKey } from "@solana/web3.js";
+import type { TrackedPosition } from "./state.js";
 
 // ─── SDK Types (external - properly typed) ─────────────────
 
@@ -268,6 +269,8 @@ export interface EnrichedPosition {
   age_minutes: number | null;
   minutes_out_of_range: number;
   instruction: string | null;
+  /** Pre-fetched tracked DB state — avoids a redundant DB read in the PnL poller. */
+  tracked_state: TrackedPosition | null;
 }
 
 export interface PositionsResult {
