@@ -358,7 +358,7 @@ export function createPersistenceMiddleware(context: MiddlewareContext): Middlew
         position: result.position as string,
         pool: result.pool as string,
         pool_name: (result.pool_name as string) || undefined,
-        strategy: (result.strategy as string) || "spot",
+        strategy: (result.strategy as string) || undefined,
         strategy_config: result.strategy_config as unknown,
         bin_range: result.bin_range as { min: number; max: number; active?: number } | undefined,
         bin_step: (result.bin_step as number) || 80,

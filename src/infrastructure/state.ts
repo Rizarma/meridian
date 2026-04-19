@@ -21,7 +21,11 @@ import {
 } from "../config/constants.js";
 import { PROJECT_ROOT } from "../config/paths.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
-import { getStrategy } from "../domain/strategy-library.js";
+import {
+  getStrategy,
+  getStrategyByLpStrategy,
+  isLegacyLpStrategy,
+} from "../domain/strategy-library.js";
 import type { SetPositionNoteArgs } from "../types/executor.js";
 import type { SignalSnapshot } from "../types/signals.js";
 import type {
@@ -36,7 +40,7 @@ import type {
   TrackedPosition,
   TrailingConfirmation,
 } from "../types/state.js";
-import type { Strategy } from "../types/strategy.js";
+import type { LPStrategyType, Strategy } from "../types/strategy.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
 import { get, parseJson, query, run, stringifyJson, transaction } from "./db.js";
@@ -82,13 +86,78 @@ export interface TrackPositionParams {
 // Row Mapping Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Resolve a strategy value that might be either a strategy ID or a legacy lp_strategy.
+ * Returns a Strategy object if resolution succeeds, or null.
+ *
+ * Resolution order:
+ * 1. If strategy_config is already present, use it (trust the snapshot).
+ * 2. Try resolving by strategy id via getStrategy().
+ * 3. If strategy is a legacy lp_strategy value, map to a sensible default Strategy object.
+ */
+export function resolveStrategy(
+  strategy: string,
+  strategyConfig: Strategy | null | undefined
+): { resolved: Strategy | null; strategyId: string; legacy: boolean } {
+  // 1. Prefer existing strategy_config snapshot
+  if (strategyConfig && typeof strategyConfig === "object" && strategyConfig.id) {
+    return { resolved: strategyConfig, strategyId: strategyConfig.id, legacy: false };
+  }
+
+  // 2. Try resolving by strategy id
+  if (strategy && !isLegacyLpStrategy(strategy)) {
+    const result = getStrategy({ id: strategy });
+    if (!result.error && result.id) {
+      return { resolved: result as Strategy, strategyId: result.id, legacy: false };
+    }
+  }
+
+  // 3. Legacy lp_strategy fallback — prefer a real strategy definition for that lp_strategy
+  if (strategy && isLegacyLpStrategy(strategy)) {
+    const mapped = getStrategyByLpStrategy(strategy);
+    if (mapped) {
+      log(
+        "state_warn",
+        `Legacy lp_strategy "${strategy}" found — mapped to strategy id "${mapped.id}". Backfill recommended.`
+      );
+      return { resolved: mapped, strategyId: mapped.id, legacy: true };
+    }
+
+    log(
+      "state_warn",
+      `Legacy lp_strategy "${strategy}" found with no matching strategy definition — using synthetic fallback. Backfill recommended.`
+    );
+    const syntheticId = `__legacy_${strategy}__`;
+    const legacyStrategy: Strategy = {
+      id: syntheticId,
+      name: `Legacy ${strategy}`,
+      author: "legacy",
+      lp_strategy: strategy as LPStrategyType,
+      token_criteria: {},
+      entry: {},
+      range: {},
+      exit: {},
+      best_for: `Legacy ${strategy} strategy`,
+    };
+    return { resolved: legacyStrategy, strategyId: syntheticId, legacy: true };
+  }
+
+  return { resolved: null, strategyId: strategy || "unknown", legacy: false };
+}
+
 function rowToTrackedPosition(row: Record<string, unknown>): TrackedPosition {
+  const rawStrategy = row.strategy as string;
+  const rawStrategyConfig = parseJson<Strategy>(row.strategy_config as string | null);
+
+  // Resolve strategy with backward compatibility for legacy rows
+  const { resolved: resolvedStrategyConfig } = resolveStrategy(rawStrategy, rawStrategyConfig);
+
   return {
     position: row.position as string,
     pool: row.pool as string,
     pool_name: row.pool_name as string,
-    strategy: row.strategy as string,
-    strategy_config: parseJson<Strategy>(row.strategy_config as string | null),
+    strategy: resolvedStrategyConfig?.id ?? rawStrategy,
+    strategy_config: resolvedStrategyConfig,
     bin_range: parseJson<BinRange>(row.bin_range as string | null) ?? {},
     amount_sol: row.amount_sol as number,
     amount_x: (row.amount_x as number) ?? 0,
@@ -304,18 +373,15 @@ export function trackPosition({
   signal_snapshot = null,
   strategy_config,
 }: TrackPositionParams): void {
-  // Load full strategy config if not provided
-  let strategyConfig = strategy_config;
-  if (!strategyConfig && strategy) {
-    const strategyResult = getStrategy({ id: strategy });
-    if (!strategyResult.error && strategyResult.id) {
-      strategyConfig = strategyResult as Strategy;
-    } else {
-      log(
-        "state_warn",
-        `Strategy "${strategy}" not found for position ${position.slice(0, 8)} — falling back to global config for exit rules`
-      );
-    }
+  // Resolve strategy using canonical resolution (handles both IDs and legacy lp_strategy values)
+  const { resolved: strategyConfig, strategyId } = resolveStrategy(strategy, strategy_config);
+
+  // Warn if strategy id in row differs from strategy_config.id (inconsistent state)
+  if (strategyConfig && strategyConfig.id && strategy && strategy !== strategyConfig.id) {
+    log(
+      "state_warn",
+      `Strategy id mismatch for position ${position.slice(0, 8)}: strategy="${strategy}" but strategy_config.id="${strategyConfig.id}" — using config snapshot`
+    );
   }
 
   const now = new Date().toISOString();
@@ -323,7 +389,7 @@ export function trackPosition({
     position,
     pool,
     pool_name,
-    strategy,
+    strategy: strategyId,
     strategy_config: strategyConfig || null,
     bin_range,
     amount_sol,

@@ -20,6 +20,12 @@ import type {
   TokenCriteria,
 } from "../types/strategy.js";
 
+export const LEGACY_LP_STRATEGIES = ["bid_ask", "spot", "curve", "any", "mixed"] as const;
+
+export function isLegacyLpStrategy(value: string | null | undefined): value is LPStrategyType {
+  return !!value && (LEGACY_LP_STRATEGIES as readonly string[]).includes(value);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Parameter and Return Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -497,6 +503,29 @@ export function getActiveStrategy(): Strategy | null {
   if (!row) return null;
 
   return rowToStrategy(row);
+}
+
+/**
+ * Resolve a strategy by LP shape/type.
+ *
+ * Preference order:
+ * 1. Active strategy if it matches the requested lp_strategy
+ * 2. Most recently updated strategy matching the lp_strategy
+ */
+export function getStrategyByLpStrategy(lpStrategy: LPStrategyType): Strategy | null {
+  ensureDefaultsLazy();
+
+  const active = getActiveStrategy();
+  if (active?.lp_strategy === lpStrategy) {
+    return active;
+  }
+
+  const row = get<StrategyRow>(
+    "SELECT * FROM strategies WHERE lp_strategy = ? ORDER BY updated_at DESC, added_at DESC LIMIT 1",
+    lpStrategy
+  );
+
+  return row ? rowToStrategy(row) : null;
 }
 
 /**

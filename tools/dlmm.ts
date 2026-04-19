@@ -3,6 +3,11 @@ import { Mutex } from "async-mutex";
 import BN from "bn.js";
 import { config } from "../src/config/config.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import {
+  getActiveStrategy,
+  getStrategyByLpStrategy,
+  isLegacyLpStrategy,
+} from "../src/domain/strategy-library.js";
 import { getSharedConnection } from "../src/infrastructure/connection.js";
 import { log } from "../src/infrastructure/logger.js";
 import {
@@ -360,6 +365,22 @@ export async function deployPosition({
       base_fee ??
       (baseFactor > 0 ? parseFloat((((baseFactor * actualBinStep) / 1e6) * 100).toFixed(4)) : null);
 
+    // Resolve canonical strategy id + config snapshot for persistence
+    const resolvedStrategy =
+      isLegacyLpStrategy(activeStrategy) && getActiveStrategy()?.lp_strategy !== activeStrategy
+        ? getStrategyByLpStrategy(activeStrategy)
+        : getActiveStrategy();
+
+    if (!resolvedStrategy) {
+      log(
+        "deploy_warn",
+        `No persisted strategy definition found for lp_strategy "${activeStrategy}"; strategy_config will be omitted`
+      );
+    }
+
+    const strategyId = resolvedStrategy?.id ?? activeStrategy;
+    const strategyConfig = resolvedStrategy ?? null;
+
     return {
       success: true,
       position: newPosition.publicKey.toString(),
@@ -369,7 +390,8 @@ export async function deployPosition({
       price_range: { min: minPrice, max: maxPrice },
       bin_step: actualBinStep,
       base_fee: actualBaseFee,
-      strategy: activeStrategy,
+      strategy: strategyId,
+      strategy_config: strategyConfig as unknown as Record<string, unknown> | undefined,
       wide_range: isWideRange,
       amount_x: finalAmountX,
       amount_y: finalAmountY,
