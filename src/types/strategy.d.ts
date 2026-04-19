@@ -22,6 +22,7 @@ export interface EntryCriteria {
 export interface RangeCriteria {
   type?: "custom" | "default";
   bins_below_pct?: number;
+  bins_above?: number;
   notes?: string;
 }
 
