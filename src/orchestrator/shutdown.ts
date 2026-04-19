@@ -4,6 +4,7 @@
 import { getMyPositions, stopPoolCache } from "../../tools/dlmm.js";
 import { TIMEOUT } from "../config/constants.js";
 import { closeDb } from "../infrastructure/db.js";
+import { destroyConsensusCache } from "../infrastructure/hive-mind.js";
 import { closeLogStreams, log } from "../infrastructure/logger.js";
 import { stopPolling } from "../infrastructure/telegram.js";
 import { cache } from "../utils/cache.js";
@@ -33,6 +34,7 @@ export async function shutdown(signal: string): Promise<void> {
         stopPolling();
         _stopCronJobs();
         stopPoolCache();
+        destroyConsensusCache();
         cache.destroy();
 
         // Get final positions state

@@ -5,7 +5,7 @@ import * as cron from "node-cron";
 import { getMyPositions } from "../../tools/dlmm.js";
 import { agentLoop } from "../agent/agent.js";
 import { config, registerCronRestarter } from "../config/config.js";
-import { CYCLE, RETRY, TIME } from "../config/constants.js";
+import { CYCLE, HIVE_MIND, RETRY, TIME } from "../config/constants.js";
 import {
   runManagementCycle as runManagementCycleImpl,
   schedulePeakConfirmation,
@@ -13,6 +13,7 @@ import {
 } from "../cycles/management.js";
 import { runScreeningCycle as runScreeningCycleImpl } from "../cycles/screening.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
+import { heartbeat as hiveHeartbeat } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import {
   getTrackedPosition,
@@ -253,7 +254,22 @@ Summarize the current portfolio health, total fees earned, and performance of al
     });
   }, CYCLE.PNL_POLL_INTERVAL_MS);
 
-  cycleState.setCronTasks([mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog]);
+  // Hive Mind heartbeat — periodic background sync with the hive server
+  const hiveHeartbeatTask = cron.schedule(
+    `*/${HIVE_MIND.HEARTBEAT_INTERVAL_MIN} * * * *`,
+    async () => {
+      await hiveHeartbeat();
+    }
+  );
+
+  cycleState.setCronTasks([
+    mgmtTask,
+    screenTask,
+    healthTask,
+    briefingTask,
+    briefingWatchdog,
+    hiveHeartbeatTask,
+  ]);
   // Store interval ref so stopCronJobs can clear it
   cycleState.setPnlPollInterval(pnlPollInterval);
   log(
