@@ -483,13 +483,14 @@ export function trackPosition({
 
 /**
  * Mark a position as out of range (sets timestamp on first detection).
+ * Returns the effective out_of_range_since timestamp (or null if no row).
  */
-export function markOutOfRange(position_address: string): void {
-  const pos = get<Record<string, unknown>>(
+export function markOutOfRange(position_address: string): string | null {
+  const pos = get<{ out_of_range_since: string | null }>(
     "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
-  if (!pos) return;
+  if (!pos) return null;
 
   if (!pos.out_of_range_since) {
     const now = new Date().toISOString();
@@ -500,18 +501,21 @@ export function markOutOfRange(position_address: string): void {
       position_address
     );
     log("state", `Position ${position_address} marked out of range`);
+    return now;
   }
+  return pos.out_of_range_since;
 }
 
 /**
  * Mark a position as back in range (clears OOR timestamp).
+ * Returns the effective out_of_range_since (always null after clearing, or null if no row).
  */
-export function markInRange(position_address: string): void {
-  const pos = get<Record<string, unknown>>(
+export function markInRange(position_address: string): null {
+  const pos = get<{ out_of_range_since: string | null }>(
     "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
-  if (!pos) return;
+  if (!pos) return null;
 
   if (pos.out_of_range_since) {
     const now = new Date().toISOString();
@@ -522,19 +526,27 @@ export function markInRange(position_address: string): void {
     );
     log("state", `Position ${position_address} back in range`);
   }
+  return null;
 }
 
 /**
  * How many minutes has a position been out of range?
  * Returns 0 if currently in range.
+ * Accepts an optional preloaded out_of_range_since timestamp to avoid a redundant DB read.
  */
-export function minutesOutOfRange(position_address: string): number {
-  const pos = get<{ out_of_range_since: string | null }>(
-    "SELECT out_of_range_since FROM position_state WHERE position = ?",
-    position_address
-  );
-  if (!pos?.out_of_range_since) return 0;
-  const ms = Date.now() - new Date(pos.out_of_range_since).getTime();
+export function minutesOutOfRange(
+  position_address: string,
+  preloadedSince?: string | null
+): number {
+  const oorSince =
+    preloadedSince !== undefined
+      ? preloadedSince
+      : (get<{ out_of_range_since: string | null }>(
+          "SELECT out_of_range_since FROM position_state WHERE position = ?",
+          position_address
+        )?.out_of_range_since ?? null);
+  if (!oorSince) return 0;
+  const ms = Date.now() - new Date(oorSince).getTime();
   return Math.floor(ms / 60000);
 }
 
