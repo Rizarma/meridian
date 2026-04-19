@@ -1,6 +1,6 @@
 import { config } from "../src/config/config.js";
 import { getBlockedDevs, isDevBlocked } from "../src/domain/dev-blocklist.js";
-import { isBaseMintOnCooldown, isPoolOnCooldown } from "../src/domain/pool-memory.js";
+import { getBaseMintsOnCooldown, getPoolsOnCooldown } from "../src/domain/pool-memory.js";
 import { isBlacklisted } from "../src/domain/token-blacklist.js";
 import { log } from "../src/infrastructure/logger.js";
 import type { Config } from "../src/types/config.js";
@@ -195,18 +195,24 @@ export async function getTopCandidates({
   const occupiedPools = new Set(positions.map((p) => p.pool));
   const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
 
+  // Batch-fetch cooldown state upfront (avoids per-candidate DB reads)
+  const cooldownPools = getPoolsOnCooldown(pools.map((p) => p.pool));
+  const cooldownMints = getBaseMintsOnCooldown(
+    pools.map((p) => p.base?.mint).filter((m): m is string => !!m)
+  );
+
   const eligible: CondensedPool[] = pools
     .filter((p) => {
       if (occupiedPools.has(p.pool) || occupiedMints.has(p.base?.mint)) {
         pushFilteredReason(p, "Pool already has position");
         return false;
       }
-      if (isPoolOnCooldown(p.pool)) {
+      if (cooldownPools.has(p.pool)) {
         log("screening", `Filtered cooldown pool ${p.name} (${p.pool.slice(0, 8)})`);
         pushFilteredReason(p, "Pool on cooldown");
         return false;
       }
-      if (isBaseMintOnCooldown(p.base?.mint)) {
+      if (p.base?.mint && cooldownMints.has(p.base.mint)) {
         log(
           "screening",
           `Filtered cooldown token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)})`
