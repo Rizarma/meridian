@@ -18,6 +18,7 @@ import {
   setTrailingDropConfirmTimer,
 } from "../infrastructure/confirmation-timers.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
+import { flushDbReadDebugSummary } from "../infrastructure/db.js";
 import { log } from "../infrastructure/logger.js";
 import {
   getTrackedPosition,
@@ -526,6 +527,7 @@ After executing, write a brief one-line result per position.
       mgmtReport = `Management cycle failed: ${getErrorMessage(error)}`;
     } finally {
       deps.setManagementBusy(false);
+      flushDbReadDebugSummary("management cycle");
       if (!silent && telegramEnabled()) {
         if (mgmtReport) {
           if (liveMessage) {
