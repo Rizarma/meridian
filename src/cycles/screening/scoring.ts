@@ -170,15 +170,16 @@ export function applyEdgeProximityFilter(
 
   const passing = scoredCandidates.filter(({ candidate, activeBin }) => {
     const poolName = candidate.pool.name || "Unknown";
+    const poolAddress = candidate.pool.pool;
 
     // Reject if active_bin is unavailable — can't determine position safety
     if (activeBin == null) {
       log(
         "screening",
-        `Edge proximity: rejected ${poolName} — active_bin unavailable, can't verify position`
+        `Edge proximity: rejected ${poolName} (${poolAddress}) — active_bin unavailable, can't verify position`
       );
       edgeFiltered.push({
-        pool_address: candidate.pool.pool,
+        pool_address: poolAddress,
         name: poolName,
         filter_reason: "Edge deployment risk: active_bin unavailable, can't verify position safety",
       });
@@ -191,10 +192,10 @@ export function applyEdgeProximityFilter(
     if (binsAbove < EDGE_PROXIMITY.MIN_BINS_ABOVE) {
       log(
         "screening",
-        `Edge proximity: rejected ${poolName} — bins_above=${binsAbove} < ${EDGE_PROXIMITY.MIN_BINS_ABOVE} (insufficient upside buffer, active_bin=${activeBin})`
+        `Edge proximity: rejected ${poolName} (${poolAddress}) — bins_above=${binsAbove} < ${EDGE_PROXIMITY.MIN_BINS_ABOVE} (insufficient upside buffer, active_bin=${activeBin})`
       );
       edgeFiltered.push({
-        pool_address: candidate.pool.pool,
+        pool_address: poolAddress,
         name: poolName,
         filter_reason: `Edge deployment risk: active_bin too close to range boundary (bins_above=${binsAbove} < ${EDGE_PROXIMITY.MIN_BINS_ABOVE})`,
       });

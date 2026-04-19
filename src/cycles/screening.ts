@@ -168,8 +168,8 @@ export async function runScreeningCycle(
       const { getActiveStrategy } = await import("../domain/strategy-library.js");
       const activeStrategy = getActiveStrategy();
       const strategyBlock = activeStrategy
-        ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${(activeStrategy.range as { bins_above?: number })?.bins_above ?? 0} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`
-        : `No active strategy — use default bid_ask, bins_above: 0, SOL only.`;
+        ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${activeStrategy.range?.bins_above ?? config.strategy.binsAbove} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`
+        : `No active strategy — use default bid_ask, bins_above: ${config.strategy.binsAbove}, SOL only.`;
 
       // Fetch and enrich candidates
       const { candidates: enrichedCandidates, earlyFiltered } = await fetchAndEnrichCandidates(
@@ -198,9 +198,10 @@ export async function runScreeningCycle(
       const scoredCandidates = await scoreAndRankCandidates(passing);
 
       // Apply edge proximity filter — reject candidates at range boundary
+      // Resolve binsAbove conservatively: strategy.range.bins_above > config.strategy.binsAbove > 0
       const binsAbove = activeStrategy
-        ? ((activeStrategy.range as { bins_above?: number })?.bins_above ?? 0)
-        : 0;
+        ? (activeStrategy.range?.bins_above ?? config.strategy.binsAbove)
+        : config.strategy.binsAbove;
       const { passing: edgePassing, edgeFiltered } = applyEdgeProximityFilter(
         scoredCandidates,
         binsAbove
