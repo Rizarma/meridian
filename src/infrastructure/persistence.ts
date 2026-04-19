@@ -78,7 +78,9 @@ export function createPersistenceService(deps: PersistenceServiceDeps): Persiste
         position: deployResult.position,
         pool: deployResult.pool,
         pool_name: deployResult.pool_name || "unknown",
-        strategy: deployResult.strategy || "spot",
+        strategy:
+          deployResult.strategy ||
+          ((deployResult.strategy_config as { id?: string } | undefined)?.id ?? ""),
         strategy_config: deployResult.strategy_config as
           | import("../types/strategy.js").Strategy
           | undefined,

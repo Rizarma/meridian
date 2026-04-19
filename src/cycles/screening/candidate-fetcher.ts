@@ -4,7 +4,7 @@ import { getTokenInfo, getTokenNarrative } from "../../../tools/token.js";
 import { getWalletBalances } from "../../../tools/wallet.js";
 import { config } from "../../config/config.js";
 import { SCREENING } from "../../config/constants.js";
-import { recallForPool } from "../../domain/pool-memory.js";
+import { getKnownPoolAddresses, recallForPool } from "../../domain/pool-memory.js";
 import { checkSmartWalletsOnPool } from "../../domain/smart-wallets.js";
 import {
   isEnabled as isHiveMindEnabled,
@@ -184,6 +184,9 @@ export async function fetchAndEnrichCandidates(limit: number): Promise<Candidate
     }
   }
 
+  // Batch-check which candidates have pool memory to avoid per-pool DB misses
+  const knownPools = getKnownPoolAddresses(candidates.map((c) => c.pool));
+
   const enrichedCandidates: ReconCandidate[] = [];
 
   // Enrich each candidate with additional data
@@ -200,7 +203,7 @@ export async function fetchAndEnrichCandidates(limit: number): Promise<Candidate
       sw: smartWallets.status === "fulfilled" ? smartWallets.value : null,
       n: narrative.status === "fulfilled" ? narrative.value : null,
       ti: tokenInfo.status === "fulfilled" ? tokenInfo.value : null,
-      mem: recallForPool(pool.pool),
+      mem: knownPools.has(pool.pool) ? recallForPool(pool.pool) : null,
       hive_consensus: hiveConsensusMap.get(pool.pool) ?? null,
     });
 
