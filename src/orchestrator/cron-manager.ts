@@ -181,10 +181,10 @@ Summarize the current portfolio health, total fees earned, and performance of al
         // Process each position with individual error handling
         for (const p of rawPositions) {
           try {
-            if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+            const trackedP = getTrackedPosition(p.position);
+            if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
               schedulePeakConfirmation(p.position);
             }
-            const trackedP = getTrackedPosition(p.position);
             const exit = updatePnlAndCheckExits(
               p.position,
               p,

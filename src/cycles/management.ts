@@ -278,10 +278,10 @@ export async function runManagementCycle(
       // JS trailing TP check
       const exitMap = new Map<string, ExitAction>();
       for (const p of positionData) {
-        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+        const trackedP = trackedCache.get(p.position) ?? null;
+        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
           schedulePeakConfirmation(p.position);
         }
-        const trackedP = trackedCache.get(p.position) ?? null;
         const exit = updatePnlAndCheckExits(
           p.position,
           p,
