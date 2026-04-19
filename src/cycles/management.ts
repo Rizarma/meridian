@@ -259,8 +259,8 @@ export async function runManagementCycle(
       }
       const positionData: Array<EnrichedPosition & { recall: string | null }> = positions.map(
         (p) => {
-          recordPositionSnapshot(p.pool, p);
-          return { ...p, recall: recallForPool(p.pool) };
+          const poolRow = recordPositionSnapshot(p.pool, p);
+          return { ...p, recall: recallForPool(p.pool, poolRow) };
         }
       );
 

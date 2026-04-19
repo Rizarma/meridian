@@ -160,14 +160,27 @@ function getOrCreatePool(poolAddress: string, name?: string): PoolRow | null {
 }
 
 /**
- * Get snapshots for a pool by looking up position addresses that contain the pool address.
+ * Get snapshots for a pool by resolving position addresses through the
+ * positions / position_state tables and also matching the fallback
+ * "${poolAddress}_snapshot_*" pattern.
+ *
+ * Previous implementation used `LIKE '${poolAddress}%'` which failed because
+ * snapshots are keyed by the actual DLMM position PDA address (completely
+ * different from the pool address).
  */
 function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
   const rows = getDb().query<SnapshotRow>(
     `SELECT * FROM position_snapshots
-     WHERE position_address LIKE ?
+     WHERE position_address IN (
+       SELECT address FROM positions WHERE pool = ?
+       UNION
+       SELECT position FROM position_state WHERE pool = ?
+     )
+     OR position_address LIKE ? ESCAPE '\\'
      ORDER BY ts DESC LIMIT 48`,
-    `${poolAddress}%`
+    poolAddress,
+    poolAddress,
+    `${poolAddress}\\_snapshot\\_%` // fallback key pattern
   );
 
   return rows.map((s) => ({
@@ -372,9 +385,17 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
  * Record a live position snapshot during a management cycle.
  * Builds a trend dataset while position is still open — not just at close.
  * Keeps last 48 snapshots per position (~4h at 5min intervals).
+ *
+ * Returns the PoolRow that was fetched/created so callers can reuse it
+ * (e.g. pass to recallForPool) and avoid a redundant pools query.
  */
-export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSnapshotInput): void {
-  if (!poolAddress) return;
+export function recordPositionSnapshot(
+  poolAddress: string,
+  snapshot: PositionSnapshotInput
+): PoolRow | null {
+  if (!poolAddress) return null;
+
+  let result: PoolRow | null = null;
 
   getDb().transaction(() => {
     // Ensure pool exists
@@ -386,6 +407,7 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
       );
       return;
     }
+    result = pool;
 
     const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
     getDb().run(
@@ -425,6 +447,8 @@ export function recordPositionSnapshot(poolAddress: string, snapshot: PositionSn
       );
     }
   });
+
+  return result;
 }
 
 // ─── Read Operations ───────────────────────────────────────────
@@ -550,11 +574,15 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
 /**
  * Recall focused context for a specific pool — used before screening or management.
  * Returns a short formatted string ready for injection into the agent goal.
+ *
+ * @param poolAddress - The pool address to look up
+ * @param preloadedPool - Optional pre-fetched pool row to skip redundant DB read
  */
-export function recallForPool(poolAddress: string): string | null {
+export function recallForPool(poolAddress: string, preloadedPool?: PoolRow | null): string | null {
   if (!poolAddress) return null;
 
-  const pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
+  const pool =
+    preloadedPool ?? getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
   if (!pool) return null;
 
   const deploys = getDb().query<PoolDeployRow>(

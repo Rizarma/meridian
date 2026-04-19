@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { LESSONS_FILE, POOL_MEMORY_FILE, PROJECT_ROOT } from "../config/paths.js";
+import { getStrategyByLpStrategy, isLegacyLpStrategy } from "../domain/strategy-library.js";
 import { getDb, parseJson, query, run, stringifyJson, transaction } from "./db.js";
 import { initThresholdEvolutionTables } from "./db-threshold-evolution.js";
 import { log } from "./logger.js";
@@ -970,7 +971,19 @@ export function createJsonBackups(): { success: boolean; message: string } {
         in_range: number;
         unclaimed_fees_usd: number;
         data_json: string;
-      }>("SELECT * FROM position_snapshots WHERE position_address LIKE ?", `${pool.address}%`);
+        position_address: string;
+      }>(
+        `SELECT ps.* FROM position_snapshots ps
+         WHERE ps.position_address IN (
+           SELECT address FROM positions WHERE pool = ?
+           UNION
+           SELECT position FROM position_state WHERE pool = ?
+         )
+         OR ps.position_address LIKE ? ESCAPE '\\'`,
+        pool.address,
+        pool.address,
+        `${pool.address}\\_snapshot\\_%`
+      );
 
       poolsBackup[pool.address] = {
         ...(parseJson(pool.data_json) ?? pool),
@@ -1091,6 +1104,58 @@ export function validateSchema(): { valid: boolean; missingTables: string[] } {
 }
 
 /**
+ * Backfill legacy strategy values in position_state rows.
+ *
+ * Legacy rows may have strategy="spot"/"bid_ask"/"curve"/"any"/"mixed" (raw lp_strategy)
+ * and strategy_config=NULL. This migration resolves them to canonical strategy IDs
+ * and populates strategy_config with a resolved Strategy snapshot.
+ *
+ * Idempotent: skips rows that already have a non-legacy strategy or a populated strategy_config.
+ */
+export function backfillLegacyStrategyFields(): void {
+  // Find rows with legacy strategy and null strategy_config
+  const legacyRows = query<{ position: string; strategy: string }>(
+    `SELECT position, strategy FROM position_state WHERE strategy_config IS NULL`
+  );
+
+  if (legacyRows.length === 0) return;
+
+  let backfilled = 0;
+  transaction(() => {
+    for (const row of legacyRows) {
+      if (!isLegacyLpStrategy(row.strategy)) continue;
+
+      const resolved = getStrategyByLpStrategy(row.strategy);
+      const strategyId = resolved?.id ?? `__legacy_${row.strategy}__`;
+      const strategyConfig = resolved ?? {
+        id: strategyId,
+        name: `Legacy ${row.strategy}`,
+        author: "legacy",
+        lp_strategy: row.strategy,
+        token_criteria: {},
+        entry: {},
+        range: {},
+        exit: {},
+        best_for: `Legacy ${row.strategy} strategy (backfilled)`,
+      };
+
+      run(
+        "UPDATE position_state SET strategy = ?, strategy_config = ?, last_updated = ? WHERE position = ?",
+        strategyId,
+        JSON.stringify(strategyConfig),
+        new Date().toISOString(),
+        row.position
+      );
+      backfilled++;
+    }
+  });
+
+  if (backfilled > 0) {
+    log("db_migration", `Backfilled strategy_config for ${backfilled} legacy position_state rows`);
+  }
+}
+
+/**
  * Full database setup - initialize schema and migrate if needed.
  */
 export function setupDatabase(): { success: boolean; message: string } {
@@ -1098,6 +1163,7 @@ export function setupDatabase(): { success: boolean; message: string } {
     initSchema();
     initThresholdEvolutionTables();
     removePositionFkConstraints(); // Remove overly restrictive FK constraints
+    backfillLegacyStrategyFields(); // Backfill legacy strategy values
 
     if (needsJsonImport()) {
       const result = migrateFromJson();

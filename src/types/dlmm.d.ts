@@ -106,6 +106,7 @@ export interface DeployResult {
   bin_step?: number;
   base_fee?: number | null;
   strategy?: string;
+  strategy_config?: Record<string, unknown>;
   wide_range?: boolean;
   amount_x?: number;
   amount_y?: number;
