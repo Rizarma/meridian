@@ -661,11 +661,12 @@ export function setPositionInstruction(
  */
 export function queuePeakConfirmation(
   position_address: string,
-  candidatePnlPct: number | null
+  candidatePnlPct: number | null,
+  preloaded?: TrackedPosition | null
 ): boolean {
   if (candidatePnlPct == null) return false;
 
-  const pos = getTrackedPosition(position_address);
+  const pos = preloaded ?? getTrackedPosition(position_address);
   if (!pos || pos.closed) return false;
 
   const currentPeak = pos.peak_pnl_pct ?? 0;
