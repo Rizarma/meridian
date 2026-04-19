@@ -11,6 +11,7 @@
 
   "strategy": "bid_ask",
   "binsBelow": 69,
+  "binsAbove": 0,
 
   "timeframe": "5m",
   "category": "trending",

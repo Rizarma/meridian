@@ -76,6 +76,7 @@ function createTestConfig(partial: UserConfigPartial): Config {
     strategy: {
       strategy: u.strategy ?? "bid_ask",
       binsBelow: u.binsBelow ?? 69,
+      binsAbove: u.binsAbove ?? 0,
     },
     schedule: {
       managementIntervalMin: u.managementIntervalMin ?? 10,

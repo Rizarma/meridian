@@ -59,6 +59,7 @@ const CONFIG_MAP: Record<string, [string, string]> = {
   generalModel: ["llm", "generalModel"],
   // strategy
   binsBelow: ["strategy", "binsBelow"],
+  binsAbove: ["strategy", "binsAbove"],
 };
 
 // Mock live config object

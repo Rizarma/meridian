@@ -55,6 +55,7 @@ export interface ManagementConfig {
 export interface StrategyConfig {
   strategy: string;
   binsBelow: number;
+  binsAbove: number;
 }
 
 export interface ScheduleConfig {
@@ -157,6 +158,7 @@ export interface UserConfigPartial {
   solMode?: boolean;
   strategy?: string;
   binsBelow?: number;
+  binsAbove?: number;
   managementIntervalMin?: number;
   screeningIntervalMin?: number;
   healthCheckIntervalMin?: number;
