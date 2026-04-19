@@ -929,6 +929,7 @@ export async function getMyPositions({
               : ageFromState,
             minutes_out_of_range: minutesOutOfRange(positionAddress, oorSince),
             instruction: tracked?.instruction ?? null,
+            tracked_state: tracked,
           });
         }
       }
