@@ -454,6 +454,24 @@ export function recordPositionSnapshot(
 // ─── Read Operations ───────────────────────────────────────────
 
 /**
+ * Batch-check which pool addresses have memory records.
+ * Used by screening to avoid full recallForPool() queries for unknown pools.
+ * Returns a Set of addresses that exist in the pools table.
+ */
+export function getKnownPoolAddresses(addresses: string[]): Set<string> {
+  if (addresses.length === 0) return new Set();
+
+  // Deduplicate to avoid unnecessary query parameters
+  const unique = [...new Set(addresses)];
+  const placeholders = unique.map(() => "?").join(", ");
+  const rows = getDb().query<{ address: string }>(
+    `SELECT address FROM pools WHERE address IN (${placeholders})`,
+    ...unique
+  );
+  return new Set(rows.map((r) => r.address));
+}
+
+/**
  * Get all pool deploys across all pools, joined with pool metadata.
  * Used by hive-mind sync to upload anonymized deploy history.
  */
@@ -493,6 +511,48 @@ export function isBaseMintOnCooldown(baseMint: string): boolean {
 
   if (!pool?.base_mint_cooldown_until) return false;
   return new Date(pool.base_mint_cooldown_until) > new Date();
+}
+
+/**
+ * Batch-check which pool addresses are currently on cooldown.
+ * Returns a Set of pool addresses with an active cooldown_until (in the future).
+ * Replaces per-candidate isPoolOnCooldown() calls in screening loops.
+ */
+export function getPoolsOnCooldown(poolAddresses: string[]): Set<string> {
+  if (poolAddresses.length === 0) return new Set();
+
+  const unique = [...new Set(poolAddresses.filter(Boolean))];
+  if (unique.length === 0) return new Set();
+
+  const placeholders = unique.map(() => "?").join(", ");
+  const now = new Date().toISOString();
+  const rows = getDb().query<{ address: string }>(
+    `SELECT address FROM pools WHERE address IN (${placeholders}) AND cooldown_until IS NOT NULL AND cooldown_until > ?`,
+    ...unique,
+    now
+  );
+  return new Set(rows.map((r) => r.address));
+}
+
+/**
+ * Batch-check which base mints are currently on cooldown.
+ * Returns a Set of base mint addresses with an active base_mint_cooldown_until (in the future).
+ * Replaces per-candidate isBaseMintOnCooldown() calls in screening loops.
+ */
+export function getBaseMintsOnCooldown(baseMints: string[]): Set<string> {
+  if (baseMints.length === 0) return new Set();
+
+  const unique = [...new Set(baseMints.filter(Boolean))];
+  if (unique.length === 0) return new Set();
+
+  const placeholders = unique.map(() => "?").join(", ");
+  const now = new Date().toISOString();
+  const rows = getDb().query<{ base_mint: string }>(
+    `SELECT DISTINCT base_mint FROM pools WHERE base_mint IN (${placeholders}) AND base_mint_cooldown_until IS NOT NULL AND base_mint_cooldown_until > ?`,
+    ...unique,
+    now
+  );
+  return new Set(rows.map((r) => r.base_mint));
 }
 
 /**
