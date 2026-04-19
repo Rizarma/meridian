@@ -44,6 +44,7 @@ import type {
   ExitAction,
   LiveMessageHandler,
 } from "../types/index.js";
+import type { TrackedPosition } from "../types/state.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { isArray } from "../utils/validation.js";
 
@@ -265,18 +266,28 @@ export async function runManagementCycle(
         }
       );
 
+      // Pre-load tracked positions once to avoid redundant DB reads per position
+      // across both the exit-check and rule-check loops.
+      const trackedCache = new Map<string, TrackedPosition | null>();
+      for (const p of positionData) {
+        if (!trackedCache.has(p.position)) {
+          trackedCache.set(p.position, getTrackedPosition(p.position));
+        }
+      }
+
       // JS trailing TP check
       const exitMap = new Map<string, ExitAction>();
       for (const p of positionData) {
-        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct)) {
+        const trackedP = trackedCache.get(p.position) ?? null;
+        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
           schedulePeakConfirmation(p.position);
         }
-        const trackedP = getTrackedPosition(p.position);
         const exit = updatePnlAndCheckExits(
           p.position,
           p,
           config.management,
-          trackedP?.strategy_config
+          trackedP?.strategy_config,
+          trackedP
         );
         if (exit) {
           // Trailing TP needs confirmation before closing
@@ -324,9 +335,13 @@ export async function runManagementCycle(
           continue;
         }
 
+        // Reuse pre-loaded tracked position (no redundant DB read).
+        // Fields read here (amount_sol, strategy_config) are not mutated by
+        // updatePnlAndCheckExits, so the cached value remains valid.
+        const tracked = trackedCache.get(p.position) ?? null;
+
         // Sanity-check PnL against tracked initial deposit — API sometimes returns bad data
         // giving -99% PnL which would incorrectly trigger stop loss
-        const tracked = getTrackedPosition(p.position);
         const pnlSuspect = ((): boolean => {
           if (p.pnl_pct == null) return false;
           if (p.pnl_pct > -90) return false; // only flag extreme negatives
@@ -342,9 +357,7 @@ export async function runManagementCycle(
         })();
 
         // Use extracted exit-rules module for deterministic rule checks
-        // Load tracked position to get strategy config
-        const trackedPosition = getTrackedPosition(p.position);
-        const strategyConfig = trackedPosition?.strategy_config;
+        const strategyConfig = tracked?.strategy_config;
 
         const exitDecision = evaluateManagementExitRules(
           p,
