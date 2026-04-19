@@ -3,6 +3,7 @@ import { computeDeployAmount, config } from "../config/config.js";
 import { LLM } from "../config/constants.js";
 import { stageSignals } from "../domain/signal-tracker.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
+import { flushDbReadDebugSummary } from "../infrastructure/db.js";
 import { formatPoolConsensusForPrompt } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import {
@@ -294,6 +295,7 @@ export async function runScreeningCycle(
       screenReport = `Screening cycle failed: ${getErrorMessage(error)}`;
     } finally {
       setBusy(false);
+      flushDbReadDebugSummary("screening cycle");
       if (!silent && telegramEnabled()) {
         if (screenReport) {
           const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
