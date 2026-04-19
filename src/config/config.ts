@@ -190,6 +190,7 @@ export const config: Config = {
   strategy: {
     strategy: u.strategy ?? "bid_ask",
     binsBelow: u.binsBelow ?? 69,
+    binsAbove: u.binsAbove ?? 0,
   },
 
   // ─── Scheduling ─────────────────────────
@@ -372,6 +373,7 @@ registerTool({
       // strategy
       strategy: ["strategy", "strategy"],
       binsBelow: ["strategy", "binsBelow"],
+      binsAbove: ["strategy", "binsAbove"],
       // features
       trailingTakeProfit: ["features", "trailingTakeProfit"],
       hiveMind: ["features", "hiveMind"],
@@ -390,6 +392,7 @@ registerTool({
       "features",
       "llm",
       "schedule",
+      "strategy",
     ] as const;
     type ValidConfigSection = (typeof VALID_CONFIG_SECTIONS)[number];
 
