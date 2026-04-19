@@ -14,6 +14,18 @@ import { log } from "../infrastructure/logger.js";
 const infra = () => getInfrastructure();
 const getDb = () => infra().db;
 
+// Phase 2: event-driven hive push — lazy import avoids top-level cycle
+// (sync.ts → lessons.ts → hive-mind → sync.ts). The functions are only
+// resolved when actually called, by which time both modules are fully loaded.
+const hivePush = {
+  get lesson() {
+    return import("../infrastructure/hive-mind.js").then((m) => m.pushLesson);
+  },
+  get performance() {
+    return import("../infrastructure/hive-mind.js").then((m) => m.pushPerformance);
+  },
+};
+
 import type {
   LessonContext,
   LessonEntry,
@@ -279,6 +291,39 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
     }
   });
 
+  // Phase 2: event-driven hive pushes — fire-and-forget, fail-open.
+  // Pushed immediately at the narrowest event point (after DB commit)
+  // so the hive receives data without waiting for the next batch sync.
+  const hiveAgentId = process.env.HIVE_MIND_AGENT_ID || "";
+  hivePush.performance
+    .then((fn) =>
+      fn({
+        agentId: hiveAgentId,
+        poolAddress: entry.pool,
+        pnlPct: entry.pnl_pct,
+        pnlUsd: entry.pnl_usd,
+        holdTimeMinutes: entry.minutes_held,
+        closeReason: entry.close_reason ?? "",
+        rangeEfficiency: entry.range_efficiency,
+        strategy: entry.strategy || undefined,
+      })
+    )
+    .catch(() => {}); // fail-open: never block recordPerformance
+
+  if (lesson) {
+    hivePush.lesson
+      .then((fn) =>
+        fn({
+          agentId: hiveAgentId,
+          rule: lesson.rule,
+          tags: lesson.tags,
+          outcome: lesson.outcome,
+          context: lesson.context,
+        })
+      )
+      .catch(() => {}); // fail-open
+  }
+
   // Run threshold evolution (pool memory, Darwin weights, hive sync)
   // Get all performance for evolution calculation
   const allPerformance = getDb()
@@ -398,6 +443,18 @@ export function addLesson(
     "lessons",
     `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${safeRule}`
   );
+
+  // Phase 2: event-driven hive push for manual lesson — fire-and-forget, fail-open
+  hivePush.lesson
+    .then((fn) =>
+      fn({
+        agentId: process.env.HIVE_MIND_AGENT_ID || "",
+        rule: safeRule,
+        tags,
+        outcome: "manual",
+      })
+    )
+    .catch(() => {}); // fail-open: never block addLesson
 }
 
 /**

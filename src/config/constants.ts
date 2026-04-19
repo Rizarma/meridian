@@ -164,6 +164,17 @@ export const CACHE = {
 } as const;
 
 // ═══════════════════════════════════════════
+//  HIVE MIND CONFIGURATION
+// ═══════════════════════════════════════════
+
+export const HIVE_MIND = {
+  /** TTL for consensus query cache (milliseconds) — 5 minutes */
+  CONSENSUS_CACHE_TTL_MS: 5 * TIME.MINUTE,
+  /** Heartbeat / background sync interval (minutes) */
+  HEARTBEAT_INTERVAL_MIN: 30,
+} as const;
+
+// ═══════════════════════════════════════════
 //  TRAILING TAKE-PROFIT TIMING
 // ═══════════════════════════════════════════
 
