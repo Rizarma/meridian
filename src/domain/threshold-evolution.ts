@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import { config, reloadScreeningThresholds } from "../config/config.js";
 import { USER_CONFIG_PATH } from "../config/paths.js";
-import { syncToHive } from "../infrastructure/hive-mind.js";
+import { formatThresholdConsensusForAdvisory, syncToHive } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import type { Config } from "../types/config.js";
 import type {
@@ -63,10 +63,21 @@ export async function runThresholdEvolution(
 
   // 2. Evolve thresholds every 5 closed positions
   if (performanceHistory.length % MIN_EVOLVE_POSITIONS === 0) {
+    // Fetch hive threshold advisory as supplementary context (fail-open)
+    let hiveAdvisory = "";
+    try {
+      hiveAdvisory = await formatThresholdConsensusForAdvisory();
+    } catch {
+      // Non-critical — proceed without it
+    }
+
     const result = evolveThresholds(performanceHistory, config as Config);
     if (result?.changes && Object.keys(result.changes).length > 0) {
       reloadScreeningThresholds();
-      log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
+      const advisoryNote = hiveAdvisory
+        ? ` [Hive advisory: ${hiveAdvisory.replace(/\n/g, " ")}]`
+        : "";
+      log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}${advisoryNote}`);
     }
 
     // 3. Darwinian signal weight recalculation

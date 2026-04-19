@@ -78,6 +78,12 @@ function computeCandidateScore(candidate: ReconCandidate, weights: Record<string
     score += (weights.smart_wallets_present ?? 1.0) * 0.5; // bonus for smart wallets
   }
 
+  // Hive Mind consensus — weighted win rate (0-100 scale, normalize to 0-1)
+  if (candidate.hive_consensus != null) {
+    const normalizedHive = Math.min(candidate.hive_consensus / 100, 1);
+    score += normalizedHive * (weights.hive_consensus ?? 1.0);
+  }
+
   // Narrative quality (categorical) - validate before using
   const narrativeResult = isValidNarrativeResponse(n) ? n : null;
   const narrative = narrativeResult?.narrative;
