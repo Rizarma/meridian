@@ -10,6 +10,12 @@ export interface HiveMindConfig {
   hiveMindUrl?: string; // From process.env.HIVE_MIND_URL only
   hiveMindApiKey?: string; // From process.env.HIVE_MIND_API_KEY only
   hiveMindAgentId?: string; // From process.env.HIVE_MIND_AGENT_ID only
+  // Phase 2 migration guard: set HIVE_MIND_LEGACY_BATCH_SYNC=true to
+  // re-enable the legacy batch syncToHive() path. Defaults to false
+  // because event-driven pushes (pushLesson/pushPerformance) now cover
+  // the same data in real time, making batch sync redundant and creating
+  // duplicate sends if left active.
+  hiveMindLegacyBatchSync?: boolean; // From process.env.HIVE_MIND_LEGACY_BATCH_SYNC
   displayName?: string;
   // Screening thresholds (copied from config for sync)
   minFeeActiveTvlRatio?: number;
@@ -150,4 +156,116 @@ export interface RegistrationParams {
 export interface RegistrationResult {
   agent_id: string;
   api_key: string;
+}
+
+// ─── Original-Compatible Registration (Phase 1) ──────────────────────
+
+/** Capabilities declared during original-compatible registration. */
+export interface AgentCapabilities {
+  telegram: boolean;
+  lpagent: boolean;
+  dryRun: boolean;
+}
+
+/** Payload for POST /api/hivemind/agents/register */
+export interface AgentRegistrationPayload {
+  agentId: string;
+  version: string;
+  timestamp: string;
+  reason: string;
+  capabilities: AgentCapabilities;
+}
+
+/** Response from POST /api/hivemind/agents/register */
+export interface AgentRegistrationResponse {
+  agentId: string;
+  registered: boolean;
+  message?: string;
+}
+
+// ─── Push Types (Phase 1) ──────────────────────────────────────────
+
+/** Payload for pushing a single lesson to the hive. */
+export interface LessonPushPayload {
+  agentId: string;
+  lesson: {
+    rule: string;
+    tags: string[];
+    outcome: string;
+    context?: string;
+  };
+}
+
+/** Payload for pushing a performance record to the hive. */
+export interface PerformancePushPayload {
+  agentId: string;
+  performance: {
+    poolAddress: string;
+    pnlPct: number;
+    pnlUsd: number;
+    holdTimeMinutes: number;
+    closeReason: string;
+    rangeEfficiency?: number;
+    strategy?: string;
+  };
+}
+
+/** Generic push response. */
+export interface PushResponse {
+  accepted: boolean;
+  message?: string;
+}
+
+// ─── Pull Types (Phase 3) ────────────────────────────────────────────
+
+/**
+ * A single pulled lesson from the hive, normalised from original JS fields:
+ *   id | lessonId, rule, tags, role, outcome, sourceType | source, score, created_at | createdAt
+ *
+ * All fields are optional to handle server schema variation safely.
+ * Consumers must validate before relying on any field.
+ */
+export interface PulledLesson {
+  /** Normalised id (from `id` or `lessonId`). */
+  id?: string;
+  /** The lesson rule text. */
+  rule: string;
+  /** Tags associated with this lesson. */
+  tags?: string[];
+  /** Role context (e.g. "screener", "manager"). */
+  role?: string;
+  /** Outcome that produced this lesson (e.g. "positive", "negative"). */
+  outcome?: string;
+  /** Source type (from `sourceType` or `source`). */
+  sourceType?: string;
+  /** Numeric score / relevance. */
+  score?: number;
+  /** Creation timestamp (from `created_at` or `createdAt`). */
+  createdAt?: string;
+}
+
+/**
+ * Response payload from GET /api/hivemind/lessons/pull.
+ * The original client expects `.lessons` under `payload`.
+ */
+export interface PullLessonsResponse {
+  lessons?: PulledLesson[];
+}
+
+/**
+ * A single pulled preset item from the hive.
+ * The schema is intentionally permissive — we only use fields that
+ * clearly exist in the original client usage pattern. If the shape
+ * is ambiguous, the adapter returns empty string rather than inventing meaning.
+ */
+export interface PulledPreset {
+  [key: string]: unknown;
+}
+
+/**
+ * Response payload from GET /api/hivemind/presets/pull.
+ * The original client expects `.presets` under `payload`.
+ */
+export interface PullPresetsResponse {
+  presets?: PulledPreset[];
 }
