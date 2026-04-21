@@ -57,7 +57,16 @@ function formatReportWithTimestamp(report: string, scheduled = false): string {
   if (intervalMin <= 0) {
     throw new Error(`Invalid screeningIntervalMin: ${config.schedule.screeningIntervalMin}`);
   }
-  const nextScreening = new Date(now.getTime() + intervalMin * 60 * 1000);
+  // Calculate actual cron-aligned next time (*/N pattern → :00, :N, :2N, …)
+  const currentMinutes = now.getMinutes();
+  const nextMinute = (Math.floor(currentMinutes / intervalMin) + 1) * intervalMin;
+  const nextScreening = new Date(now);
+  if (nextMinute >= 60) {
+    nextScreening.setHours(nextScreening.getHours() + 1);
+    nextScreening.setMinutes(nextMinute % 60, 0, 0);
+  } else {
+    nextScreening.setMinutes(nextMinute, 0, 0);
+  }
   const nextScreeningTime = `⏭️ Next: ${nextScreening.getDate().toString().padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][nextScreening.getMonth()]} ${nextScreening.getHours().toString().padStart(2, "0")}:${nextScreening.getMinutes().toString().padStart(2, "0")} (${scheduled ? "scheduled" : "manual"})`;
 
   return `${report}\n\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${timestamp} | ${nextScreeningTime}`;
