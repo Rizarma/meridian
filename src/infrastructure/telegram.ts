@@ -362,6 +362,7 @@ function createTypingIndicator(): TypingIndicator {
   async function tick(): Promise<void> {
     if (stopped) return;
     await botInstance.api.sendChatAction(chatIdStr, "typing");
+    if (stopped) return;
     timer = setTimeout((): void => {
       tick().catch((): null => null);
     }, 4000);
@@ -739,7 +740,6 @@ export async function notifyDeploy({
   binStep,
   baseFee,
 }: TelegramNotifyDeploy): Promise<void> {
-  if (hasActiveLiveMessage()) return;
   const priceStr = priceRange
     ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
@@ -758,7 +758,6 @@ export async function notifyDeploy({
 }
 
 export async function notifyClose({ pair, pnlUsd, pnlPct }: TelegramNotifyClose): Promise<void> {
-  if (hasActiveLiveMessage()) return;
   const sign = pnlUsd >= 0 ? "+" : "";
   await sendHTML(
     `🔒 <b>Closed</b> ${pair}\n` +
@@ -773,7 +772,6 @@ export async function notifySwap({
   amountOut,
   tx,
 }: TelegramNotifySwap): Promise<void> {
-  if (hasActiveLiveMessage()) return;
   await sendHTML(
     `🔄 <b>Swapped</b> ${inputSymbol} → ${outputSymbol}\n` +
       `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
@@ -782,6 +780,5 @@ export async function notifySwap({
 }
 
 export async function notifyOutOfRange({ pair, minutesOOR }: TelegramNotifyOOR): Promise<void> {
-  if (hasActiveLiveMessage()) return;
   await sendHTML(`⚠️ <b>Out of Range</b> ${pair}\n` + `Been OOR for ${minutesOOR} minutes`);
 }
