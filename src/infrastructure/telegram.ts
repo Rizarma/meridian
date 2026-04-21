@@ -349,6 +349,16 @@ interface TypingIndicator {
   stop(): void;
 }
 
+// Track all active typing indicators for force cleanup
+const _activeTypingIndicators = new Set<TypingIndicator>();
+
+export function stopAllTypingIndicators(): void {
+  for (const indicator of _activeTypingIndicators) {
+    indicator.stop();
+  }
+  _activeTypingIndicators.clear();
+}
+
 function createTypingIndicator(): TypingIndicator {
   if (!bot || !chatId) {
     return { stop() {} };
@@ -368,15 +378,19 @@ function createTypingIndicator(): TypingIndicator {
     }, 4000);
   }
 
-  tick().catch((): null => null);
-
-  return {
+  const indicator: TypingIndicator = {
     stop() {
       stopped = true;
       if (timer) clearTimeout(timer);
       timer = null;
+      _activeTypingIndicators.delete(indicator);
     },
   };
+
+  _activeTypingIndicators.add(indicator);
+  tick().catch((): null => null);
+
+  return indicator;
 }
 
 function toolLabel(name: string): string {

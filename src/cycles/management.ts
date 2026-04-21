@@ -83,9 +83,17 @@ function formatTimestampWithNextManagement(scheduled = false): string {
   ];
   const timestamp = `🕐 ${now.getDate().toString().padStart(2, "0")} ${months[now.getMonth()]} ${now.getFullYear().toString().slice(2)} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
 
-  // Calculate next management time
+  // Calculate next management time (cron-aligned: */N pattern → :00, :N, :2N, …)
   const intervalMin = config.schedule.managementIntervalMin ?? 10;
-  const nextRun = new Date(now.getTime() + intervalMin * 60 * 1000);
+  const currentMinutes = now.getMinutes();
+  const nextMinute = (Math.floor(currentMinutes / intervalMin) + 1) * intervalMin;
+  const nextRun = new Date(now);
+  if (nextMinute >= 60) {
+    nextRun.setHours(nextRun.getHours() + 1);
+    nextRun.setMinutes(nextMinute % 60, 0, 0);
+  } else {
+    nextRun.setMinutes(nextMinute, 0, 0);
+  }
   const nextTime = `${nextRun.getDate().toString().padStart(2, "0")} ${months[nextRun.getMonth()]} ${nextRun.getHours().toString().padStart(2, "0")}:${nextRun.getMinutes().toString().padStart(2, "0")}`;
   const indicator = scheduled ? "scheduled" : "manual";
 
