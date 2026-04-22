@@ -139,12 +139,15 @@ export async function runScreeningCycle(
           // screening cycle runs at a time, preventing concurrent mutation of the ID.
           const existingMessageId = getLastScreeningMessageId();
           if (existingMessageId) {
-            const updated = await updateExistingLiveMessage(
+            const updatedLiveMessage = await updateExistingLiveMessage(
               "🔍 Screening Cycle",
               formattedReport,
               existingMessageId
             );
-            if (!updated) {
+            if (updatedLiveMessage) {
+              // Finalize to stop the typing indicator
+              await updatedLiveMessage.finalize(formattedReport);
+            } else {
               const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
               if (hasMessageId(sent)) {
                 setLastScreeningMessageId(sent.message_id);
@@ -327,12 +330,15 @@ export async function runScreeningCycle(
             const existingMessageId = getLastScreeningMessageId();
             if (existingMessageId) {
               // Try to update existing message
-              const updated = await updateExistingLiveMessage(
+              const updatedLiveMessage = await updateExistingLiveMessage(
                 "🔍 Screening Cycle",
                 formattedReport,
                 existingMessageId
               );
-              if (!updated) {
+              if (updatedLiveMessage) {
+                // Finalize to stop the typing indicator
+                await updatedLiveMessage.finalize(formattedReport);
+              } else {
                 // Update failed (message deleted or too old), create new
                 const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
                 if (hasMessageId(sent)) {
