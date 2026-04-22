@@ -248,6 +248,47 @@ export function initSchema(): void {
     )
   `);
 
+  // Portfolio history - synced from Meteora API for cross-machine learning
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS portfolio_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      wallet_address TEXT NOT NULL,
+      pool_address TEXT NOT NULL,
+      pool_name TEXT,
+      token_x_mint TEXT,
+      token_y_mint TEXT,
+      token_x_symbol TEXT,
+      token_y_symbol TEXT,
+      bin_step INTEGER,
+      base_fee REAL,
+      total_deposit_usd REAL,
+      total_deposit_sol REAL,
+      total_withdrawal_usd REAL,
+      total_withdrawal_sol REAL,
+      total_fee_usd REAL,
+      total_fee_sol REAL,
+      pnl_usd REAL,
+      pnl_sol REAL,
+      pnl_pct_change REAL,
+      pnl_sol_pct_change REAL,
+      token_breakdown_json TEXT,
+      last_closed_at INTEGER,
+      total_positions_count INTEGER,
+      days_back INTEGER,
+      fetched_at TEXT NOT NULL,
+      first_seen_at TEXT,
+      fee_efficiency_annualized REAL,
+      capital_rotation_ratio REAL,
+      data_freshness_hours REAL,
+      our_positions_count INTEGER DEFAULT 0,
+      our_total_pnl_pct REAL,
+      outperformance_delta REAL,
+      is_active_pool BOOLEAN DEFAULT 0,
+      lesson_generated BOOLEAN DEFAULT 0,
+      UNIQUE(wallet_address, pool_address, fetched_at)
+    )
+  `);
+
   // State metadata - generic key-value store
   db.exec(`
     CREATE TABLE IF NOT EXISTS state_metadata (
@@ -360,6 +401,9 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_position_state_events_ts ON position_state_events(ts);
     CREATE INDEX IF NOT EXISTS idx_position_state_events_position ON position_state_events(position);
     CREATE INDEX IF NOT EXISTS idx_token_blacklist_added ON token_blacklist(added_at);
+    CREATE INDEX IF NOT EXISTS idx_portfolio_wallet ON portfolio_history(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_portfolio_pool ON portfolio_history(pool_address);
+    CREATE INDEX IF NOT EXISTS idx_portfolio_fetched ON portfolio_history(fetched_at);
     CREATE INDEX IF NOT EXISTS idx_strategies_added ON strategies(added_at);
     CREATE INDEX IF NOT EXISTS idx_suggestions_status ON threshold_suggestions(status);
     CREATE INDEX IF NOT EXISTS idx_suggestions_created ON threshold_suggestions(created_at);
@@ -1091,6 +1135,7 @@ export function validateSchema(): { valid: boolean; missingTables: string[] } {
     "active_strategy",
     "threshold_suggestions",
     "threshold_history",
+    "portfolio_history",
   ];
 
   const db = getDb();
