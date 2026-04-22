@@ -96,6 +96,13 @@ export interface FeaturesConfig {
   okx: boolean;
 }
 
+export interface PortfolioSyncConfig {
+  enabled: boolean;
+  daysBack: number;
+  minPositionsForLesson: number;
+  refreshIntervalMinutes: number;
+}
+
 export interface Config {
   risk: RiskConfig;
   screening: ScreeningConfig;
@@ -106,6 +113,7 @@ export interface Config {
   tokens: TokenConfig;
   darwin: DarwinConfig;
   features: FeaturesConfig;
+  portfolioSync: PortfolioSyncConfig;
 }
 
 export interface UserConfigPartial {
@@ -171,6 +179,7 @@ export interface UserConfigPartial {
   emergencyPriceDropPct?: number;
   darwin?: DarwinConfig;
   features?: Partial<FeaturesConfig>;
+  portfolioSync?: Partial<PortfolioSyncConfig>;
   // Flat key fallbacks for feature flags (written by older versions or update_config)
   hiveMind?: boolean;
   darwinEvolution?: boolean;
