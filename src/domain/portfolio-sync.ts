@@ -80,6 +80,63 @@ interface PortfolioHistoryRow {
   lesson_generated: number;
 }
 
+// ─── Lesson Coverage ──────────────────────────────────────────────
+
+/** Coverage metrics for existing lessons, used to decide if bootstrap is needed. */
+export interface LessonCoverage {
+  /** Number of distinct pools represented in lessons */
+  uniquePools: number;
+  /** Lessons with a positive outcome (good, worked) */
+  positiveCount: number;
+  /** Lessons with a negative outcome (bad, avoid, poor, failed) */
+  negativeCount: number;
+  /** Newest lesson timestamp as milliseconds since epoch (0 if no lessons) */
+  newestLessonMs: number;
+}
+
+/**
+ * Calculate lesson coverage metrics from the lessons table.
+ * Used to determine whether portfolio bootstrap is still useful.
+ */
+export function calculateLessonCoverage(): LessonCoverage {
+  try {
+    const row = get<{
+      unique_pools: number;
+      positive_count: number;
+      negative_count: number;
+      newest_lesson: string | null;
+    }>(
+      `SELECT
+         COUNT(DISTINCT pool)         AS unique_pools,
+         SUM(CASE WHEN outcome IN ('good','worked') THEN 1 ELSE 0 END) AS positive_count,
+         SUM(CASE WHEN outcome IN ('bad','avoid','poor','failed') THEN 1 ELSE 0 END) AS negative_count,
+         MAX(created_at)              AS newest_lesson
+       FROM lessons`
+    );
+
+    const newestMs = row?.newest_lesson ? new Date(row.newest_lesson).getTime() : 0;
+
+    return {
+      uniquePools: row?.unique_pools ?? 0,
+      positiveCount: row?.positive_count ?? 0,
+      negativeCount: row?.negative_count ?? 0,
+      newestLessonMs: Number.isFinite(newestMs) ? newestMs : 0,
+    };
+  } catch (err) {
+    log(
+      "portfolio_sync_warn",
+      `Failed to calculate lesson coverage: ${err instanceof Error ? err.message : String(err)}`
+    );
+    // Fail-open: return zero coverage to trigger bootstrap
+    return {
+      uniquePools: 0,
+      positiveCount: 0,
+      negativeCount: 0,
+      newestLessonMs: 0,
+    };
+  }
+}
+
 // ─── Feature Flag Check ──────────────────────────────────────────
 
 /**
@@ -235,13 +292,84 @@ export async function storePortfolioSnapshot(
     firstSeenAt,
     feeEfficiencyAnnualized,
     capitalRotationRatio,
-    null, // data_freshness_hours — computed on read
+    // Compute data freshness: hours since last_closed_at or since first_seen_at
+    (() => {
+      if (pool.lastClosedAt) return (Date.now() - pool.lastClosedAt) / (1000 * 60 * 60);
+      if (existing?.first_seen_at)
+        return (Date.now() - new Date(existing.first_seen_at).getTime()) / (1000 * 60 * 60);
+      return 0;
+    })() as number,
     ourPositionsCount,
     ourTotalPnlPct,
     outperformanceDelta,
     isActivePool,
     0 // lesson_generated — will be set by generatePortfolioLessons
   );
+}
+
+// ─── Age-Out Cleanup ─────────────────────────────────────────────
+
+/**
+ * Delete portfolio_history records older than `daysToKeep` days.
+ * Uses ISO date (YYYY-MM-DD) comparison on fetched_at.
+ * Fail-open: errors are logged but never thrown.
+ */
+export function cleanupOldPortfolioData(daysToKeep: number = 180): void {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    const cutoffIso = cutoffDate.toISOString().split("T")[0]; // YYYY-MM-DD
+
+    const result = run(`DELETE FROM portfolio_history WHERE fetched_at < ?`, cutoffIso);
+
+    if (result.changes > 0) {
+      log(
+        "portfolio_sync",
+        `Cleaned up ${result.changes} old portfolio records (> ${daysToKeep} days)`
+      );
+    }
+  } catch (err) {
+    log(
+      "portfolio_sync_warn",
+      `Cleanup failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+// ─── Background Refresh Cron ─────────────────────────────────────
+
+/** Tracks last cleanup time for weekly execution within the cron interval. */
+let lastCleanupTime = 0;
+
+const WEEKLY_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Start a background cron that periodically refreshes portfolio data.
+ * Also runs cleanup on a weekly cadence.
+ *
+ * @returns A stop function to clear the interval.
+ */
+export function startPortfolioRefreshCron(
+  wallet: string,
+  syncConfig: PortfolioSyncConfig
+): () => void {
+  const intervalMs = (syncConfig.refreshIntervalMinutes ?? 30) * 60 * 1000;
+
+  const timer = setInterval(async () => {
+    try {
+      await syncPoolPortfolio(wallet, ""); // refresh all pools for the wallet
+    } catch {
+      // Fail-open: errors logged inside syncPoolPortfolio
+    }
+
+    // Weekly cleanup of old records
+    if (Date.now() - lastCleanupTime > WEEKLY_MS) {
+      cleanupOldPortfolioData();
+      lastCleanupTime = Date.now();
+    }
+  }, intervalMs);
+
+  return () => clearInterval(timer);
 }
 
 // ─── Bootstrap & Sync ────────────────────────────────────────────
@@ -286,6 +414,9 @@ export async function bootstrapFromPortfolio(
     if (lessons.length > 0) {
       log("portfolio_sync", `Generated ${lessons.length} portfolio-derived lessons`);
     }
+
+    // Clean up old records after fetching new data
+    cleanupOldPortfolioData();
   } catch (err) {
     log(
       "portfolio_sync_error",
@@ -305,6 +436,9 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
 
   log("portfolio_sync", `Syncing portfolio for pool ${poolAddress.slice(0, 8)}...`);
 
+  // Warn if existing data is stale
+  validateDataFreshness(poolAddress);
+
   try {
     const items = await fetchMeteoraPortfolio(wallet, syncConfig.daysBack);
     const targetPool = items.find((item) => item.poolAddress === poolAddress);
@@ -320,6 +454,103 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
     );
     // Fail-open: never block position close flow
   }
+}
+
+// ─── Data Freshness Validation ────────────────────────────────────
+
+/**
+ * Validate data freshness for a pool and log warnings if stale (>48h).
+ * Fail-open: errors are caught and logged, never blocking.
+ */
+export function validateDataFreshness(poolAddress: string): void {
+  try {
+    const row = get<{ data_freshness_hours: number; fetched_at: string }>(
+      `SELECT data_freshness_hours, fetched_at
+       FROM portfolio_history
+       WHERE pool_address = ?
+       ORDER BY fetched_at DESC LIMIT 1`,
+      poolAddress
+    );
+
+    if (row && row.data_freshness_hours > 48) {
+      log(
+        "portfolio_sync_warn",
+        `Portfolio data for ${poolAddress.slice(0, 8)}... is ${row.data_freshness_hours.toFixed(1)}h old`
+      );
+    }
+  } catch {
+    // Fail-open: never block operations
+  }
+}
+
+// ─── Lesson Deduplication ─────────────────────────────────────────
+
+/**
+ * Check if a semantically equivalent lesson already exists.
+ * Compares pool, outcome, source, and the first 100 chars of the rule text.
+ * Fail-open: returns false if the check itself fails.
+ */
+function isDuplicateLesson(
+  pool: string,
+  outcome: string,
+  rule: string,
+  source: string = "portfolio_sync"
+): boolean {
+  try {
+    const existing = query<{ rule: string }>(
+      `SELECT rule FROM lessons
+       WHERE pool = ? AND outcome = ?
+       AND json_extract(data_json, '$.source') = ?`,
+      pool,
+      outcome,
+      source
+    );
+
+    if (!existing || existing.length === 0) return false;
+
+    const rulePrefix = rule.substring(0, 100);
+    return existing.some((e) => {
+      const existingRule = e.rule ?? "";
+      return existingRule.substring(0, 100) === rulePrefix;
+    });
+  } catch {
+    // Fail-open: if the check fails, don't block insertion
+    return false;
+  }
+}
+
+// ─── Lesson Diversity Guard ──────────────────────────────────────
+
+/**
+ * Validate that a batch of lessons isn't biased toward a single pool.
+ * Returns { valid: false } to reject, { valid: true, reason? } to accept (with optional warning).
+ */
+function validateLessonDiversity(lessons: LessonEntry[]): { valid: boolean; reason?: string } {
+  const poolDistribution = new Map<string, number>();
+  for (const lesson of lessons) {
+    const pool = lesson.pool ?? "unknown";
+    poolDistribution.set(pool, (poolDistribution.get(pool) || 0) + 1);
+  }
+
+  // If all lessons from single pool and more than 2 lessons, reject
+  if (poolDistribution.size === 1 && lessons.length > 2) {
+    const [pool, count] = Array.from(poolDistribution.entries())[0];
+    return {
+      valid: false,
+      reason: `All ${count} lessons from single pool (${pool}) — skipping to avoid bias`,
+    };
+  }
+
+  // If one pool dominates (>70% of lessons), warn but accept
+  const maxCount = Math.max(...poolDistribution.values());
+  if (maxCount / lessons.length > 0.7) {
+    return {
+      valid: true,
+      reason: `Warning: One pool dominates (${maxCount}/${lessons.length} lessons)`,
+    };
+  }
+
+  return { valid: true };
 }
 
 // ─── Lesson Generation ───────────────────────────────────────────
@@ -347,8 +578,29 @@ export async function generatePortfolioLessons(
     const perfLessons = generateOutperformanceLessons(wallet, syncConfig);
     lessons.push(...perfLessons);
 
-    // Store generated lessons
+    // Diversity guard — validate before inserting
     if (lessons.length > 0) {
+      let diversityResult: { valid: boolean; reason?: string };
+      try {
+        diversityResult = validateLessonDiversity(lessons);
+      } catch {
+        // Fail-open: if validation itself fails, proceed with insertion
+        diversityResult = { valid: true };
+      }
+
+      if (!diversityResult.valid) {
+        log(
+          "portfolio_sync_warn",
+          diversityResult.reason ?? "Lesson diversity check failed — skipping batch"
+        );
+        return [];
+      }
+
+      if (diversityResult.reason) {
+        log("portfolio_sync_warn", diversityResult.reason);
+      }
+
+      // Store generated lessons
       transaction(() => {
         for (const lesson of lessons) {
           run(
@@ -397,31 +649,46 @@ function generatePoolCharacterLessons(
   const lessons: LessonEntry[] = [];
   const now = new Date().toISOString();
 
-  // Find pools with consistently positive PnL from portfolio history
-  const reliablePools = query<PortfolioHistoryRow & { avg_pnl_pct: number; snap_count: number }>(
-    `SELECT *, AVG(pnl_pct_change) as avg_pnl_pct, COUNT(*) as snap_count
+  // Find pools with consistently positive PnL from portfolio history (recency-weighted)
+  const reliablePools = query<
+    PortfolioHistoryRow & { weighted_avg_pnl_pct: number; snap_count: number; recent_count: number }
+  >(
+    `SELECT *, 
+       SUM(CASE 
+         WHEN fetched_at > date('now', '-30 days') THEN pnl_pct_change * 2 
+         ELSE pnl_pct_change 
+       END) / COUNT(*) as weighted_avg_pnl_pct,
+       COUNT(*) as snap_count,
+       SUM(CASE WHEN fetched_at > date('now', '-30 days') THEN 1 ELSE 0 END) as recent_count
      FROM portfolio_history
      WHERE wallet_address = ?
        AND pnl_pct_change IS NOT NULL
        AND pnl_pct_change > 0
      GROUP BY pool_address
      HAVING snap_count >= ?
-     ORDER BY avg_pnl_pct DESC
+     ORDER BY weighted_avg_pnl_pct DESC
      LIMIT 10`,
     wallet,
     syncConfig.minPositionsForLesson
   );
 
   for (const pool of reliablePools) {
-    const avgPnl = pool.avg_pnl_pct.toFixed(1);
+    const avgPnl = pool.weighted_avg_pnl_pct.toFixed(1);
+    const rule = `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} positive portfolio snapshots (${pool.recent_count} recent) with weighted avg PnL +${avgPnl}% — historically reliable [Note: based on surviving pools only; verify current TVL/volume]`;
+
+    if (isDuplicateLesson(pool.pool_address, "good", rule)) {
+      log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
+      continue;
+    }
+
     lessons.push({
       id: Date.now() + Math.floor(Math.random() * 10000),
-      rule: `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} positive portfolio snapshots with avg PnL +${avgPnl}% — historically reliable`,
+      rule,
       tags: ["portfolio", "pool-character", "reliable", "screening"],
       outcome: "good" as LessonOutcome,
-      context: `Cross-machine portfolio data (${syncConfig.daysBack} days): ${pool.snap_count} snapshots`,
+      context: `Cross-machine portfolio data (${syncConfig.daysBack} days, recency-weighted): ${pool.snap_count} snapshots (${pool.recent_count} recent). Note: Excludes delisted/failed pools`,
       pool: pool.pool_address,
-      pnl_pct: pool.avg_pnl_pct,
+      pnl_pct: pool.weighted_avg_pnl_pct,
       created_at: now,
       pinned: false,
       role: "SCREENER",
@@ -438,30 +705,45 @@ function generateAvoidLessons(wallet: string, syncConfig: PortfolioSyncConfig): 
   const lessons: LessonEntry[] = [];
   const now = new Date().toISOString();
 
-  const avoidPools = query<PortfolioHistoryRow & { avg_pnl_pct: number; snap_count: number }>(
-    `SELECT *, AVG(pnl_pct_change) as avg_pnl_pct, COUNT(*) as snap_count
+  const avoidPools = query<
+    PortfolioHistoryRow & { weighted_avg_pnl_pct: number; snap_count: number; recent_count: number }
+  >(
+    `SELECT *, 
+       SUM(CASE 
+         WHEN fetched_at > date('now', '-30 days') THEN pnl_pct_change * 2 
+         ELSE pnl_pct_change 
+       END) / COUNT(*) as weighted_avg_pnl_pct,
+       COUNT(*) as snap_count,
+       SUM(CASE WHEN fetched_at > date('now', '-30 days') THEN 1 ELSE 0 END) as recent_count
      FROM portfolio_history
      WHERE wallet_address = ?
        AND pnl_pct_change IS NOT NULL
        AND pnl_pct_change < -10
      GROUP BY pool_address
      HAVING snap_count >= ?
-     ORDER BY avg_pnl_pct ASC
+     ORDER BY weighted_avg_pnl_pct ASC
      LIMIT 10`,
     wallet,
     syncConfig.minPositionsForLesson
   );
 
   for (const pool of avoidPools) {
-    const avgPnl = pool.avg_pnl_pct.toFixed(1);
+    const avgPnl = pool.weighted_avg_pnl_pct.toFixed(1);
+    const rule = `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} losing portfolio snapshots (${pool.recent_count} recent) with weighted avg PnL ${avgPnl}% — avoid deploying here [Note: based on surviving pools; worse pools may have already failed]`;
+
+    if (isDuplicateLesson(pool.pool_address, "bad", rule)) {
+      log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
+      continue;
+    }
+
     lessons.push({
       id: Date.now() + Math.floor(Math.random() * 10000),
-      rule: `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} losing portfolio snapshots with avg PnL ${avgPnl}% — avoid deploying here`,
+      rule,
       tags: ["portfolio", "avoid", "risk", "screening"],
       outcome: "bad" as LessonOutcome,
-      context: `Cross-machine portfolio data (${syncConfig.daysBack} days): ${pool.snap_count} snapshots all negative`,
+      context: `Cross-machine portfolio data (${syncConfig.daysBack} days, recency-weighted): ${pool.snap_count} snapshots (${pool.recent_count} recent) all negative. Note: Excludes delisted/failed pools`,
       pool: pool.pool_address,
-      pnl_pct: pool.avg_pnl_pct,
+      pnl_pct: pool.weighted_avg_pnl_pct,
       created_at: now,
       pinned: false,
       role: "SCREENER",
@@ -504,12 +786,19 @@ function generateOutperformanceLessons(
   );
 
   for (const pool of outperformers) {
+    const rule = `Outperforming portfolio avg by +${pool.delta.toFixed(1)}% on ${pool.pool_name || pool.pool_address.slice(0, 8)} — our strategy works well here [Note: comparison against surviving pools only]`;
+
+    if (isDuplicateLesson(pool.pool_address, "worked", rule)) {
+      log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
+      continue;
+    }
+
     lessons.push({
       id: Date.now() + Math.floor(Math.random() * 10000),
-      rule: `Outperforming portfolio avg by +${pool.delta.toFixed(1)}% on ${pool.pool_name || pool.pool_address.slice(0, 8)} — our strategy works well here`,
+      rule,
       tags: ["portfolio", "outperformance", "strategy", "management"],
       outcome: "worked" as LessonOutcome,
-      context: `Our avg: ${pool.our_pnl.toFixed(1)}% vs portfolio avg: ${pool.pool_pnl.toFixed(1)}%`,
+      context: `Our avg: ${pool.our_pnl.toFixed(1)}% vs portfolio avg: ${pool.pool_pnl.toFixed(1)}%. Note: Excludes delisted/failed pools`,
       pool: pool.pool_address,
       pnl_pct: pool.our_pnl,
       created_at: now,

@@ -12,6 +12,7 @@ import {
   scheduleTrailingDropConfirmation,
 } from "../cycles/management.js";
 import { runScreeningCycle as runScreeningCycleImpl } from "../cycles/screening.js";
+import { syncPoolPortfolio } from "../domain/portfolio-sync.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
 import { heartbeat as hiveHeartbeat } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
@@ -71,6 +72,61 @@ export async function runScreeningCycle(options: CycleOptions = {}): Promise<str
 }
 
 // ═══════════════════════════════════════════
+//  PORTFOLIO SYNC REFRESH
+// ═══════════════════════════════════════════
+
+/**
+ * Start a background interval that periodically refreshes portfolio data
+ * for pools with open positions. Only runs when portfolioSync is enabled
+ * and refreshIntervalMinutes > 0.
+ *
+ * Fail-open: errors are caught and logged, never crash the bot.
+ */
+export function startPortfolioRefreshCron(): void {
+  if (!config.portfolioSync.enabled || config.portfolioSync.refreshIntervalMinutes <= 0) return;
+
+  const intervalMs = config.portfolioSync.refreshIntervalMinutes * 60 * 1000;
+
+  const interval = setInterval(async () => {
+    try {
+      const { getWallet } = await import("../utils/wallet.js");
+      const wallet = getWallet();
+      const walletAddress = wallet.publicKey.toString();
+
+      // Get pools with open positions
+      const { query } = await import("../infrastructure/db.js");
+      const activePools = query<{ pool: string }>(
+        "SELECT DISTINCT pool FROM position_state WHERE closed = 0"
+      );
+
+      if (activePools.length === 0) return;
+
+      log("portfolio_sync", `Background refresh: syncing ${activePools.length} active pool(s)`);
+
+      for (const { pool } of activePools) {
+        try {
+          await syncPoolPortfolio(walletAddress, pool);
+        } catch (err) {
+          log(
+            "portfolio_sync_warn",
+            `Background refresh failed for pool ${pool.slice(0, 8)}...: ${getErrorMessage(err)}`
+          );
+        }
+      }
+    } catch (err) {
+      log("portfolio_sync_warn", `Background refresh failed: ${getErrorMessage(err)}`);
+    }
+  }, intervalMs);
+
+  cycleState.setPortfolioRefreshInterval(interval);
+
+  log(
+    "portfolio_sync",
+    `Portfolio refresh cron started — every ${config.portfolioSync.refreshIntervalMinutes}m`
+  );
+}
+
+// ═══════════════════════════════════════════
 //  CRON JOB MANAGEMENT
 // ═══════════════════════════════════════════
 
@@ -78,8 +134,11 @@ export function stopCronJobs(): void {
   for (const task of cycleState.getCronTasks()) task.stop();
   const pnlPollInterval = cycleState.getPnlPollInterval();
   if (pnlPollInterval) clearInterval(pnlPollInterval);
+  const portfolioRefreshInterval = cycleState.getPortfolioRefreshInterval();
+  if (portfolioRefreshInterval) clearInterval(portfolioRefreshInterval);
   cycleState.setCronTasks([]);
   cycleState.setPnlPollInterval(undefined);
+  cycleState.setPortfolioRefreshInterval(undefined);
 }
 
 export function startCronJobs(): void {
@@ -272,6 +331,10 @@ Summarize the current portfolio health, total fees earned, and performance of al
   ]);
   // Store interval ref so stopCronJobs can clear it
   cycleState.setPnlPollInterval(pnlPollInterval);
+
+  // Start portfolio refresh cron (no-op if portfolioSync is disabled)
+  startPortfolioRefreshCron();
+
   log(
     "cron",
     `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m`
