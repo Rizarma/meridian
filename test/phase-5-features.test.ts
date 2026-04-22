@@ -111,6 +111,12 @@ function createTestConfig(partial: UserConfigPartial): Config {
       solMode: u.features?.solMode ?? u.solMode ?? false,
       okx: u.features?.okx ?? u.okx ?? false,
     },
+    portfolioSync: {
+      enabled: u.portfolioSync?.enabled ?? false,
+      daysBack: u.portfolioSync?.daysBack ?? 90,
+      minPositionsForLesson: u.portfolioSync?.minPositionsForLesson ?? 3,
+      refreshIntervalMinutes: u.portfolioSync?.refreshIntervalMinutes ?? 30,
+    },
   };
 }
 
