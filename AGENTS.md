@@ -67,6 +67,28 @@ test/            # Phase-numbered integration tests
 - Use `.env` for secrets and environment-specific overrides
 - Use `user-config.json` for day-to-day tuning (models, screening thresholds)
 
+### Portfolio Sync (Cross-Machine Learning)
+
+Optional feature to sync historical LP data from Meteora API. Useful when running the bot on multiple machines.
+
+**Enable in `user-config.json`:**
+```json
+"portfolioSync": {
+  "enabled": true,
+  "daysBack": 90,
+  "minPositionsForLesson": 3,
+  "refreshIntervalMinutes": 30
+}
+```
+
+**What it does**:
+- Fetches your wallet's historical LP positions from Meteora
+- Generates lessons about pool reliability and performance
+- Enables performance comparison (your results vs pool average)
+- Bootstraps learning on fresh deployments
+
+**Default**: Disabled (`enabled: false`)
+
 ## Data Storage
 
 All data is stored in a SQLite database (`meridian.db`) in the project root by default. Override location with `MERIDIAN_ROOT` env var.
