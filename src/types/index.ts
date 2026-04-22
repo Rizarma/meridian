@@ -34,6 +34,7 @@ export type {
   Config,
   DarwinConfig,
   LlmConfig,
+  PortfolioSyncConfig,
   RiskConfig,
   ScheduleConfig,
   ScreeningConfig,

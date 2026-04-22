@@ -243,6 +243,14 @@ export const config: Config = {
     // OKX integration: requires OKX_API_KEY and OKX_SECRET_KEY env vars
     okx: u.features?.okx ?? u.okx ?? hasNonEmptyEnv("OKX_API_KEY", "OKX_SECRET_KEY"),
   },
+
+  // ─── Portfolio Sync ───────────────────
+  portfolioSync: {
+    enabled: u.portfolioSync?.enabled ?? false,
+    daysBack: u.portfolioSync?.daysBack ?? 90,
+    minPositionsForLesson: u.portfolioSync?.minPositionsForLesson ?? 3,
+    refreshIntervalMinutes: u.portfolioSync?.refreshIntervalMinutes ?? 30,
+  },
 };
 
 /**
