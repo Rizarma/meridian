@@ -7,6 +7,7 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
+import { config } from "../config/config.js";
 import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 
@@ -330,6 +331,17 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
     .query<PerformanceRow>("SELECT * FROM performance ORDER BY recorded_at")
     .map(performanceFromRow);
   await runThresholdEvolution(perf, allPerformance);
+
+  // Portfolio sync: update pool portfolio data after position close (opt-in, fail-open)
+  if (config.portfolioSync.enabled) {
+    import("./portfolio-sync.js")
+      .then(async (m) => {
+        const { getWallet } = await import("../utils/wallet.js");
+        const walletAddress = getWallet().publicKey.toString();
+        await m.syncPoolPortfolio(walletAddress, perf.pool);
+      })
+      .catch(() => {}); // fail-open: never block recordPerformance
+  }
 }
 
 /**
