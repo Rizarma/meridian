@@ -84,6 +84,11 @@
     "enabled": false,
     "daysBack": 90,
     "minPositionsForLesson": 3,
-    "refreshIntervalMinutes": 30
+    "refreshIntervalMinutes": 30,
+    "bootstrapThreshold": {
+      "minUniquePools": 3,
+      "requireRiskLessons": true,
+      "maxLessonAgeDays": 7
+    }
   }
 }

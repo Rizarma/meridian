@@ -96,11 +96,18 @@ export interface FeaturesConfig {
   okx: boolean;
 }
 
+export interface BootstrapThresholdConfig {
+  minUniquePools?: number; // default: 3
+  requireRiskLessons?: boolean; // default: true
+  maxLessonAgeDays?: number; // default: 7
+}
+
 export interface PortfolioSyncConfig {
   enabled: boolean;
   daysBack: number;
   minPositionsForLesson: number;
   refreshIntervalMinutes: number;
+  bootstrapThreshold?: BootstrapThresholdConfig;
 }
 
 export interface Config {
