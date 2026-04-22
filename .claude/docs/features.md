@@ -50,6 +50,29 @@ Handled directly in the telegram bot poller (`src/infrastructure/telegram.ts`), 
 | `/close <n>` | Close position by list index |
 | `/set <n> <note>` | Set note on position by list index |
 
+## Portfolio Sync
+
+Cross-machine learning feature that fetches your historical LP positions from Meteora API.
+
+**Use case**: When you switch machines (local → VPS), your lesson history doesn't transfer. This feature fetches your on-chain LP history to bootstrap learning on fresh deployments.
+
+**Configuration** (`user-config.json`):
+```json
+"portfolioSync": {
+  "enabled": false,              // Set true to enable
+  "daysBack": 90,               // How many days of history to fetch
+  "minPositionsForLesson": 3,   // Min positions on a pool before generating lessons
+  "refreshIntervalMinutes": 30  // Background refresh interval
+}
+```
+
+**When enabled**:
+- On startup (if < 5 lessons): Fetches full portfolio, generates "pool character" lessons
+- On position close: Syncs that pool's data for performance comparison
+- Generates lessons like: "RELIABLE_POOL: SOL-USDC consistently yields 8-12%"
+
+**Default**: `enabled: false` — feature is opt-in, zero impact when disabled.
+
 ## Hive Mind (src/infrastructure/hive-mind.ts)
 
 Optional. Enabled by setting `HIVE_MIND_URL` and `HIVE_MIND_API_KEY` in `.env`. Syncs lessons and deploys to a shared server and queries consensus patterns. Not required for normal operation.
