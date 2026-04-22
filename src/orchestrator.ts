@@ -3,7 +3,7 @@
 
 import { config } from "./config/config.js";
 import { TIMEOUT } from "./config/constants.js";
-import { bootstrapFromPortfolio } from "./domain/portfolio-sync.js";
+import { bootstrapFromPortfolio, calculateLessonCoverage } from "./domain/portfolio-sync.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
 import { bootstrapSync } from "./infrastructure/hive-mind.js";
@@ -116,15 +116,22 @@ export async function start(): Promise<void> {
         const wallet = getWallet();
         const walletAddress = wallet.publicKey.toString();
 
-        // Count existing lessons to decide if bootstrap is useful
-        const { query } = await import("./infrastructure/db.js");
-        const lessonRows = query<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
-        const lessonCount = lessonRows[0]?.count ?? 0;
+        // Coverage-based check to decide if bootstrap is useful
+        const coverage = calculateLessonCoverage();
+        const threshold = config.portfolioSync.bootstrapThreshold;
+        const needsBootstrap =
+          coverage.uniquePools < (threshold?.minUniquePools ?? 3) ||
+          (threshold?.requireRiskLessons !== false && coverage.negativeCount === 0) ||
+          Date.now() - coverage.newestLessonMs >
+            (threshold?.maxLessonAgeDays ?? 7) * 24 * 60 * 60 * 1000;
 
-        if (lessonCount < 5) {
+        if (needsBootstrap) {
           await bootstrapFromPortfolio(walletAddress, config.portfolioSync);
         } else {
-          log("portfolio_sync", `Skipping bootstrap — already have ${lessonCount} lessons`);
+          log(
+            "portfolio_sync",
+            `Skipping bootstrap — coverage sufficient: ${coverage.uniquePools} pools, ${coverage.negativeCount} risk lessons`
+          );
         }
       } catch (err) {
         log(
