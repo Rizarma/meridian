@@ -462,7 +462,7 @@ function summarizeToolResult(name: string, result: ToolResult | null): string {
 export async function createLiveMessage(
   title: string,
   intro = "Starting...",
-  cycleType: "management" | "screening" = "management"
+  cycleType: "management" | "screening" | "interactive" = "interactive"
 ): Promise<LiveMessageAPI | null> {
   if (!bot || !chatId) return null;
   const typing = createTypingIndicator();
@@ -493,11 +493,11 @@ export async function createLiveMessage(
     if (!state.messageId) {
       const sent = (await sendMessage(text)) as { message_id?: number } | null;
       state.messageId = sent?.message_id ?? null;
-      // Track this message ID for cycle reuse
-      if (state.messageId) {
+      // Track this message ID for cycle reuse (only for actual cycles, not interactive commands)
+      if (state.messageId && cycleType !== "interactive") {
         if (cycleType === "screening") {
           setLastScreeningMessageId(state.messageId);
-        } else {
+        } else if (cycleType === "management") {
           setLastManagementMessageId(state.messageId);
         }
       }
