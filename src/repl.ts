@@ -517,6 +517,7 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
       await liveMessage?.fail("Empty or invalid input");
       return;
     }
+    let outputAlreadySent = false;
     const { content } = await agentLoop(
       sanitizedText,
       config.llm.maxSteps,
@@ -540,13 +541,24 @@ async function telegramHandler(msg: TelegramMessage, deps: REPLDependencies): Pr
           success: boolean;
         }) => {
           await liveMessage?.toolFinish(name, result, success);
+          // Check if tool already sent output directly to Telegram
+          if (
+            result &&
+            typeof result === "object" &&
+            (result as Record<string, unknown>).output_already_sent === true
+          ) {
+            outputAlreadySent = true;
+          }
         },
       }
     );
     appendHistory(text, content);
-    if (content) {
+    if (content && !outputAlreadySent) {
       if (liveMessage) await liveMessage.finalize(stripThink(content));
       else await sendMessage(stripThink(content));
+    } else if (outputAlreadySent && liveMessage) {
+      // Tool already sent formatted output - just close the live message
+      await liveMessage.finalize("✅ Complete");
     }
   } catch (e) {
     if (liveMessage)
