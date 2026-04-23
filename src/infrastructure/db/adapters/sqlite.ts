@@ -52,6 +52,16 @@ export class SqliteAdapter extends BaseAdapter implements DatabaseOperations {
   async transaction<T>(fn: () => Promise<T> | T): Promise<T> {
     if (!this.db) throw new Error("Database not initialized");
 
-    return Promise.resolve(this.db.transaction(() => fn())());
+    // better-sqlite3's transaction() doesn't support async functions
+    // Use manual BEGIN/COMMIT/ROLLBACK for async support
+    this.db.exec("BEGIN");
+    try {
+      const result = await fn();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 }
