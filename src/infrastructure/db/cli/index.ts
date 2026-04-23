@@ -108,6 +108,54 @@ async function main() {
       break;
     }
 
+    case "reset": {
+      const dbUrl = process.argv[3] || process.env.DATABASE_URL;
+
+      if (!dbUrl) {
+        console.error("Error: DATABASE_URL not set");
+        process.exit(1);
+      }
+
+      console.log("WARNING: This will drop ALL tables in the database.");
+      console.log("Database:", dbUrl.replace(/:.*@/, ":***@")); // Hide password
+      
+      const { createDatabase } = await import("../index.js");
+      const db = await createDatabase({ backend: "postgres", url: dbUrl });
+
+      try {
+        console.log("\nDropping all tables...");
+        await db.run(`
+          DROP TABLE IF EXISTS portfolio_history CASCADE;
+          DROP TABLE IF EXISTS threshold_history CASCADE;
+          DROP TABLE IF EXISTS threshold_suggestions CASCADE;
+          DROP TABLE IF EXISTS cycle_state CASCADE;
+          DROP TABLE IF EXISTS dev_blocklist CASCADE;
+          DROP TABLE IF EXISTS smart_wallets CASCADE;
+          DROP TABLE IF EXISTS token_blacklist CASCADE;
+          DROP TABLE IF EXISTS active_strategy CASCADE;
+          DROP TABLE IF EXISTS strategies CASCADE;
+          DROP TABLE IF EXISTS state_metadata CASCADE;
+          DROP TABLE IF EXISTS position_state_events CASCADE;
+          DROP TABLE IF EXISTS position_state CASCADE;
+          DROP TABLE IF EXISTS signal_weight_history CASCADE;
+          DROP TABLE IF EXISTS signal_weights CASCADE;
+          DROP TABLE IF EXISTS performance CASCADE;
+          DROP TABLE IF EXISTS lessons CASCADE;
+          DROP TABLE IF EXISTS pool_deploys CASCADE;
+          DROP TABLE IF EXISTS pools CASCADE;
+          DROP TABLE IF EXISTS position_events CASCADE;
+          DROP TABLE IF EXISTS position_snapshots CASCADE;
+          DROP TABLE IF EXISTS positions CASCADE;
+          DROP TABLE IF EXISTS schema_version CASCADE;
+        `);
+        console.log("All tables dropped successfully.");
+        console.log("\nYou can now re-import your data with: pnpm db:import <file.json> <db-url>");
+      } finally {
+        await db.close();
+      }
+      break;
+    }
+
     default:
       console.log("Meridian Database CLI");
       console.log("");
@@ -116,11 +164,13 @@ async function main() {
       console.log("  import [input.json] [db-url]       Import JSON to Postgres");
       console.log("  dedupe <file1> <file2> [output]    Merge and deduplicate two exports");
       console.log("  migrate [db-path]                  Full SQLite → Postgres migration");
+      console.log("  reset [db-url]                     Drop all tables (DANGER)");
       console.log("");
       console.log("Examples:");
       console.log("  pnpm db:export ./meridian.db ./backup.json");
       console.log("  pnpm db:dedupe ./local.json ./vps.json ./merged.json");
       console.log("  DATABASE_URL=postgresql://... pnpm db:migrate");
+      console.log("  pnpm db:reset postgresql://...    # Reset database");
       process.exit(1);
   }
 }

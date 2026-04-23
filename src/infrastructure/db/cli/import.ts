@@ -69,7 +69,7 @@ async function importPositions(db: DatabaseOperations, positions: ExportData["po
         closed = excluded.closed,
         closed_at = COALESCE(excluded.closed_at, positions.closed_at),
         pnl_pct = COALESCE(excluded.pnl_pct, positions.pnl_pct),
-        updated_at = MAX(positions.updated_at, excluded.updated_at)`,
+        updated_at = GREATEST(positions.updated_at, excluded.updated_at)`,
       pos.address,
       pos.pool,
       pos.pool_name,

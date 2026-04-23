@@ -16,6 +16,7 @@
     "db:import": "node dist/src/infrastructure/db/cli/index.js import",
     "db:dedupe": "node dist/src/infrastructure/db/cli/index.js dedupe",
     "db:migrate": "node dist/src/infrastructure/db/cli/index.js migrate",
+    "db:reset": "node dist/src/infrastructure/db/cli/index.js reset",
     "test:phase0:exit": "pnpm run build && node dist/test/phase-0-exit-rules.test.js",
     "test:phase0:trailing": "pnpm run build && node dist/test/phase-0-trailing-tp.test.js",
     "test:phase0:config": "pnpm run build && node dist/test/phase-0-config-mutation.test.js",

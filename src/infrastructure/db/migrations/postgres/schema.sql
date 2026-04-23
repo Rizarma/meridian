@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS pool_deploys (
 
 -- Lessons table
 CREATE TABLE IF NOT EXISTS lessons (
-  id SERIAL PRIMARY KEY,
+  id BIGINT PRIMARY KEY,
   rule TEXT NOT NULL,
   tags TEXT,
   outcome TEXT,
