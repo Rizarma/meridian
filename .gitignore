@@ -69,3 +69,5 @@ coverage/
 
 # Husky internal files
 .husky/_
+*.json.backup
+local-backup.json
