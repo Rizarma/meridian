@@ -78,5 +78,17 @@
     "decayFactor": 0.95,
     "weightFloor": 0.5,
     "weightCeiling": 2.0
+  },
+  "portfolioSync": {
+    "_comment": "Cross-machine learning via Meteora API. Fetches your historical LP data to generate lessons across deployments.",
+    "enabled": false,
+    "daysBack": 90,
+    "minPositionsForLesson": 3,
+    "refreshIntervalMinutes": 30,
+    "bootstrapThreshold": {
+      "minUniquePools": 3,
+      "requireRiskLessons": true,
+      "maxLessonAgeDays": 7
+    }
   }
 }

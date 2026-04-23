@@ -25,6 +25,7 @@ Meridian runs continuous screening and management cycles, deploying capital into
 - **Darwinian signal weighting** — tracks which screening signals actually predict winners and reweights them over time
 - **Top-LPer study** — analyzes on-chain behavior of the best performers in any pool (hold duration, entry/exit timing, win rate)
 - **Pool memory** — per-pool deploy history, snapshots, and outcomes
+- **Portfolio sync** — fetches your historical LP positions from Meteora API to bootstrap learning on fresh deployments; includes coverage-based threshold validation, recency-weighted lesson generation, and automatic background refresh for active pools
 
 ### Risk & safety
 - **Multi-source risk screening** — Jupiter token audit, bundle/sniper/suspicious-tx detection via OKX OnchainOS, bot-holder detection
@@ -519,6 +520,18 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `darwin.decayFactor` | `0.95` | Multiplier applied to losing signals |
 | `darwin.weightFloor` | `0.5` | Minimum allowed weight |
 | `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
+
+### Portfolio sync
+
+| Field | Default | Description |
+|---|---|---|
+| `portfolioSync.enabled` | `false` | Enable cross-machine learning from Meteora API |
+| `portfolioSync.daysBack` | `90` | Days of historical LP data to fetch |
+| `portfolioSync.minPositionsForLesson` | `3` | Minimum positions on a pool before generating lessons |
+| `portfolioSync.refreshIntervalMinutes` | `30` | Background refresh interval for active pools |
+| `portfolioSync.bootstrapThreshold.minUniquePools` | `3` | Minimum unique pools required to skip bootstrap |
+| `portfolioSync.bootstrapThreshold.requireRiskLessons` | `true` | Require at least one lesson from losing positions |
+| `portfolioSync.bootstrapThreshold.maxLessonAgeDays` | `7` | Maximum age of newest lesson before bootstrap triggers |
 
 ---
 

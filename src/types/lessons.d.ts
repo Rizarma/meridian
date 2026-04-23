@@ -45,7 +45,7 @@ export type LessonOutcome =
   | "efficient";
 
 export interface LessonEntry {
-  id: number;
+  id: number | null;
   rule: string;
   tags: string[];
   outcome: LessonOutcome;

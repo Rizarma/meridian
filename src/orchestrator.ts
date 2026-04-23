@@ -3,6 +3,7 @@
 
 import { config } from "./config/config.js";
 import { TIMEOUT } from "./config/constants.js";
+import { bootstrapFromPortfolio, calculateLessonCoverage } from "./domain/portfolio-sync.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
 import { bootstrapSync } from "./infrastructure/hive-mind.js";
@@ -104,6 +105,42 @@ export async function start(): Promise<void> {
 
   // Hive Mind bootstrap sync — non-blocking, fail-open
   bootstrapSync();
+
+  // Portfolio Sync bootstrap — opt-in, only when enabled and few lessons
+  if (config.portfolioSync.enabled) {
+    const walletKey = process.env.WALLET_PRIVATE_KEY;
+    if (walletKey) {
+      try {
+        // Dynamic import to avoid circular deps and to only load bs58/web3 when needed
+        const { getWallet } = await import("./utils/wallet.js");
+        const wallet = getWallet();
+        const walletAddress = wallet.publicKey.toString();
+
+        // Coverage-based check to decide if bootstrap is useful
+        const coverage = calculateLessonCoverage();
+        const threshold = config.portfolioSync.bootstrapThreshold;
+        const needsBootstrap =
+          coverage.uniquePools < (threshold?.minUniquePools ?? 3) ||
+          (threshold?.requireRiskLessons !== false && coverage.negativeCount === 0) ||
+          Date.now() - coverage.newestLessonMs >
+            (threshold?.maxLessonAgeDays ?? 7) * 24 * 60 * 60 * 1000;
+
+        if (needsBootstrap) {
+          await bootstrapFromPortfolio(walletAddress, config.portfolioSync);
+        } else {
+          log(
+            "portfolio_sync",
+            `Skipping bootstrap — coverage sufficient: ${coverage.uniquePools} pools, ${coverage.negativeCount} risk lessons`
+          );
+        }
+      } catch (err) {
+        log(
+          "portfolio_sync_warn",
+          `Portfolio bootstrap skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
 
   // Start REPL or non-TTY mode
   const isTTY = process.stdin.isTTY;

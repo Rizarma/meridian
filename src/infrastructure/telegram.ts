@@ -294,6 +294,31 @@ export async function sendMessage(text: string): Promise<unknown> {
   }
 }
 
+/**
+ * Send a message with MarkdownV2 formatting without escaping.
+ * Use this ONLY when content is pre-formatted and known to be valid MarkdownV2.
+ */
+export async function sendMessageMarkdown(text: string): Promise<unknown> {
+  if (!bot || !chatId) return null;
+  const safeText = String(text).slice(0, 4096);
+  try {
+    return await bot.api.sendMessage(chatId, safeText, { parse_mode: "MarkdownV2" });
+  } catch (error) {
+    // If MarkdownV2 parsing fails, retry as plain text
+    if (error instanceof GrammyError) {
+      const errorMessage = error.description || "";
+      if (errorMessage.includes("parse entities") || errorMessage.includes("Can't find end")) {
+        log("telegram_warn", "MarkdownV2 parsing failed, sending as plain text");
+        return await bot.api.sendMessage(chatId, safeText.slice(0, 4096));
+      }
+      if (errorMessage.includes("message is not modified")) {
+        return null;
+      }
+    }
+    throw error;
+  }
+}
+
 export async function sendHTML(html: string): Promise<void> {
   if (!bot || !chatId) return;
   try {
@@ -449,8 +474,11 @@ function summarizeToolResult(name: string, result: ToolResult | null): string {
       return `${result.candidates?.length ?? 0} candidates`;
     case "get_my_positions":
       return `${result.total_positions ?? result.positions?.length ?? 0} positions`;
-    case "get_wallet_balance":
-      return `${result.sol ?? "?"} SOL`;
+    case "get_wallet_balance": {
+      // Format with 3 decimal places, handle missing value gracefully
+      const sol = typeof result.sol === "number" ? result.sol.toFixed(3) : "loading...";
+      return `${sol} SOL`;
+    }
     case "study_top_lpers":
     case "get_top_lpers":
       return `${result.lpers?.length ?? 0} LPers`;
@@ -462,7 +490,7 @@ function summarizeToolResult(name: string, result: ToolResult | null): string {
 export async function createLiveMessage(
   title: string,
   intro = "Starting...",
-  cycleType: "management" | "screening" = "management"
+  cycleType: "management" | "screening" | "interactive" = "interactive"
 ): Promise<LiveMessageAPI | null> {
   if (!bot || !chatId) return null;
   const typing = createTypingIndicator();
@@ -493,11 +521,11 @@ export async function createLiveMessage(
     if (!state.messageId) {
       const sent = (await sendMessage(text)) as { message_id?: number } | null;
       state.messageId = sent?.message_id ?? null;
-      // Track this message ID for cycle reuse
-      if (state.messageId) {
+      // Track this message ID for cycle reuse (only for actual cycles, not interactive commands)
+      if (state.messageId && cycleType !== "interactive") {
         if (cycleType === "screening") {
           setLastScreeningMessageId(state.messageId);
-        } else {
+        } else if (cycleType === "management") {
           setLastManagementMessageId(state.messageId);
         }
       }

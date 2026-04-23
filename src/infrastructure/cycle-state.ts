@@ -14,6 +14,10 @@ export interface CycleState {
   getPnlPollInterval(): NodeJS.Timeout | undefined;
   setPnlPollInterval(interval: NodeJS.Timeout | undefined): void;
 
+  // Portfolio Refresh
+  getPortfolioRefreshInterval(): NodeJS.Timeout | undefined;
+  setPortfolioRefreshInterval(interval: NodeJS.Timeout | undefined): void;
+
   // Busy flags
   isManagementBusy(): boolean;
   setManagementBusy(busy: boolean): void;
@@ -42,6 +46,7 @@ export function createCycleState(): CycleState {
   // Private state (closure-scoped)
   let _cronTasks: CronTaskList = [];
   let _pnlPollInterval: NodeJS.Timeout | undefined;
+  let _portfolioRefreshInterval: NodeJS.Timeout | undefined;
   let _managementBusy = false;
   let _screeningBusy = false;
   let _screeningLastTriggered = 0;
@@ -69,6 +74,14 @@ export function createCycleState(): CycleState {
     },
     setPnlPollInterval(interval: NodeJS.Timeout | undefined): void {
       _pnlPollInterval = interval;
+    },
+
+    // Portfolio Refresh
+    getPortfolioRefreshInterval(): NodeJS.Timeout | undefined {
+      return _portfolioRefreshInterval;
+    },
+    setPortfolioRefreshInterval(interval: NodeJS.Timeout | undefined): void {
+      _portfolioRefreshInterval = interval;
     },
 
     // Busy flags
