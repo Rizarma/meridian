@@ -135,6 +135,7 @@ export async function getWalletBalances(): Promise<WalletBalances> {
   }
 
   const HELIUS_KEY = process.env.HELIUS_API_KEY;
+  log("wallet_debug", `HELIUS_API_KEY present: ${!!HELIUS_KEY}`);
   if (!HELIUS_KEY) {
     log("wallet_error", "HELIUS_API_KEY not set in .env");
     return {
@@ -151,13 +152,20 @@ export async function getWalletBalances(): Promise<WalletBalances> {
 
   try {
     const url = `https://api.helius.xyz/v1/wallet/${walletAddress}/balances?api-key=${HELIUS_KEY}`;
+    log("wallet_debug", `Calling Helius: ${url.replace(HELIUS_KEY, "***")}`);
     const res = await withRateLimit(rateLimiters.helius, () => fetchWithRetry(url));
+    log("wallet_debug", `Helius response status: ${res.status}`);
 
     if (!res.ok) {
       throw new Error(`Helius API error: ${res.status} ${res.statusText}`);
     }
 
     const data = (await res.json()) as HeliusBalancesResponse;
+    log("wallet_debug", `Helius response keys: ${Object.keys(data).join(", ")}`);
+    log(
+      "wallet_debug",
+      `Helius balances array: ${data.balances ? `length=${data.balances.length}` : "undefined"}`
+    );
     const balances = data.balances || [];
 
     // ─── Find SOL and USDC ────────────────────────────────────
@@ -188,7 +196,11 @@ export async function getWalletBalances(): Promise<WalletBalances> {
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log("wallet_error", errorMessage);
+    log("wallet_error", `Wallet balance fetch failed: ${errorMessage}`);
+    log(
+      "wallet_debug",
+      `Full error object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`
+    );
     return {
       wallet: walletAddress,
       sol: 0,
