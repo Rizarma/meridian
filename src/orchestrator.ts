@@ -91,7 +91,7 @@ export async function initializeApp(): Promise<void> {
   }
 
   // Initialize database schema first (creates tables if they don't exist)
-  const dbSetup = setupDatabase();
+  const dbSetup = await setupDatabase();
   if (!dbSetup.success) {
     log("startup_error", `Database setup failed: ${dbSetup.message}`);
     throw new Error(dbSetup.message);
@@ -124,7 +124,7 @@ export async function initializeApp(): Promise<void> {
         const walletAddress = wallet.publicKey.toString();
 
         // Coverage-based check to decide if bootstrap is useful
-        const coverage = calculateLessonCoverage();
+        const coverage = await calculateLessonCoverage();
         const threshold = config.portfolioSync.bootstrapThreshold;
         const needsBootstrap =
           coverage.uniquePools < (threshold?.minUniquePools ?? 3) ||

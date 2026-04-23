@@ -82,23 +82,26 @@ export async function discoverPools({
   const condensed = (data.data || []).map(condensePool);
 
   // Hard-filter blacklisted tokens and blocked deployers (what pool discovery already gave us)
-  let pools = condensed.filter((p) => {
-    if (isBlacklisted(p.base?.mint)) {
-      log(
-        "blacklist",
-        `Filtered blacklisted token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)}) in pool ${p.name}`
-      );
-      return false;
-    }
-    if (p.dev && isDevBlocked(p.dev)) {
-      log(
-        "dev_blocklist",
-        `Filtered blocked deployer ${p.dev?.slice(0, 8)} token ${p.base?.symbol} in pool ${p.name}`
-      );
-      return false;
-    }
-    return true;
-  });
+  const poolFilterResults = await Promise.all(
+    condensed.map(async (p) => {
+      if (await isBlacklisted(p.base?.mint)) {
+        log(
+          "blacklist",
+          `Filtered blacklisted token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)}) in pool ${p.name}`
+        );
+        return false;
+      }
+      if (p.dev && (await isDevBlocked(p.dev))) {
+        log(
+          "dev_blocklist",
+          `Filtered blocked deployer ${p.dev?.slice(0, 8)} token ${p.base?.symbol} in pool ${p.name}`
+        );
+        return false;
+      }
+      return true;
+    })
+  );
+  let pools = condensed.filter((_, index) => poolFilterResults[index]);
 
   const filtered = condensed.length - pools.length;
   if (filtered > 0) log("blacklist", `Filtered ${filtered} pool(s) with blacklisted tokens/devs`);
@@ -124,18 +127,20 @@ export async function discoverPools({
       for (const r of devResults) {
         if (r.status === "fulfilled") devMap[r.value.pool] = r.value.dev;
       }
-      pools = pools.filter((p) => {
+      const filteredPools: CondensedPool[] = [];
+      for (const p of pools) {
         const dev = devMap[p.pool];
         if (dev) p.dev = dev; // enrich in-place
-        if (dev && isDevBlocked(dev)) {
+        if (dev && (await isDevBlocked(dev))) {
           log(
             "dev_blocklist",
             `Filtered blocked deployer (jup) ${dev.slice(0, 8)} token ${p.base?.symbol}`
           );
-          return false;
+          continue;
         }
-        return true;
-      });
+        filteredPools.push(p);
+      }
+      pools = filteredPools;
     }
   }
 
@@ -196,8 +201,8 @@ export async function getTopCandidates({
   const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
 
   // Batch-fetch cooldown state upfront (avoids per-candidate DB reads)
-  const cooldownPools = getPoolsOnCooldown(pools.map((p) => p.pool));
-  const cooldownMints = getBaseMintsOnCooldown(
+  const cooldownPools = await getPoolsOnCooldown(pools.map((p) => p.pool));
+  const cooldownMints = await getBaseMintsOnCooldown(
     pools.map((p) => p.base?.mint).filter((m): m is string => !!m)
   );
 
@@ -328,18 +333,19 @@ export async function getTopCandidates({
 
     // Drop any pools whose creator is on the dev blocklist (caught via advanced-info)
     const before = eligible.length;
-    const filtered = eligible.filter((p) => {
-      if (p.dev && isDevBlocked(p.dev)) {
+    const filteredEligible: CondensedPool[] = [];
+    for (const p of eligible) {
+      if (p.dev && (await isDevBlocked(p.dev))) {
         log(
           "dev_blocklist",
           `Filtered blocked deployer (okx) ${p.dev.slice(0, 8)} token ${p.base?.symbol}`
         );
         pushFilteredReason(p, "Deployer blocked");
-        return false;
+        continue;
       }
-      return true;
-    });
-    eligible.splice(0, eligible.length, ...filtered);
+      filteredEligible.push(p);
+    }
+    eligible.splice(0, eligible.length, ...filteredEligible);
     if (eligible.length < before)
       log("dev_blocklist", `Filtered ${before - eligible.length} pool(s) via OKX creator check`);
   }

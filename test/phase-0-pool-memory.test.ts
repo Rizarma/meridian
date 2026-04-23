@@ -17,7 +17,7 @@ import {
   recallForPool,
   recordPositionSnapshot,
 } from "../src/domain/pool-memory.js";
-import { describe, expect, runTests, test } from "./test-harness.js";
+import { describe, expect, runTestsAsync, test } from "./test-harness.js";
 
 // ─── In-memory DB Setup ─────────────────────────────────────────
 
@@ -212,7 +212,7 @@ describe("Pool Memory - Snapshot Recall", () => {
   let testDb: Database.Database;
 
   // Set up fresh DB for each logical group
-  test("setup test database", () => {
+  test("setup test database", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -257,8 +257,8 @@ describe("Pool Memory - Snapshot Recall", () => {
     expect(true).toBe(true); // setup succeeded
   });
 
-  test("recallForPool finds snapshots via position lookup", () => {
-    const result = recallForPool(POOL_ADDR);
+  test("recallForPool finds snapshots via position lookup", async () => {
+    const result = await recallForPool(POOL_ADDR);
     // Should return non-null because pool has deploys via snapshots
     // The recall should include RECENT TREND since we have 5 snapshots
     expect(result).toBeTruthy();
@@ -268,20 +268,20 @@ describe("Pool Memory - Snapshot Recall", () => {
     }
   });
 
-  test("recallForPool returns null for unknown pool", () => {
-    const result = recallForPool("UnknownPool0000000000000000000000000");
+  test("recallForPool returns null for unknown pool", async () => {
+    const result = await recallForPool("UnknownPool0000000000000000000000000");
     expect(result).toBe(null);
   });
 
-  test("recallForPool returns null for empty string", () => {
-    const result = recallForPool("");
+  test("recallForPool returns null for empty string", async () => {
+    const result = await recallForPool("");
     expect(result).toBe(null);
   });
 
-  test("snapshots from multiple positions are found", () => {
+  test("snapshots from multiple positions are found", async () => {
     // Both POSITION_ADDR and POSITION_ADDR_2 belong to POOL_ADDR
     // recallForPool should find snapshots from both
-    const result = recallForPool(POOL_ADDR);
+    const result = await recallForPool(POOL_ADDR);
     expect(result).toBeTruthy();
     // At least 6 snapshots exist (5 from POSITION_ADDR + 1 from POSITION_ADDR_2)
     // The RECENT TREND line should show trend data
@@ -290,7 +290,7 @@ describe("Pool Memory - Snapshot Recall", () => {
     }
   });
 
-  test("fallback snapshot pattern also works", () => {
+  test("fallback snapshot pattern also works", async () => {
     // Insert a fallback-style snapshot: poolAddress + "_snapshot_" + timestamp
     const fallbackAddr = `${POOL_ADDR}_snapshot_1700000000000`;
     testDb
@@ -300,7 +300,7 @@ describe("Pool Memory - Snapshot Recall", () => {
       )
       .run(fallbackAddr);
 
-    const result = recallForPool(POOL_ADDR);
+    const result = await recallForPool(POOL_ADDR);
     expect(result).toBeTruthy();
     // Should still work (found at least the existing snapshots + fallback)
     if (result) {
@@ -308,7 +308,7 @@ describe("Pool Memory - Snapshot Recall", () => {
     }
   });
 
-  test("snapshot stored under pool address directly is NOT incorrectly matched", () => {
+  test("snapshot stored under pool address directly is NOT incorrectly matched", async () => {
     // A snapshot stored with position_address = exact pool address
     // (which is wrong but could happen) should be found via the fallback pattern
     // only if it matches the _snapshot_ pattern — NOT by the old broken LIKE
@@ -321,7 +321,7 @@ describe("Pool Memory - Snapshot Recall", () => {
 
     // Pool with no positions and no fallback snapshots should return null
     // (no pool row exists)
-    const result = recallForPool("CompletelyDifferentAddr4444444444444444444444");
+    const result = await recallForPool("CompletelyDifferentAddr4444444444444444444444");
     expect(result).toBe(null);
   });
 });
@@ -329,14 +329,14 @@ describe("Pool Memory - Snapshot Recall", () => {
 describe("Pool Memory - recordPositionSnapshot return value", () => {
   let testDb: Database.Database;
 
-  test("setup", () => {
+  test("setup", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
     expect(true).toBe(true);
   });
 
-  test("recordPositionSnapshot returns PoolRow for new pool", () => {
-    const poolRow = recordPositionSnapshot(POOL_ADDR, {
+  test("recordPositionSnapshot returns PoolRow for new pool", async () => {
+    const poolRow = await recordPositionSnapshot(POOL_ADDR, {
       position: POSITION_ADDR,
       pair: "NEW/SOL",
       pnl_pct: 5.0,
@@ -351,14 +351,14 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
     }
   });
 
-  test("recordPositionSnapshot returns null for empty pool address", () => {
-    const poolRow = recordPositionSnapshot("", {
+  test("recordPositionSnapshot returns null for empty pool address", async () => {
+    const poolRow = await recordPositionSnapshot("", {
       position: POSITION_ADDR,
     });
     expect(poolRow).toBe(null);
   });
 
-  test("recorded snapshot is findable via recallForPool", () => {
+  test("recorded snapshot is findable via recallForPool", async () => {
     // First ensure a position→pool mapping exists so getPoolSnapshots can find it
     testDb
       .prepare(
@@ -369,7 +369,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
 
     // Record multiple snapshots to build a trend
     for (let i = 0; i < 5; i++) {
-      recordPositionSnapshot(POOL_ADDR, {
+      await recordPositionSnapshot(POOL_ADDR, {
         position: POSITION_ADDR,
         pair: "NEW/SOL",
         pnl_pct: i * 1.0,
@@ -379,7 +379,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
       });
     }
 
-    const result = recallForPool(POOL_ADDR);
+    const result = await recallForPool(POOL_ADDR);
     expect(result).toBeTruthy();
     if (result) {
       expect(result.includes("RECENT TREND")).toBe(true);
@@ -390,7 +390,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
 describe("Pool Memory - recallForPool with preloadedPool", () => {
   let testDb: Database.Database;
 
-  test("setup", () => {
+  test("setup", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -422,7 +422,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
     expect(true).toBe(true);
   });
 
-  test("recallForPool accepts preloadedPool and skips DB read", () => {
+  test("recallForPool accepts preloadedPool and skips DB read", async () => {
     // Pre-fetched pool row (simulates what recordPositionSnapshot returns)
     const preloadedPool = {
       address: POOL_ADDR,
@@ -439,7 +439,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
       data_json: null,
     };
 
-    const result = recallForPool(POOL_ADDR, preloadedPool);
+    const result = await recallForPool(POOL_ADDR, preloadedPool);
     expect(result).toBeTruthy();
     if (result) {
       expect(result.includes("PRELOADED/SOL")).toBe(true);
@@ -448,8 +448,8 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
     }
   });
 
-  test("recallForPool with null preloadedPool falls back to DB read", () => {
-    const result = recallForPool(POOL_ADDR, null);
+  test("recallForPool with null preloadedPool falls back to DB read", async () => {
+    const result = await recallForPool(POOL_ADDR, null);
     // Should still work — falls back to querying DB
     expect(result).toBeTruthy();
     if (result) {
@@ -457,9 +457,9 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
     }
   });
 
-  test("management cycle pattern: recordPositionSnapshot then recallForPool with returned row", () => {
+  test("management cycle pattern: recordPositionSnapshot then recallForPool with returned row", async () => {
     // This tests the exact pattern used in management.ts
-    const poolRow = recordPositionSnapshot(POOL_ADDR, {
+    const poolRow = await recordPositionSnapshot(POOL_ADDR, {
       position: POSITION_ADDR,
       pair: "PRELOADED/SOL",
       pnl_pct: 10.0,
@@ -474,7 +474,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
     }
 
     // Pass the preloaded row to recallForPool
-    const recall = recallForPool(POOL_ADDR, poolRow);
+    const recall = await recallForPool(POOL_ADDR, poolRow);
     expect(recall).toBeTruthy();
     if (recall) {
       expect(recall.includes("PRELOADED/SOL")).toBe(true);
@@ -486,7 +486,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
 describe("Pool Memory - getKnownPoolAddresses", () => {
   let testDb: Database.Database;
 
-  test("setup", () => {
+  test("setup", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -501,13 +501,13 @@ describe("Pool Memory - getKnownPoolAddresses", () => {
     expect(true).toBe(true);
   });
 
-  test("returns empty set for empty input", () => {
-    const result = getKnownPoolAddresses([]);
+  test("returns empty set for empty input", async () => {
+    const result = await getKnownPoolAddresses([]);
     expect(result.size).toBe(0);
   });
 
-  test("returns only addresses that exist in pools table", () => {
-    const result = getKnownPoolAddresses([
+  test("returns only addresses that exist in pools table", async () => {
+    const result = await getKnownPoolAddresses([
       POOL_ADDR, // exists
       POSITION_ADDR, // exists
       "UnknownPool0000000000000000000000000", // does not exist
@@ -518,16 +518,16 @@ describe("Pool Memory - getKnownPoolAddresses", () => {
     expect(result.has("UnknownPool0000000000000000000000000")).toBe(false);
   });
 
-  test("returns empty set when no addresses match", () => {
-    const result = getKnownPoolAddresses([
+  test("returns empty set when no addresses match", async () => {
+    const result = await getKnownPoolAddresses([
       "UnknownA0000000000000000000000000000000",
       "UnknownB0000000000000000000000000000000",
     ]);
     expect(result.size).toBe(0);
   });
 
-  test("handles duplicate addresses gracefully", () => {
-    const result = getKnownPoolAddresses([POOL_ADDR, POOL_ADDR, POOL_ADDR]);
+  test("handles duplicate addresses gracefully", async () => {
+    const result = await getKnownPoolAddresses([POOL_ADDR, POOL_ADDR, POOL_ADDR]);
     expect(result.size).toBe(1);
     expect(result.has(POOL_ADDR)).toBe(true);
   });
@@ -539,7 +539,7 @@ describe("Pool Memory - getPoolsOnCooldown (batch)", () => {
   const POOL_B = "CooldownPoolB222222222222222222222222222222";
   const POOL_C = "CooldownPoolC333333333333333333333333333333";
 
-  test("setup", () => {
+  test("setup", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -565,26 +565,26 @@ describe("Pool Memory - getPoolsOnCooldown (batch)", () => {
     expect(true).toBe(true);
   });
 
-  test("returns only pools with active cooldown", () => {
-    const result = getPoolsOnCooldown([POOL_A, POOL_B, POOL_C]);
+  test("returns only pools with active cooldown", async () => {
+    const result = await getPoolsOnCooldown([POOL_A, POOL_B, POOL_C]);
     expect(result.size).toBe(1);
     expect(result.has(POOL_A)).toBe(true);
     expect(result.has(POOL_B)).toBe(false);
     expect(result.has(POOL_C)).toBe(false);
   });
 
-  test("returns empty set for empty input", () => {
-    const result = getPoolsOnCooldown([]);
+  test("returns empty set for empty input", async () => {
+    const result = await getPoolsOnCooldown([]);
     expect(result.size).toBe(0);
   });
 
-  test("returns empty set for unknown addresses", () => {
-    const result = getPoolsOnCooldown(["UnknownZZZ00000000000000000000000000"]);
+  test("returns empty set for unknown addresses", async () => {
+    const result = await getPoolsOnCooldown(["UnknownZZZ00000000000000000000000000"]);
     expect(result.size).toBe(0);
   });
 
-  test("handles duplicates gracefully", () => {
-    const result = getPoolsOnCooldown([POOL_A, POOL_A]);
+  test("handles duplicates gracefully", async () => {
+    const result = await getPoolsOnCooldown([POOL_A, POOL_A]);
     expect(result.size).toBe(1);
     expect(result.has(POOL_A)).toBe(true);
   });
@@ -597,7 +597,7 @@ describe("Pool Memory - getBaseMintsOnCooldown (batch)", () => {
   const POOL_X = "PoolForMintX1111111111111111111111111111111";
   const POOL_Y = "PoolForMintY2222222222222222222222222222222";
 
-  test("setup", () => {
+  test("setup", async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -620,25 +620,25 @@ describe("Pool Memory - getBaseMintsOnCooldown (batch)", () => {
     expect(true).toBe(true);
   });
 
-  test("returns only mints with active cooldown", () => {
-    const result = getBaseMintsOnCooldown([MINT_X, MINT_Y]);
+  test("returns only mints with active cooldown", async () => {
+    const result = await getBaseMintsOnCooldown([MINT_X, MINT_Y]);
     expect(result.size).toBe(1);
     expect(result.has(MINT_X)).toBe(true);
     expect(result.has(MINT_Y)).toBe(false);
   });
 
-  test("returns empty set for empty input", () => {
-    const result = getBaseMintsOnCooldown([]);
+  test("returns empty set for empty input", async () => {
+    const result = await getBaseMintsOnCooldown([]);
     expect(result.size).toBe(0);
   });
 
-  test("returns empty set for unknown mints", () => {
-    const result = getBaseMintsOnCooldown(["UnknownMint000000000000000000000000000"]);
+  test("returns empty set for unknown mints", async () => {
+    const result = await getBaseMintsOnCooldown(["UnknownMint000000000000000000000000000"]);
     expect(result.size).toBe(0);
   });
 
-  test("handles duplicates gracefully", () => {
-    const result = getBaseMintsOnCooldown([MINT_X, MINT_X]);
+  test("handles duplicates gracefully", async () => {
+    const result = await getBaseMintsOnCooldown([MINT_X, MINT_X]);
     expect(result.size).toBe(1);
     expect(result.has(MINT_X)).toBe(true);
   });
@@ -646,4 +646,4 @@ describe("Pool Memory - getBaseMintsOnCooldown (batch)", () => {
 
 // ─── Run ─────────────────────────────────────────────────────────
 
-runTests();
+runTestsAsync();

@@ -86,34 +86,27 @@ export function test(name: string, fn: () => void | Promise<void>): void {
     throw new Error("test() must be called inside describe() or describeAsync()");
   }
 
-  const start = Date.now();
-  let passed = true;
-  let error: string | undefined;
-
-  try {
-    const result = fn();
-
-    // Check if the test function returned a Promise (async test)
-    if (result && typeof result.then === "function") {
-      // For async tests within sync describe(), we can't properly await
-      // This is a limitation of the minimal harness
-      throw new Error(
-        "Async test function detected in sync describe(). " +
-          "Use describeAsync() for async test suites or handle async before test()."
-      );
-    }
-    // Sync test completed successfully
-  } catch (e) {
-    passed = false;
-    error = e instanceof Error ? e.message : String(e);
-  }
-
-  currentSuite.tests.push({
+  const testResult: TestResult = {
     name,
-    passed,
-    error,
-    durationMs: Date.now() - start,
-  });
+    passed: true,
+    error: undefined,
+    durationMs: 0,
+  };
+  currentSuite.tests.push(testResult);
+
+  const testPromise = (async () => {
+    const start = Date.now();
+    try {
+      await fn();
+      testResult.passed = true;
+    } catch (e) {
+      testResult.passed = false;
+      testResult.error = e instanceof Error ? e.message : String(e);
+    }
+    testResult.durationMs = Date.now() - start;
+  })();
+
+  pendingTests.push(testPromise);
 }
 
 /**
@@ -292,9 +285,9 @@ export function runTests(): void {
  * Use this when test files use describeAsync().
  */
 export async function runTestsAsync(): Promise<void> {
-  // Wait for all async suites to complete
-  if (pendingSuites.length > 0) {
-    await Promise.all(pendingSuites);
+  // Wait for all async suites/tests to complete
+  if (pendingSuites.length > 0 || pendingTests.length > 0) {
+    await Promise.all([...pendingSuites, ...pendingTests]);
   }
 
   printResults();

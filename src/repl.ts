@@ -724,7 +724,7 @@ const cmdThresholds: Command = {
     console.log(`  ${colors.cyan("maxBotHoldersPct:")}     ${s.maxBotHoldersPct}`);
     console.log(`  ${colors.cyan("maxTop10Pct:")}          ${s.maxTop10Pct}`);
     console.log(`  ${colors.cyan("timeframe:")}            ${s.timeframe}`);
-    const perf = getPerformanceSummary();
+    const perf = await getPerformanceSummary();
     if (perf) {
       console.log(colors.dim(`\n  Based on ${perf.total_positions_closed} closed positions`));
       console.log(
@@ -793,7 +793,7 @@ const cmdEvolve: Command = {
   description: "Manually trigger threshold evolution from performance data",
   handler: async ({ rl, deps }) => {
     await runBusy(rl, deps, async () => {
-      const perf = getPerformanceSummary();
+      const perf = await getPerformanceSummary();
       if (!perf || perf.total_positions_closed < 5) {
         const needed = 5 - (perf?.total_positions_closed || 0);
         console.log(

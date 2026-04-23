@@ -98,10 +98,10 @@ export interface TrackPositionParams {
  * 2. Try resolving by strategy id via getStrategy().
  * 3. If strategy is a legacy lp_strategy value, map to a sensible default Strategy object.
  */
-export function resolveStrategy(
+export async function resolveStrategy(
   strategy: string,
   strategyConfig: Strategy | null | undefined
-): { resolved: Strategy | null; strategyId: string; legacy: boolean } {
+): Promise<{ resolved: Strategy | null; strategyId: string; legacy: boolean }> {
   // 1. Prefer existing strategy_config snapshot
   if (strategyConfig && typeof strategyConfig === "object" && strategyConfig.id) {
     return { resolved: strategyConfig, strategyId: strategyConfig.id, legacy: false };
@@ -109,7 +109,7 @@ export function resolveStrategy(
 
   // 2. Try resolving by strategy id
   if (strategy && !isLegacyLpStrategy(strategy)) {
-    const result = getStrategy({ id: strategy });
+    const result = await getStrategy({ id: strategy });
     if (!result.error && result.id) {
       return { resolved: result as Strategy, strategyId: result.id, legacy: false };
     }
@@ -117,7 +117,7 @@ export function resolveStrategy(
 
   // 3. Legacy lp_strategy fallback — prefer a real strategy definition for that lp_strategy
   if (strategy && isLegacyLpStrategy(strategy)) {
-    const mapped = getStrategyByLpStrategy(strategy);
+    const mapped = await getStrategyByLpStrategy(strategy);
     if (mapped) {
       log(
         "state_warn",
@@ -148,12 +148,12 @@ export function resolveStrategy(
   return { resolved: null, strategyId: strategy || "unknown", legacy: false };
 }
 
-function rowToTrackedPosition(row: Record<string, unknown>): TrackedPosition {
+async function rowToTrackedPosition(row: Record<string, unknown>): Promise<TrackedPosition> {
   const rawStrategy = row.strategy as string;
   const rawStrategyConfig = parseJson<Strategy>(row.strategy_config as string | null);
 
   // Resolve strategy with backward compatibility for legacy rows
-  const { resolved: resolvedStrategyConfig } = resolveStrategy(rawStrategy, rawStrategyConfig);
+  const { resolved: resolvedStrategyConfig } = await resolveStrategy(rawStrategy, rawStrategyConfig);
 
   return {
     position: row.position as string,
@@ -259,7 +259,7 @@ async function load(): Promise<PositionState> {
     const positions: Record<string, TrackedPosition> = {};
     const positionRows = await infra().db.query<Record<string, unknown>>("SELECT * FROM position_state");
     for (const row of positionRows) {
-      const pos = rowToTrackedPosition(row);
+      const pos = await rowToTrackedPosition(row);
       positions[pos.position] = pos;
     }
 
@@ -378,7 +378,7 @@ export async function trackPosition({
   strategy_config,
 }: TrackPositionParams): Promise<void> {
   // Resolve strategy using canonical resolution (handles both IDs and legacy lp_strategy values)
-  const { resolved: strategyConfig, strategyId } = resolveStrategy(strategy, strategy_config);
+  const { resolved: strategyConfig, strategyId } = await resolveStrategy(strategy, strategy_config);
 
   // Warn if strategy id in row differs from strategy_config.id (inconsistent state)
   if (strategyConfig && strategyConfig.id && strategy && strategy !== strategyConfig.id) {
@@ -870,7 +870,7 @@ export async function getTrackedPositions(openOnly: boolean = false): Promise<Tr
   }
 
   const rows = await infra().db.query<Record<string, unknown>>(sql, ...params);
-  return rows.map(rowToTrackedPosition);
+  return Promise.all(rows.map((row) => rowToTrackedPosition(row)));
 }
 
 /**
@@ -882,7 +882,7 @@ export async function getTrackedPosition(position_address: string): Promise<Trac
     position_address
   );
   if (!row) return null;
-  return rowToTrackedPosition(row);
+  return await rowToTrackedPosition(row);
 }
 
 /**
@@ -913,8 +913,8 @@ export async function getStateSummary(): Promise<StateSummary> {
     open_positions: counts?.open_count ?? 0,
     closed_positions: counts?.closed_count ?? 0,
     total_fees_claimed_usd: Math.round((counts?.total_fees ?? 0) * 100) / 100,
-    positions: openPositions.map((row) => {
-      const pos = rowToTrackedPosition(row);
+    positions: await Promise.all(openPositions.map(async (row) => {
+      const pos = await rowToTrackedPosition(row);
       return {
         position: pos.position,
         pool: pos.pool,
@@ -927,7 +927,7 @@ export async function getStateSummary(): Promise<StateSummary> {
         rebalance_count: pos.rebalance_count,
         instruction: pos.instruction || null,
       };
-    }),
+    })),
     last_updated: new Date().toISOString(),
     recent_events: mappedEvents,
   };
