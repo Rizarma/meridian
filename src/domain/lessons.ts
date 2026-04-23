@@ -340,7 +340,9 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
         const walletAddress = getWallet().publicKey.toString();
         await m.syncPoolPortfolio(walletAddress, perf.pool);
       })
-      .catch(() => {}); // fail-open: never block recordPerformance
+      .catch((err) => {
+        log("portfolio_sync_warn", `Failed to sync portfolio on position close: ${err}`);
+      });
   }
 }
 

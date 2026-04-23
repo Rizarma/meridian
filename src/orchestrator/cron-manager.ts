@@ -12,7 +12,7 @@ import {
   scheduleTrailingDropConfirmation,
 } from "../cycles/management.js";
 import { runScreeningCycle as runScreeningCycleImpl } from "../cycles/screening.js";
-import { syncPoolPortfolio } from "../domain/portfolio-sync.js";
+import { fetchMeteoraPortfolio, storePortfolioSnapshot } from "../domain/portfolio-sync.js";
 import { cycleState } from "../infrastructure/cycle-state.js";
 import { heartbeat as hiveHeartbeat } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
@@ -103,14 +103,21 @@ export function startPortfolioRefreshCron(): void {
 
       log("portfolio_sync", `Background refresh: syncing ${activePools.length} active pool(s)`);
 
-      for (const { pool } of activePools) {
-        try {
-          await syncPoolPortfolio(walletAddress, pool);
-        } catch (err) {
-          log(
-            "portfolio_sync_warn",
-            `Background refresh failed for pool ${pool.slice(0, 8)}...: ${getErrorMessage(err)}`
-          );
+      // Fetch portfolio once, then match to active pools
+      const { config } = await import("../config/config.js");
+      const items = await fetchMeteoraPortfolio(walletAddress, config.portfolioSync.daysBack);
+      const poolSet = new Set(activePools.map(({ pool }) => pool));
+
+      for (const item of items) {
+        if (poolSet.has(item.poolAddress)) {
+          try {
+            await storePortfolioSnapshot(walletAddress, item, config.portfolioSync.daysBack);
+          } catch (err) {
+            log(
+              "portfolio_sync_warn",
+              `Background refresh failed for pool ${item.poolAddress.slice(0, 8)}...: ${getErrorMessage(err)}`
+            );
+          }
         }
       }
     } catch (err) {

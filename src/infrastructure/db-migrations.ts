@@ -404,6 +404,7 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_portfolio_wallet ON portfolio_history(wallet_address);
     CREATE INDEX IF NOT EXISTS idx_portfolio_pool ON portfolio_history(pool_address);
     CREATE INDEX IF NOT EXISTS idx_portfolio_fetched ON portfolio_history(fetched_at);
+    CREATE INDEX IF NOT EXISTS idx_portfolio_wallet_pool ON portfolio_history(wallet_address, pool_address);
     CREATE INDEX IF NOT EXISTS idx_strategies_added ON strategies(added_at);
     CREATE INDEX IF NOT EXISTS idx_suggestions_status ON threshold_suggestions(status);
     CREATE INDEX IF NOT EXISTS idx_suggestions_created ON threshold_suggestions(created_at);

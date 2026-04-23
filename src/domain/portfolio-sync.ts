@@ -338,40 +338,6 @@ export function cleanupOldPortfolioData(daysToKeep: number = 180): void {
 
 // ─── Background Refresh Cron ─────────────────────────────────────
 
-/** Tracks last cleanup time for weekly execution within the cron interval. */
-let lastCleanupTime = 0;
-
-const WEEKLY_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * Start a background cron that periodically refreshes portfolio data.
- * Also runs cleanup on a weekly cadence.
- *
- * @returns A stop function to clear the interval.
- */
-export function startPortfolioRefreshCron(
-  wallet: string,
-  syncConfig: PortfolioSyncConfig
-): () => void {
-  const intervalMs = (syncConfig.refreshIntervalMinutes ?? 30) * 60 * 1000;
-
-  const timer = setInterval(async () => {
-    try {
-      await syncPoolPortfolio(wallet, ""); // refresh all pools for the wallet
-    } catch {
-      // Fail-open: errors logged inside syncPoolPortfolio
-    }
-
-    // Weekly cleanup of old records
-    if (Date.now() - lastCleanupTime > WEEKLY_MS) {
-      cleanupOldPortfolioData();
-      lastCleanupTime = Date.now();
-    }
-  }, intervalMs);
-
-  return () => clearInterval(timer);
-}
-
 // ─── Bootstrap & Sync ────────────────────────────────────────────
 
 /**
@@ -682,7 +648,7 @@ function generatePoolCharacterLessons(
     }
 
     lessons.push({
-      id: Date.now() + Math.floor(Math.random() * 10000),
+      id: null,
       rule,
       tags: ["portfolio", "pool-character", "reliable", "screening"],
       outcome: "good" as LessonOutcome,
@@ -737,7 +703,7 @@ function generateAvoidLessons(wallet: string, syncConfig: PortfolioSyncConfig): 
     }
 
     lessons.push({
-      id: Date.now() + Math.floor(Math.random() * 10000),
+      id: null,
       rule,
       tags: ["portfolio", "avoid", "risk", "screening"],
       outcome: "bad" as LessonOutcome,
@@ -794,7 +760,7 @@ function generateOutperformanceLessons(
     }
 
     lessons.push({
-      id: Date.now() + Math.floor(Math.random() * 10000),
+      id: null,
       rule,
       tags: ["portfolio", "outperformance", "strategy", "management"],
       outcome: "worked" as LessonOutcome,
