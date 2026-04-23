@@ -130,36 +130,6 @@ export async function runScreeningCycle(
       const preFlightResult = await runPreFlightChecks(silent);
       if ("error" in preFlightResult) {
         screenReport = preFlightResult.error;
-        setBusy(false);
-        // Format with timestamp even for early returns
-        if (!silent && telegramEnabled()) {
-          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
-          // NOTE: The read → update → write pattern on message ID is safe because the
-          // screening cycle mutex (runScreening is wrapped in setBusy) ensures only one
-          // screening cycle runs at a time, preventing concurrent mutation of the ID.
-          const existingMessageId = getLastScreeningMessageId();
-          if (existingMessageId) {
-            const updatedLiveMessage = await updateExistingLiveMessage(
-              "🔍 Screening Cycle",
-              formattedReport,
-              existingMessageId
-            );
-            if (updatedLiveMessage) {
-              // Finalize to stop the typing indicator
-              await updatedLiveMessage.finalize(formattedReport);
-            } else {
-              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
-              if (hasMessageId(sent)) {
-                setLastScreeningMessageId(sent.message_id);
-              }
-            }
-          } else {
-            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
-            if (hasMessageId(sent)) {
-              setLastScreeningMessageId(sent.message_id);
-            }
-          }
-        }
         return screenReport;
       }
 

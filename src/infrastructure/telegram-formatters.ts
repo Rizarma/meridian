@@ -14,15 +14,8 @@ export function formatWalletBalanceForTelegram(
   data: WalletBalances,
   options: FormatOptions = {}
 ): string {
-  console.log("[telegram-formatters] formatWalletBalanceForTelegram called");
-  console.log("[telegram-formatters] data keys:", Object.keys(data));
-  console.log("[telegram-formatters] data.tokens:", data.tokens);
-  console.log("[telegram-formatters] data.tokens type:", typeof data.tokens);
-  console.log("[telegram-formatters] Array.isArray(data.tokens):", Array.isArray(data.tokens));
-
   // Handle error case
   if (data.error) {
-    console.log("[telegram-formatters] Error case triggered:", data.error);
     return `❌ *Wallet Balance Error*\n\n${data.error}\n\n_Using cached state data..._`;
   }
 
@@ -56,39 +49,22 @@ export function formatWalletBalanceForTelegram(
   lines.push("");
 
   // Sort tokens by USD value
-  console.log("[telegram-formatters] About to process tokens");
   const tokens = data.tokens || [];
-  console.log("[telegram-formatters] tokens length after fallback:", tokens.length);
 
   let significant: typeof tokens = [];
   let dust: typeof tokens = [];
 
-  try {
-    significant = tokens
-      .filter(
-        (t) => (t.usd || 0) >= DUST_THRESHOLD_USD && t.symbol !== "SOL" && t.symbol !== "USDC"
-      )
-      .sort((a, b) => (b.usd || 0) - (a.usd || 0));
+  significant = tokens
+    .filter((t) => (t.usd || 0) >= DUST_THRESHOLD_USD && t.symbol !== "SOL" && t.symbol !== "USDC")
+    .sort((a, b) => (b.usd || 0) - (a.usd || 0));
 
-    dust = tokens.filter(
-      (t) =>
-        (t.usd || 0) > 0 &&
-        (t.usd || 0) < DUST_THRESHOLD_USD &&
-        t.symbol !== "SOL" &&
-        t.symbol !== "USDC"
-    );
-
-    console.log(
-      "[telegram-formatters] Filter success - significant:",
-      significant.length,
-      "dust:",
-      dust.length
-    );
-  } catch (filterError) {
-    console.error("[telegram-formatters] FILTER ERROR:", filterError);
-    console.error("[telegram-formatters] tokens array:", JSON.stringify(tokens, null, 2));
-    throw filterError;
-  }
+  dust = tokens.filter(
+    (t) =>
+      (t.usd || 0) > 0 &&
+      (t.usd || 0) < DUST_THRESHOLD_USD &&
+      t.symbol !== "SOL" &&
+      t.symbol !== "USDC"
+  );
 
   // Other holdings
   if (significant.length > 0) {
