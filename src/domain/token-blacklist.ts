@@ -8,9 +8,11 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
-import { get, query, run } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 import type { BlacklistEntry } from "../types/blocklist.js";
+
+const infra = () => getInfrastructure();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Database Types
@@ -32,9 +34,9 @@ interface TokenBlacklistRow {
  * Returns true if the mint is on the blacklist.
  * Used in screening.js before returning pools to the LLM.
  */
-export function isBlacklisted(mint: string): boolean {
+export async function isBlacklisted(mint: string): Promise<boolean> {
   if (!mint) return false;
-  const row = get<{ count: number }>(
+  const row = await infra().db.get<{ count: number }>(
     "SELECT COUNT(*) as count FROM token_blacklist WHERE mint = ?",
     mint
   );
@@ -44,9 +46,9 @@ export function isBlacklisted(mint: string): boolean {
 /**
  * Get a single blacklist entry.
  */
-export function getBlacklistEntry(mint: string): (BlacklistEntry & { mint: string }) | null {
+export async function getBlacklistEntry(mint: string): Promise<(BlacklistEntry & { mint: string }) | null> {
   if (!mint) return null;
-  const row = get<TokenBlacklistRow>("SELECT * FROM token_blacklist WHERE mint = ?", mint);
+  const row = await infra().db.get<TokenBlacklistRow>("SELECT * FROM token_blacklist WHERE mint = ?", mint);
   if (!row) return null;
   return {
     mint: row.mint,
@@ -64,7 +66,7 @@ export function getBlacklistEntry(mint: string): (BlacklistEntry & { mint: strin
 /**
  * Tool handler: add_to_blacklist
  */
-export function addToBlacklist({
+export async function addToBlacklist({
   mint,
   symbol,
   reason,
@@ -72,14 +74,15 @@ export function addToBlacklist({
   mint: string;
   symbol?: string;
   reason?: string;
-}):
+}): Promise<
   | { blacklisted: true; mint: string; symbol: string; reason: string }
   | { already_blacklisted: true; mint: string; symbol: string; reason: string }
-  | { error: string } {
+  | { error: string }
+> {
   if (!mint) return { error: "mint required" };
 
   // Check if already blacklisted
-  const existing = getBlacklistEntry(mint);
+  const existing = await getBlacklistEntry(mint);
   if (existing) {
     return {
       already_blacklisted: true,
@@ -98,7 +101,7 @@ export function addToBlacklist({
   };
 
   try {
-    run(
+    await infra().db.run(
       "INSERT INTO token_blacklist (mint, symbol, reason, added_at, added_by) VALUES (?, ?, ?, ?, ?)",
       entry.mint,
       entry.symbol,
@@ -123,20 +126,20 @@ export function addToBlacklist({
 /**
  * Tool handler: remove_from_blacklist
  */
-export function removeFromBlacklist({
+export async function removeFromBlacklist({
   mint,
 }: {
   mint: string;
-}): { removed: true; mint: string; was: BlacklistEntry } | { error: string } {
+}): Promise<{ removed: true; mint: string; was: BlacklistEntry } | { error: string }> {
   if (!mint) return { error: "mint required" };
 
-  const existing = getBlacklistEntry(mint);
+  const existing = await getBlacklistEntry(mint);
   if (!existing) {
     return { error: `Mint ${mint} not found on blacklist` };
   }
 
   try {
-    run("DELETE FROM token_blacklist WHERE mint = ?", mint);
+    await infra().db.run("DELETE FROM token_blacklist WHERE mint = ?", mint);
     log("blacklist", `Removed ${existing.symbol} (${mint}) from blacklist`);
     return {
       removed: true,
@@ -158,11 +161,11 @@ export function removeFromBlacklist({
 /**
  * Tool handler: list_blacklist
  */
-export function listBlacklist(): {
+export async function listBlacklist(): Promise<{
   count: number;
   blacklist: Array<BlacklistEntry & { mint: string }>;
-} {
-  const rows = query<TokenBlacklistRow>("SELECT * FROM token_blacklist ORDER BY added_at DESC");
+}> {
+  const rows = await infra().db.query<TokenBlacklistRow>("SELECT * FROM token_blacklist ORDER BY added_at DESC");
 
   const entries = rows.map((row) => ({
     mint: row.mint,
@@ -181,8 +184,8 @@ export function listBlacklist(): {
 /**
  * Clear all blacklist entries (useful for testing).
  */
-export function clearBlacklist(): { cleared: number } {
-  const result = run("DELETE FROM token_blacklist");
+export async function clearBlacklist(): Promise<{ cleared: number }> {
+  const result = await infra().db.run("DELETE FROM token_blacklist");
   log("blacklist", `Cleared ${result.changes} blacklist entries`);
   return { cleared: Number(result.changes) };
 }

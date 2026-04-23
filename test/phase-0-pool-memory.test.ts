@@ -158,6 +158,8 @@ function createTestDb(): Database.Database {
 function wireTestDb(db: Database.Database): void {
   // Create a wrapper matching the DatabaseOperations + JsonOperations interface
   const dbOps = {
+    init: async () => {},
+    close: async () => {},
     query: <T>(sql: string, ...params: unknown[]): T[] => {
       return db.prepare(sql).all(...params) as T[];
     },

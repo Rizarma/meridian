@@ -3,6 +3,7 @@
 
 import { config } from "./config/config.js";
 import { TIMEOUT } from "./config/constants.js";
+import { getInfrastructure, initializeInfrastructure } from "./di-container.js";
 import { bootstrapFromPortfolio, calculateLessonCoverage } from "./domain/portfolio-sync.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
@@ -82,7 +83,13 @@ function launchCron(): void {
   }
 }
 
-export async function start(): Promise<void> {
+export async function initializeApp(): Promise<void> {
+  try {
+    getInfrastructure();
+  } catch {
+    await initializeInfrastructure();
+  }
+
   // Initialize database schema first (creates tables if they don't exist)
   const dbSetup = setupDatabase();
   if (!dbSetup.success) {
@@ -173,3 +180,5 @@ export async function start(): Promise<void> {
     await startNonTTY(replDeps);
   }
 }
+
+export const start = initializeApp;

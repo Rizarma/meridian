@@ -247,10 +247,10 @@ Summarize the current portfolio health, total fees earned, and performance of al
         for (const p of rawPositions) {
           try {
             const trackedP = p.tracked_state;
-            if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
+            if (!p.pnl_pct_suspicious && (await queuePeakConfirmation(p.position, p.pnl_pct, trackedP))) {
               schedulePeakConfirmation(p.position);
             }
-            const exit = updatePnlAndCheckExits(
+            const exit = await updatePnlAndCheckExits(
               p.position,
               p,
               config.management,
@@ -261,7 +261,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
               // Trailing TP needs confirmation - queue it and continue polling
               if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
                 if (
-                  queueTrailingDropConfirmation(
+                  await queueTrailingDropConfirmation(
                     p.position,
                     exit.peak_pnl_pct ?? null,
                     exit.current_pnl_pct ?? null,

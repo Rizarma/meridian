@@ -13,9 +13,7 @@
 import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 
-function getDb() {
-  return getInfrastructure().db;
-}
+const infra = () => getInfrastructure();
 
 import type {
   PerformanceRecord,
@@ -83,10 +81,10 @@ interface SignalWeightHistoryRow {
 
 // ─── Persistence ─────────────────────────────────────────────────
 
-export function loadWeights(): SignalWeights {
+export async function loadWeights(): Promise<SignalWeights> {
   try {
     // Query all signal weights from database
-    const rows = getDb().query<SignalWeightRow>(
+    const rows = await infra().db.query<SignalWeightRow>(
       "SELECT signal, weight, updated_at FROM signal_weights"
     );
 
@@ -102,17 +100,17 @@ export function loadWeights(): SignalWeights {
     }
 
     // Get metadata from most recent history entry
-    const latestHistory = getDb().get<{ changed_at: string }>(
+    const latestHistory = await infra().db.get<{ changed_at: string }>(
       "SELECT changed_at FROM signal_weight_history ORDER BY changed_at DESC LIMIT 1"
     );
 
     // Get recalc count from history entries with window_size (recalc events)
-    const recalcRow = getDb().get<{ count: number }>(
+    const recalcRow = await infra().db.get<{ count: number }>(
       "SELECT COUNT(DISTINCT changed_at) as count FROM signal_weight_history WHERE window_size IS NOT NULL"
     );
 
     // Load recent history entries (last 20 recalc events)
-    const historyRows = getDb().query<SignalWeightHistoryRow>(
+    const historyRows = await infra().db.query<SignalWeightHistoryRow>(
       `SELECT DISTINCT changed_at, window_size, win_count, loss_count
        FROM signal_weight_history
        WHERE window_size IS NOT NULL
@@ -121,9 +119,10 @@ export function loadWeights(): SignalWeights {
     );
 
     // Build history entries from database
-    const history: WeightHistoryEntry[] = historyRows.map((row) => {
+    const history: WeightHistoryEntry[] = [];
+    for (const row of historyRows) {
       // Get all changes for this recalc event
-      const changeRows = getDb().query<SignalWeightHistoryRow>(
+      const changeRows = await infra().db.query<SignalWeightHistoryRow>(
         `SELECT signal, weight_from, weight_to, lift, action
          FROM signal_weight_history
          WHERE changed_at = ? AND action IS NOT NULL`,
@@ -138,14 +137,14 @@ export function loadWeights(): SignalWeights {
         action: (c.action as "boosted" | "decayed") || "boosted",
       }));
 
-      return {
+      history.push({
         timestamp: row.changed_at,
         changes,
         window_size: row.window_size ?? 0,
         win_count: row.win_count ?? 0,
         loss_count: row.loss_count ?? 0,
-      };
-    });
+      });
+    }
 
     // Reverse to get chronological order
     history.reverse();
@@ -170,12 +169,12 @@ export function loadWeights(): SignalWeights {
   }
 }
 
-export function saveWeights(data: SignalWeights): void {
+export async function saveWeights(data: SignalWeights): Promise<void> {
   try {
-    getDb().transaction(() => {
+    await infra().db.transaction(async () => {
       // Save each signal weight using INSERT OR REPLACE
       for (const [signal, weight] of Object.entries(data.weights)) {
-        getDb().run(
+        await infra().db.run(
           `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
            VALUES (?, ?, datetime('now'))`,
           signal,
@@ -208,10 +207,10 @@ interface RecalculateConfig {
  * @param cfg - Live config object (reads cfg.darwin for tuning)
  * @returns Object containing changes and weights
  */
-export function recalculateWeights(
+export async function recalculateWeights(
   perfData: PerformanceRecord[],
   cfg: RecalculateConfig = {}
-): RecalculateResult {
+): Promise<RecalculateResult> {
   const darwin = cfg.darwin || {};
   const windowDays = darwin.windowDays ?? 60;
   const minSamples = darwin.minSamples ?? 10;
@@ -220,7 +219,7 @@ export function recalculateWeights(
   const weightFloor = darwin.weightFloor ?? 0.3;
   const weightCeiling = darwin.weightCeiling ?? 2.5;
 
-  const data = loadWeights();
+  const data = await loadWeights();
   const weights: Record<string, number> = data.weights || { ...DEFAULT_WEIGHTS };
 
   // Ensure all signals exist (handles new signals added after initial creation)
@@ -310,10 +309,10 @@ export function recalculateWeights(
   const now = new Date().toISOString();
 
   try {
-    getDb().transaction(() => {
+    await infra().db.transaction(async () => {
       // Save updated weights
       for (const [signal, weight] of Object.entries(weights)) {
-        getDb().run(
+        await infra().db.run(
           `INSERT OR REPLACE INTO signal_weights (signal, weight, updated_at)
            VALUES (?, ?, ?)`,
           signal,
@@ -325,7 +324,7 @@ export function recalculateWeights(
       // Save history entries for each change
       if (changes.length > 0) {
         for (const change of changes) {
-          getDb().run(
+          await infra().db.run(
             `INSERT INTO signal_weight_history
              (signal, weight_from, weight_to, lift, action, window_size, win_count, loss_count, changed_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -490,8 +489,8 @@ function mean(arr: number[]): number {
 
 // ─── Summary for LLM Prompt Injection ────────────────────────────
 
-export function getWeightsSummary(): string {
-  const data = loadWeights();
+export async function getWeightsSummary(): Promise<string> {
+  const data = await loadWeights();
   const w = data.weights || {};
 
   const lines: string[] = ["Signal Weights (Darwinian — learned from past positions):"];

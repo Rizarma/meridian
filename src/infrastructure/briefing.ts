@@ -5,34 +5,36 @@ import type {
   PerformanceSummary,
   StatePosition,
 } from "../types/briefing.js";
-import { query } from "./db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "./logger.js";
 
-export function generateBriefing(): string {
+const infra = () => getInfrastructure();
+
+export async function generateBriefing(): Promise<string> {
   try {
     // 1. Positions Activity (last 24h)
-    const openedLast24h = query<StatePosition>(
+    const openedLast24h = await infra().db.query<StatePosition>(
       "SELECT * FROM positions WHERE deployed_at > datetime('now', '-24 hours')"
     );
-    const closedLast24h = query<StatePosition>(
+    const closedLast24h = await infra().db.query<StatePosition>(
       "SELECT * FROM positions WHERE closed = 1 AND closed_at > datetime('now', '-24 hours')"
     );
-    const openPositions = query<StatePosition>("SELECT * FROM positions WHERE closed = 0");
+    const openPositions = await infra().db.query<StatePosition>("SELECT * FROM positions WHERE closed = 0");
 
     // 2. Performance Activity (last 24h)
-    const perfLast24h = query<PerformanceEntry>(
+    const perfLast24h = await infra().db.query<PerformanceEntry>(
       "SELECT * FROM performance WHERE recorded_at > datetime('now', '-24 hours')"
     );
     const totalPnLUsd = perfLast24h.reduce((sum, p) => sum + (p.pnl_usd || 0), 0);
     const totalFeesUsd = perfLast24h.reduce((sum, p) => sum + (p.fees_earned_usd || 0), 0);
 
     // 3. Lessons Learned (last 24h)
-    const lessonsLast24h = query<LessonEntry>(
+    const lessonsLast24h = await infra().db.query<LessonEntry>(
       "SELECT * FROM lessons WHERE created_at > datetime('now', '-24 hours')"
     );
 
     // 4. Current State
-    const perfSummary: PerformanceSummary | null = getPerformanceSummary();
+    const perfSummary: PerformanceSummary | null = await getPerformanceSummary();
 
     // 5. Format Message
     const lines: string[] = [

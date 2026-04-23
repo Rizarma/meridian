@@ -16,7 +16,7 @@ export const SCHEMA_VERSION = 1;
  * Initialize the database schema.
  * Creates all tables if they don't exist.
  */
-export function initSchema(): void {
+export async function initSchema(): Promise<void> {
   const db = getDb();
 
   // Schema version tracking
@@ -528,7 +528,7 @@ function removePositionFkConstraints(): void {
  * Check if migration is needed from JSON files.
  * Returns true if tables are empty and JSON files exist with data.
  */
-export function needsJsonImport(): boolean {
+export async function needsJsonImport(): Promise<boolean> {
   // Check if we have any data in key tables
   const positionCount = query<{ count: number }>("SELECT COUNT(*) as count FROM positions");
   const poolCount = query<{ count: number }>("SELECT COUNT(*) as count FROM pools");
@@ -554,9 +554,9 @@ export function needsJsonImport(): boolean {
  * Migrate data from existing JSON files to SQLite.
  * Keeps JSON files as backups.
  */
-export function migrateFromJson(): { success: boolean; message: string } {
+export async function migrateFromJson(): Promise<{ success: boolean; message: string }> {
   // Create pre-migration backup
-  const backupResult = createJsonBackups();
+  const backupResult = await createJsonBackups();
   if (!backupResult.success) {
     return {
       success: false,
@@ -945,7 +945,7 @@ export function migrateFromJson(): { success: boolean; message: string } {
  * Create JSON backups of current database state.
  * Useful for creating backups after migration or periodically.
  */
-export function createJsonBackups(): { success: boolean; message: string } {
+export async function createJsonBackups(): Promise<{ success: boolean; message: string }> {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupDir = path.join(PROJECT_ROOT, "backups");
@@ -1062,7 +1062,7 @@ export function createJsonBackups(): { success: boolean; message: string } {
  * Rollback a failed or partial migration.
  * Finds the most recent failed or started migration and restores from backup.
  */
-export function rollbackMigration(): { success: boolean; message: string } {
+export async function rollbackMigration(): Promise<{ success: boolean; message: string }> {
   try {
     // Find the most recent failed or started migration
     const migrationRow = query<{ id: number; backup_path: string; status: string }>(
@@ -1114,7 +1114,7 @@ export function rollbackMigration(): { success: boolean; message: string } {
  * Validate that all required tables exist in the database.
  * Returns an object with the list of missing tables (empty if all present).
  */
-export function validateSchema(): { valid: boolean; missingTables: string[] } {
+export async function validateSchema(): Promise<{ valid: boolean; missingTables: string[] }> {
   const requiredTables = [
     "schema_version",
     "positions",
@@ -1158,7 +1158,7 @@ export function validateSchema(): { valid: boolean; missingTables: string[] } {
  *
  * Idempotent: skips rows that already have a non-legacy strategy or a populated strategy_config.
  */
-export function backfillLegacyStrategyFields(): void {
+export async function backfillLegacyStrategyFields(): Promise<void> {
   // Find rows with legacy strategy and null strategy_config
   const legacyRows = query<{ position: string; strategy: string }>(
     `SELECT position, strategy FROM position_state WHERE strategy_config IS NULL`
@@ -1166,29 +1166,41 @@ export function backfillLegacyStrategyFields(): void {
 
   if (legacyRows.length === 0) return;
 
+  const resolvedLegacyRows: Array<{
+    position: string;
+    strategyId: string;
+    strategyConfig: unknown;
+  }> = [];
+
+  for (const row of legacyRows) {
+    if (!isLegacyLpStrategy(row.strategy)) continue;
+
+    const resolved = await getStrategyByLpStrategy(row.strategy);
+    const strategyId = resolved?.id ?? `__legacy_${row.strategy}__`;
+    const strategyConfig = resolved ?? {
+      id: strategyId,
+      name: `Legacy ${row.strategy}`,
+      author: "legacy",
+      lp_strategy: row.strategy,
+      token_criteria: {},
+      entry: {},
+      range: {},
+      exit: {},
+      best_for: `Legacy ${row.strategy} strategy (backfilled)`,
+    };
+
+    resolvedLegacyRows.push({ position: row.position, strategyId, strategyConfig });
+  }
+
+  if (resolvedLegacyRows.length === 0) return;
+
   let backfilled = 0;
   transaction(() => {
-    for (const row of legacyRows) {
-      if (!isLegacyLpStrategy(row.strategy)) continue;
-
-      const resolved = getStrategyByLpStrategy(row.strategy);
-      const strategyId = resolved?.id ?? `__legacy_${row.strategy}__`;
-      const strategyConfig = resolved ?? {
-        id: strategyId,
-        name: `Legacy ${row.strategy}`,
-        author: "legacy",
-        lp_strategy: row.strategy,
-        token_criteria: {},
-        entry: {},
-        range: {},
-        exit: {},
-        best_for: `Legacy ${row.strategy} strategy (backfilled)`,
-      };
-
+    for (const row of resolvedLegacyRows) {
       run(
         "UPDATE position_state SET strategy = ?, strategy_config = ?, last_updated = ? WHERE position = ?",
-        strategyId,
-        JSON.stringify(strategyConfig),
+        row.strategyId,
+        JSON.stringify(row.strategyConfig),
         new Date().toISOString(),
         row.position
       );
@@ -1204,20 +1216,20 @@ export function backfillLegacyStrategyFields(): void {
 /**
  * Full database setup - initialize schema and migrate if needed.
  */
-export function setupDatabase(): { success: boolean; message: string } {
+export async function setupDatabase(): Promise<{ success: boolean; message: string }> {
   try {
-    initSchema();
+    await initSchema();
     initThresholdEvolutionTables();
     removePositionFkConstraints(); // Remove overly restrictive FK constraints
-    backfillLegacyStrategyFields(); // Backfill legacy strategy values
+    await backfillLegacyStrategyFields(); // Backfill legacy strategy values
 
-    if (needsJsonImport()) {
-      const result = migrateFromJson();
+    if (await needsJsonImport()) {
+      const result = await migrateFromJson();
       return result;
     }
 
     // Validate schema completeness after initialization
-    const validation = validateSchema();
+    const validation = await validateSchema();
     if (!validation.valid) {
       log(
         "db_setup",

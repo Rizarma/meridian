@@ -42,7 +42,7 @@ export interface ThresholdHistory {
 
 // ─── Schema Initialization ─────────────────────────────────────────
 
-export function initThresholdEvolutionTables(): void {
+export async function initThresholdEvolutionTables(): Promise<void> {
   const db = getDb();
 
   // Suggestions table - pending approvals
@@ -92,7 +92,7 @@ export function initThresholdEvolutionTables(): void {
 
 // ─── Suggestion Management ─────────────────────────────────────────
 
-export function saveSuggestion(suggestion: ThresholdSuggestion): number {
+export async function saveSuggestion(suggestion: ThresholdSuggestion): Promise<number> {
   const result = run(
     `INSERT INTO threshold_suggestions 
      (field, current_value, suggested_value, confidence, rationale, sample_size, 
@@ -117,7 +117,7 @@ export function saveSuggestion(suggestion: ThresholdSuggestion): number {
   return Number(result.lastInsertRowid);
 }
 
-export function getPendingSuggestions(): ThresholdSuggestion[] {
+export async function getPendingSuggestions(): Promise<ThresholdSuggestion[]> {
   const rows = query<{
     id: number;
     field: string;
@@ -163,10 +163,10 @@ export function getPendingSuggestions(): ThresholdSuggestion[] {
   );
 }
 
-export function approveSuggestion(
+export async function approveSuggestion(
   id: number,
   reviewer: string
-): { success: boolean; suggestion?: ThresholdSuggestion; error?: string } {
+): Promise<{ success: boolean; suggestion?: ThresholdSuggestion; error?: string }> {
   const suggestion = get<{
     id: number;
     field: string;
@@ -233,11 +233,11 @@ export function approveSuggestion(
   };
 }
 
-export function rejectSuggestion(
+export async function rejectSuggestion(
   id: number,
   reviewer: string,
   reason?: string
-): { success: boolean; error?: string } {
+): Promise<{ success: boolean; error?: string }> {
   const suggestion = get<{ id: number }>(
     `SELECT id FROM threshold_suggestions WHERE id = ? AND status = 'pending'`,
     id
@@ -262,7 +262,7 @@ export function rejectSuggestion(
 
 // ─── History Queries ─────────────────────────────────────────────────
 
-export function getThresholdHistory(field?: string, limit: number = 20): ThresholdHistory[] {
+export async function getThresholdHistory(field?: string, limit: number = 20): Promise<ThresholdHistory[]> {
   let sql = `SELECT * FROM threshold_history`;
   const params: (string | number)[] = [];
 
@@ -314,10 +314,10 @@ export function getThresholdHistory(field?: string, limit: number = 20): Thresho
   );
 }
 
-export function getCurrentThresholdsWithHistory(): {
+export async function getCurrentThresholdsWithHistory(): Promise<{
   current: Record<string, number>;
   lastEvolved: Record<string, string>;
-} {
+}> {
   // Get current from config (this would import from config)
   const current = {
     maxVolatility: 10,
@@ -342,7 +342,7 @@ export function getCurrentThresholdsWithHistory(): {
 
 // ─── Auto-Expire Old Suggestions ───────────────────────────────────
 
-export function expireOldSuggestions(days: number = 7): number {
+export async function expireOldSuggestions(days: number = 7): Promise<number> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 

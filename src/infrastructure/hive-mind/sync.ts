@@ -311,7 +311,7 @@ export async function syncToHive(): Promise<void> {
     const now = Date.now();
     if (now - _lastSyncTime < SYNC_DEBOUNCE_MS) return;
 
-    const lessonsResult = listLessons({ limit: 1000, fullData: true });
+    const lessonsResult = await listLessons({ limit: 1000, fullData: true });
     const lessons = lessonsResult.lessons.map((lesson) => ({
       id: lesson.id,
       rule: lesson.rule,
@@ -322,7 +322,7 @@ export async function syncToHive(): Promise<void> {
       role: lesson.role,
     }));
 
-    const deploys = getAllPoolDeploys().map((d) => ({
+    const deploys = (await getAllPoolDeploys()).map((d) => ({
       pool_address: d.pool_address,
       pool_name: d.pool_name ?? undefined,
       deployed_at: d.deployed_at ?? undefined,
@@ -354,7 +354,7 @@ export async function syncToHive(): Promise<void> {
     let agentStats: import("../../types/lessons.js").PerformanceMetrics | null = null;
     try {
       const { getPerformanceSummary } = await import("../../domain/lessons.js");
-      agentStats = getPerformanceSummary();
+      agentStats = await getPerformanceSummary();
     } catch (e) {
       console.log("[hive]", `Could not load agent stats: ${getErrorMessage(e)}`);
     }

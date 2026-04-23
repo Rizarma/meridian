@@ -149,7 +149,7 @@ export async function agentLoop(
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
-  const lessons = getLessonsForPrompt({ agentType });
+  const lessons = await getLessonsForPrompt({ agentType });
   const perfSummary = getPerformanceSummary();
   // Fetch shared hive lessons — fail-open, returns "" if disabled or error
   const sharedLessons = await formatSharedLessonsForPrompt();

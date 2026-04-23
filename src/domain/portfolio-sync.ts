@@ -98,7 +98,7 @@ export interface LessonCoverage {
  * Calculate lesson coverage metrics from the lessons table.
  * Used to determine whether portfolio bootstrap is still useful.
  */
-export function calculateLessonCoverage(): LessonCoverage {
+export async function calculateLessonCoverage(): Promise<LessonCoverage> {
   try {
     const row = get<{
       unique_pools: number;
@@ -314,7 +314,7 @@ export async function storePortfolioSnapshot(
  * Uses ISO date (YYYY-MM-DD) comparison on fetched_at.
  * Fail-open: errors are logged but never thrown.
  */
-export function cleanupOldPortfolioData(daysToKeep: number = 180): void {
+export async function cleanupOldPortfolioData(daysToKeep: number = 180): Promise<void> {
   try {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
@@ -382,7 +382,7 @@ export async function bootstrapFromPortfolio(
     }
 
     // Clean up old records after fetching new data
-    cleanupOldPortfolioData();
+    await cleanupOldPortfolioData();
   } catch (err) {
     log(
       "portfolio_sync_error",
@@ -403,7 +403,7 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
   log("portfolio_sync", `Syncing portfolio for pool ${poolAddress.slice(0, 8)}...`);
 
   // Warn if existing data is stale
-  validateDataFreshness(poolAddress);
+  await validateDataFreshness(poolAddress);
 
   try {
     const items = await fetchMeteoraPortfolio(wallet, syncConfig.daysBack);
@@ -428,7 +428,7 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
  * Validate data freshness for a pool and log warnings if stale (>48h).
  * Fail-open: errors are caught and logged, never blocking.
  */
-export function validateDataFreshness(poolAddress: string): void {
+export async function validateDataFreshness(poolAddress: string): Promise<void> {
   try {
     const row = get<{ data_freshness_hours: number; fetched_at: string }>(
       `SELECT data_freshness_hours, fetched_at
