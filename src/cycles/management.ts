@@ -238,11 +238,19 @@ export async function runManagementCycle(
           );
           if (!liveMessage) {
             // Failed to update (message deleted or too old), create new
-            liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+            liveMessage = await createLiveMessage(
+              "🔄 Management Cycle",
+              "Evaluating positions...",
+              "management"
+            );
           }
         } else {
           // No existing message or too old, create new
-          liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+          liveMessage = await createLiveMessage(
+            "🔄 Management Cycle",
+            "Evaluating positions...",
+            "management"
+          );
         }
       }
       const livePositions = await getMyPositions({ force: true }).catch((): null => null);

@@ -443,6 +443,32 @@ export async function agentLoop(
             else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
               firedOnce.add(functionName);
 
+            // Special formatting for wallet balance to ensure clean Telegram output
+            if (functionName === "get_wallet_balance") {
+              const { formatWalletBalanceForTelegram } = await import(
+                "../infrastructure/telegram-formatters.js"
+              );
+              const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
+              // Unwrap the result - executeTool wraps results as { success: true, data: {...} }
+              const walletData = result.success && result.data ? result.data : result;
+              const formatted = formatWalletBalanceForTelegram(
+                walletData as unknown as import("../types/wallet.js").WalletBalances
+              );
+              // Send formatted message directly (don't escape markdown)
+              await sendMessageMarkdown(formatted);
+              // Return flag indicating output was already sent to user
+              return {
+                role: "tool" as const,
+                tool_call_id: toolCall.id,
+                content: JSON.stringify({
+                  success: true,
+                  formatted: true,
+                  output_already_sent: true, // Signal to REPL that we've handled output
+                  hint: "Wallet balance displayed above. Acknowledge briefly without repeating data.",
+                }),
+              };
+            }
+
             return {
               role: "tool",
               tool_call_id: toolCall.id,
@@ -451,6 +477,13 @@ export async function agentLoop(
           } catch (error) {
             const errorMessage = getErrorMessage(error);
             log("error", `Tool ${toolCall.function.name} failed: ${errorMessage}`);
+
+            // Send formatted error to Telegram so LLM doesn't generate its own markdown
+            const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
+            await sendMessageMarkdown(
+              `❌ *Error in ${toolCall.function.name}*\n\n${errorMessage}\n\n_Using cached state..._`
+            );
+
             return {
               role: "tool",
               tool_call_id: toolCall.id,

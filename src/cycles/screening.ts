@@ -130,33 +130,6 @@ export async function runScreeningCycle(
       const preFlightResult = await runPreFlightChecks(silent);
       if ("error" in preFlightResult) {
         screenReport = preFlightResult.error;
-        setBusy(false);
-        // Format with timestamp even for early returns
-        if (!silent && telegramEnabled()) {
-          const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);
-          // NOTE: The read → update → write pattern on message ID is safe because the
-          // screening cycle mutex (runScreening is wrapped in setBusy) ensures only one
-          // screening cycle runs at a time, preventing concurrent mutation of the ID.
-          const existingMessageId = getLastScreeningMessageId();
-          if (existingMessageId) {
-            const updated = await updateExistingLiveMessage(
-              "🔍 Screening Cycle",
-              formattedReport,
-              existingMessageId
-            );
-            if (!updated) {
-              const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
-              if (hasMessageId(sent)) {
-                setLastScreeningMessageId(sent.message_id);
-              }
-            }
-          } else {
-            const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
-            if (hasMessageId(sent)) {
-              setLastScreeningMessageId(sent.message_id);
-            }
-          }
-        }
         return screenReport;
       }
 
@@ -327,12 +300,15 @@ export async function runScreeningCycle(
             const existingMessageId = getLastScreeningMessageId();
             if (existingMessageId) {
               // Try to update existing message
-              const updated = await updateExistingLiveMessage(
+              const updatedLiveMessage = await updateExistingLiveMessage(
                 "🔍 Screening Cycle",
                 formattedReport,
                 existingMessageId
               );
-              if (!updated) {
+              if (updatedLiveMessage) {
+                // Finalize to stop the typing indicator
+                await updatedLiveMessage.finalize(formattedReport);
+              } else {
                 // Update failed (message deleted or too old), create new
                 const sent = await sendMessage(`🔍 Screening Cycle\n\n${formattedReport}`);
                 if (hasMessageId(sent)) {

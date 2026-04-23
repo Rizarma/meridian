@@ -34,7 +34,7 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 - [Agents & Tools](.claude/docs/agents-and-tools.md) — agent roles, registry pattern, adding a new tool, model configuration
 - [Config Reference](.claude/docs/config-reference.md) — every config key, defaults, environment variables
 - [Screening Logic](.claude/docs/screening-logic.md) — safety checks, bins_below formula, bundler/OKX signals, Darwinian weights
-- [Features](.claude/docs/features.md) — lessons, trailing TP, SOL mode, telegram commands, hive mind
+- [Features](.claude/docs/features.md) — lessons, trailing TP, SOL mode, telegram commands, hive mind, portfolio sync
 - [Known Issues](.claude/docs/known-issues.md) — intentional quirks and tech debt
 
 ## Claude Code resources
