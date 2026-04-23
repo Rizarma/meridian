@@ -1,5 +1,26 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import process from "node:process";
+
+// Handle uncaught errors from better-sqlite3
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  if (err instanceof Error) {
+    console.error('Message:', err.message);
+    console.error('Stack:', err.stack);
+  } else if (typeof err === 'object' && err !== null) {
+    console.error('Error details:', Object.getOwnPropertyNames(err).reduce((acc, key) => {
+      try {
+        acc[key] = (err as Record<string, unknown>)[key];
+      } catch {
+        acc[key] = '[unreadable]';
+      }
+      return acc;
+    }, {} as Record<string, unknown>));
+  }
+  process.exit(1);
+});
+
 import { deduplicate } from "./dedupe.js";
 import { exportSqlite } from "./export.js";
 import { importToPostgres } from "./import.js";
@@ -105,6 +126,13 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Error:", err);
+  if (err instanceof Error) {
+    console.error("Error:", err.message);
+    console.error("Stack:", err.stack);
+  } else if (typeof err === 'object' && err !== null) {
+    console.error("Error object:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+  } else {
+    console.error("Error:", err);
+  }
   process.exit(1);
 });
