@@ -328,8 +328,7 @@ export async function recordPerformance(perf: PositionPerformance): Promise<void
   // Get all performance for evolution calculation
   const allPerformance = (
     await infra().db.query<PerformanceRow>("SELECT * FROM performance ORDER BY recorded_at")
-  )
-    .map(performanceFromRow);
+  ).map(performanceFromRow);
   await runThresholdEvolution(perf, allPerformance);
 
   // Portfolio sync: update pool portfolio data after position close (opt-in, fail-open)
@@ -554,7 +553,7 @@ export async function listLessons({
     outcome: row.outcome as LessonOutcome,
     pinned: Boolean(row.pinned),
     role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
-    created_at: row.created_at?.slice(0, 10) || "unknown",
+    created_at: formatCreatedAt(row.created_at, 10),
   }));
 
   return { total, lessons };
@@ -572,7 +571,10 @@ export async function removeLesson(id: number): Promise<number> {
  * Remove lessons matching a keyword in their rule text (case-insensitive).
  */
 export async function removeLessonsByKeyword(keyword: string): Promise<number> {
-  const result = await infra().db.run("DELETE FROM lessons WHERE LOWER(rule) LIKE LOWER(?)", `%${keyword}%`);
+  const result = await infra().db.run(
+    "DELETE FROM lessons WHERE LOWER(rule) LIKE LOWER(?)",
+    `%${keyword}%`
+  );
   return result.changes;
 }
 
@@ -601,7 +603,9 @@ export async function clearPerformance(): Promise<number> {
  *   2. Role-matched  — lessons tagged for this agentType, up to ROLE_CAP
  *   3. Recent        — fill remaining slots up to RECENT_CAP
  */
-export async function getLessonsForPrompt(opts: LessonContext | number = {}): Promise<string | null> {
+export async function getLessonsForPrompt(
+  opts: LessonContext | number = {}
+): Promise<string | null> {
   // Support legacy call signature: getLessonsForPrompt(20)
   if (typeof opts === "number") opts = { maxLessons: opts };
 
@@ -666,7 +670,9 @@ export async function getLessonsForPrompt(opts: LessonContext | number = {}): Pr
     remainingBudget > 0
       ? allLessons
           .filter((l) => !usedIds.has(l.id))
-          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .sort((a, b) =>
+            toCreatedAtString(b.created_at).localeCompare(toCreatedAtString(a.created_at))
+          )
           .slice(0, remainingBudget)
       : [];
 
@@ -685,7 +691,7 @@ export async function getLessonsForPrompt(opts: LessonContext | number = {}): Pr
 function fmt(lessons: LessonEntry[]): string {
   return lessons
     .map((l) => {
-      const date = l.created_at ? l.created_at.slice(0, 16).replace("T", " ") : "unknown";
+      const date = formatCreatedAt(l.created_at, 16).replace("T", " ");
       const pin = l.pinned ? "📌 " : "";
       return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
     })
@@ -703,7 +709,9 @@ export async function getPerformanceHistory({
   hours?: number;
   limit?: number;
 } = {}): Promise<PerformanceHistoryResult> {
-  const countRow = await infra().db.get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const countRow = await infra().db.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM performance"
+  );
   const totalCount = countRow?.count ?? 0;
 
   if (totalCount === 0) {
@@ -747,7 +755,9 @@ export async function getPerformanceHistory({
  * Get performance stats summary.
  */
 export async function getPerformanceSummary(): Promise<PerformanceMetrics | null> {
-  const perfCountRow = await infra().db.get<{ count: number }>("SELECT COUNT(*) as count FROM performance");
+  const perfCountRow = await infra().db.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM performance"
+  );
   const perfCount = perfCountRow?.count ?? 0;
 
   if (perfCount === 0) return null;
@@ -766,7 +776,9 @@ export async function getPerformanceSummary(): Promise<PerformanceMetrics | null
     FROM performance`
   );
 
-  const lessonsCountRow = await infra().db.get<{ count: number }>("SELECT COUNT(*) as count FROM lessons");
+  const lessonsCountRow = await infra().db.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM lessons"
+  );
 
   return {
     total_positions_closed: perfCount,
@@ -795,8 +807,23 @@ export async function searchLessons(keyword: string, limit = 20): Promise<Listed
     outcome: row.outcome as LessonOutcome,
     pinned: Boolean(row.pinned),
     role: (row.role as "SCREENER" | "MANAGER" | "GENERAL") || "all",
-    created_at: row.created_at?.slice(0, 10) || "unknown",
+    created_at: formatCreatedAt(row.created_at, 10),
   }));
+}
+
+function formatCreatedAt(value: unknown, length: number): string {
+  if (value == null) return "unknown";
+
+  return toCreatedAtString(value).slice(0, length);
+}
+
+function toCreatedAtString(value: unknown): string {
+  if (value == null) return "";
+
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "number") return new Date(value).toISOString();
+
+  return String(value);
 }
 
 // Tool registrations
