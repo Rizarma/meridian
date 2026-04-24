@@ -190,6 +190,7 @@ export async function initSchema(): Promise<void> {
       window_size INTEGER,
       win_count INTEGER,
       loss_count INTEGER,
+      confidence REAL,
       changed_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -430,6 +431,25 @@ export async function initSchema(): Promise<void> {
   );
   if (!versionRow.length) {
     run("INSERT INTO schema_version (version) VALUES (?)", SCHEMA_VERSION);
+  }
+}
+
+/**
+ * Migrate signal_weight_history table to v2: add confidence column.
+ * Idempotent — checks if column exists before altering.
+ */
+function migrateSignalWeightHistoryV2(): void {
+  const db = getDb();
+
+  const columns = db.pragma("pragma_table_info('signal_weight_history')") as Array<{
+    name: string;
+  }>;
+  const hasConfidence = columns.some((col) => col.name === "confidence");
+
+  if (!hasConfidence) {
+    log("db_migration", "Adding confidence column to signal_weight_history...");
+    db.exec("ALTER TABLE signal_weight_history ADD COLUMN confidence REAL");
+    log("db_migration", "signal_weight_history confidence column added successfully");
   }
 }
 
@@ -1236,6 +1256,7 @@ export async function setupDatabase(): Promise<{ success: boolean; message: stri
 
     await initSchema();
     initThresholdEvolutionTables();
+    migrateSignalWeightHistoryV2(); // Add confidence column to signal_weight_history
     removePositionFkConstraints(); // Remove overly restrictive FK constraints
     await backfillLegacyStrategyFields(); // Backfill legacy strategy values
 

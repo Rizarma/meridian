@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS signal_weight_history (
   window_size INTEGER,
   win_count INTEGER,
   loss_count INTEGER,
+  confidence REAL,
   changed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
