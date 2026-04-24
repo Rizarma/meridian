@@ -580,10 +580,10 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
       }),
     ];
 
-    const initialWeightsData = loadWeights();
+    const initialWeightsData = await loadWeights();
     const initialWeights = { ...initialWeightsData.weights };
 
-    const result = recalculateWeights(performanceRecords, {
+    const result = await recalculateWeights(performanceRecords, {
       darwin: {
         windowDays: 60,
         minSamples: 5,
@@ -598,7 +598,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
     expect(typeof result.weights).toBe("object");
     expect(Array.isArray(result.changes)).toBe(true);
 
-    const updatedWeightsData = loadWeights();
+    const updatedWeightsData = await loadWeights();
     const updatedWeights = updatedWeightsData.weights;
 
     let weightsChanged = false;

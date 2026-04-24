@@ -175,7 +175,7 @@ export function scheduleTrailingDropConfirmation(
         const position = result?.positions?.find(
           (p: { position: string }) => p.position === positionAddress
         );
-        const resolved = resolvePendingTrailingDrop(
+        const resolved = await resolvePendingTrailingDrop(
           positionAddress,
           position?.pnl_pct ?? null,
           config.management.trailingDropPct,
@@ -275,11 +275,11 @@ export async function runManagementCycle(
       if (!isArray(positions)) {
         throw new Error("Invalid positions data: not an array");
       }
-      const positionData: Array<EnrichedPosition & { recall: string | null }> = positions.map(
-        (p) => {
-          const poolRow = recordPositionSnapshot(p.pool, p);
-          return { ...p, recall: recallForPool(p.pool, poolRow) };
-        }
+      const positionData: Array<EnrichedPosition & { recall: string | null }> = await Promise.all(
+        positions.map(async (p) => {
+          const poolRow = await recordPositionSnapshot(p.pool, p);
+          return { ...p, recall: await recallForPool(p.pool, poolRow) };
+        })
       );
 
       // Pre-load tracked positions once to avoid redundant DB reads per position
@@ -287,7 +287,7 @@ export async function runManagementCycle(
       const trackedCache = new Map<string, TrackedPosition | null>();
       for (const p of positionData) {
         if (!trackedCache.has(p.position)) {
-          trackedCache.set(p.position, getTrackedPosition(p.position));
+          trackedCache.set(p.position, await getTrackedPosition(p.position));
         }
       }
 
@@ -295,10 +295,10 @@ export async function runManagementCycle(
       const exitMap = new Map<string, ExitAction>();
       for (const p of positionData) {
         const trackedP = trackedCache.get(p.position) ?? null;
-        if (!p.pnl_pct_suspicious && queuePeakConfirmation(p.position, p.pnl_pct, trackedP)) {
+        if (!p.pnl_pct_suspicious && (await queuePeakConfirmation(p.position, p.pnl_pct, trackedP))) {
           schedulePeakConfirmation(p.position);
         }
-        const exit = updatePnlAndCheckExits(
+        const exit = await updatePnlAndCheckExits(
           p.position,
           p,
           config.management,
@@ -309,7 +309,7 @@ export async function runManagementCycle(
           // Trailing TP needs confirmation before closing
           if (exit.action === "TRAILING_TP" && exit.needs_confirmation) {
             if (
-              queueTrailingDropConfirmation(
+              await queueTrailingDropConfirmation(
                 p.position,
                 exit.peak_pnl_pct ?? null,
                 exit.current_pnl_pct ?? null,
@@ -556,7 +556,7 @@ After executing, write a brief one-line result per position.
       mgmtReport = `Management cycle failed: ${getErrorMessage(error)}`;
     } finally {
       deps.setManagementBusy(false);
-      flushDbReadDebugSummary("management cycle");
+      await flushDbReadDebugSummary("management cycle");
       if (!silent && telegramEnabled()) {
         if (mgmtReport) {
           if (liveMessage) {

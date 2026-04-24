@@ -8,7 +8,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PROJECT_ROOT } from "../config/paths.js";
-import { parseJson, query, run, stringifyJson, transaction } from "./db.js";
+import { parseJson, stringifyJson } from "../utils/json.js";
+import { query, run, transaction } from "./db.js";
 import { log } from "./logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -214,10 +215,10 @@ function assemblePoolExport(
 /**
  * Export all positions to JSON file
  */
-export function exportPositionsToJson(
+export async function exportPositionsToJson(
   outputPath?: string,
   options: ExportOptions = {}
-): ExportResult {
+): Promise<ExportResult> {
   try {
     const { pretty = true, includeDataJson = true } = options;
 
@@ -290,7 +291,10 @@ export function exportPositionsToJson(
 /**
  * Export all pools and their deploys to JSON file
  */
-export function exportPoolsToJson(outputPath?: string, options: ExportOptions = {}): ExportResult {
+export async function exportPoolsToJson(
+  outputPath?: string,
+  options: ExportOptions = {}
+): Promise<ExportResult> {
   try {
     const { pretty = true, includeDataJson = true } = options;
 
@@ -346,10 +350,10 @@ export function exportPoolsToJson(outputPath?: string, options: ExportOptions = 
 /**
  * Export lessons and performance records to JSON file
  */
-export function exportLessonsToJson(
+export async function exportLessonsToJson(
   outputPath?: string,
   options: ExportOptions = {}
-): ExportResult {
+): Promise<ExportResult> {
   try {
     const { pretty = true, includeDataJson = true } = options;
 
@@ -439,10 +443,10 @@ export function exportLessonsToJson(
 /**
  * Export signal weights and history to JSON file
  */
-export function exportSignalWeightsToJson(
+export async function exportSignalWeightsToJson(
   outputPath?: string,
   options: ExportOptions = {}
-): ExportResult {
+): Promise<ExportResult> {
   try {
     const { pretty = true } = options;
 
@@ -493,7 +497,7 @@ export function exportSignalWeightsToJson(
 /**
  * Export everything to a timestamped backup directory
  */
-export function exportAllToJson(): BackupResult {
+export async function exportAllToJson(): Promise<BackupResult> {
   try {
     const timestamp = generateTimestamp();
     const backupDir = path.join(PROJECT_ROOT, "backups", timestamp);
@@ -502,25 +506,27 @@ export function exportAllToJson(): BackupResult {
     const files: string[] = [];
 
     // Export positions
-    const positionsResult = exportPositionsToJson(path.join(backupDir, "positions.json"));
+    const positionsResult = await exportPositionsToJson(path.join(backupDir, "positions.json"));
     if (positionsResult.success && positionsResult.filePath) {
       files.push(positionsResult.filePath);
     }
 
     // Export pools
-    const poolsResult = exportPoolsToJson(path.join(backupDir, "pools.json"));
+    const poolsResult = await exportPoolsToJson(path.join(backupDir, "pools.json"));
     if (poolsResult.success && poolsResult.filePath) {
       files.push(poolsResult.filePath);
     }
 
     // Export lessons
-    const lessonsResult = exportLessonsToJson(path.join(backupDir, "lessons.json"));
+    const lessonsResult = await exportLessonsToJson(path.join(backupDir, "lessons.json"));
     if (lessonsResult.success && lessonsResult.filePath) {
       files.push(lessonsResult.filePath);
     }
 
     // Export signal weights
-    const weightsResult = exportSignalWeightsToJson(path.join(backupDir, "signal-weights.json"));
+    const weightsResult = await exportSignalWeightsToJson(
+      path.join(backupDir, "signal-weights.json")
+    );
     if (weightsResult.success && weightsResult.filePath) {
       files.push(weightsResult.filePath);
     }
@@ -560,7 +566,7 @@ export function exportAllToJson(): BackupResult {
 /**
  * Export in legacy JSON format (compatible with original lessons.json and pool-memory.json)
  */
-export function exportToLegacyFormat(outputDir?: string): BackupResult {
+export async function exportToLegacyFormat(outputDir?: string): Promise<BackupResult> {
   try {
     const dir = outputDir || path.join(PROJECT_ROOT, "backups", `legacy-${generateTimestamp()}`);
     ensureBackupDir(dir);
@@ -666,10 +672,10 @@ export function exportToLegacyFormat(outputDir?: string): BackupResult {
 /**
  * Validate import data structure
  */
-export function validateImportData(
+export async function validateImportData(
   data: unknown,
   type: "positions" | "pools" | "lessons"
-): ValidationResult {
+): Promise<ValidationResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -730,10 +736,10 @@ export function validateImportData(
 /**
  * Import positions from JSON file
  */
-export function importPositionsFromJson(
+export async function importPositionsFromJson(
   jsonPath: string,
   options: ImportOptions = {}
-): ImportResult {
+): Promise<ImportResult> {
   try {
     const { validateOnly = false, skipInvalid = true } = options;
 
@@ -748,7 +754,7 @@ export function importPositionsFromJson(
       positions?: Array<Record<string, unknown>>;
     }>(jsonPath);
 
-    const validation = validateImportData(data, "positions");
+    const validation = await validateImportData(data, "positions");
     if (!validation.valid) {
       return {
         success: false,
@@ -849,7 +855,10 @@ export function importPositionsFromJson(
 /**
  * Import pools from JSON file
  */
-export function importPoolsFromJson(jsonPath: string, options: ImportOptions = {}): ImportResult {
+export async function importPoolsFromJson(
+  jsonPath: string,
+  options: ImportOptions = {}
+): Promise<ImportResult> {
   try {
     const { validateOnly = false, skipInvalid = true } = options;
 
@@ -864,7 +873,7 @@ export function importPoolsFromJson(jsonPath: string, options: ImportOptions = {
       pools?: Record<string, Record<string, unknown>>;
     }>(jsonPath);
 
-    const validation = validateImportData(data, "pools");
+    const validation = await validateImportData(data, "pools");
     if (!validation.valid) {
       return {
         success: false,
@@ -976,7 +985,10 @@ export function importPoolsFromJson(jsonPath: string, options: ImportOptions = {
 /**
  * Import lessons from JSON file
  */
-export function importLessonsFromJson(jsonPath: string, options: ImportOptions = {}): ImportResult {
+export async function importLessonsFromJson(
+  jsonPath: string,
+  options: ImportOptions = {}
+): Promise<ImportResult> {
   try {
     const { validateOnly = false, skipInvalid = true } = options;
 
@@ -992,7 +1004,7 @@ export function importLessonsFromJson(jsonPath: string, options: ImportOptions =
       performance?: Array<Record<string, unknown>>;
     }>(jsonPath);
 
-    const validation = validateImportData(data, "lessons");
+    const validation = await validateImportData(data, "lessons");
     if (!validation.valid) {
       return {
         success: false,
@@ -1121,11 +1133,11 @@ export function importLessonsFromJson(jsonPath: string, options: ImportOptions =
 /**
  * Reset database - clear all data with confirmation
  */
-export function resetDatabase(confirm: boolean = false): {
+export async function resetDatabase(confirm: boolean = false): Promise<{
   success: boolean;
   message: string;
   cleared?: Record<string, number>;
-} {
+}> {
   if (!confirm) {
     return {
       success: false,
@@ -1178,14 +1190,14 @@ export function resetDatabase(confirm: boolean = false): {
 /**
  * List available backups
  */
-export function listBackups(): {
+export async function listBackups(): Promise<{
   backups: Array<{
     name: string;
     path: string;
     created_at: string;
     files: string[];
   }>;
-} {
+}> {
   const backupsDir = path.join(PROJECT_ROOT, "backups");
 
   if (!fs.existsSync(backupsDir)) {

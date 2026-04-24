@@ -143,7 +143,8 @@ export function log(category: LogCategory, message: string): void {
   const sanitizedMessage = sanitizeMessage(message);
   const line = `[${timestamp}] [${category.toUpperCase()}] ${sanitizedMessage}`;
 
-  // Console output
+  // Console output - data already sanitized via sanitizeMessage() above
+  // CodeQL[js/clear-text-logging]: Intentional console output for user visibility with PII redaction
   console.log(line);
 
   // File output (daily rotation) - using persistent stream (UTC date for consistency)

@@ -7,7 +7,7 @@ import type {
   Logger,
   NotificationService,
 } from "./domain/interfaces/database.js";
-import * as dbModule from "./infrastructure/db.js";
+import { createDatabase } from "./infrastructure/db/index.js";
 import { log } from "./infrastructure/logger.js";
 
 export interface Infrastructure {
@@ -16,17 +16,24 @@ export interface Infrastructure {
   notifications: NotificationService;
 }
 
-// Default infrastructure implementation
-function createDefaultInfrastructure(): Infrastructure {
-  return {
-    db: {
-      query: dbModule.query,
-      get: dbModule.get,
-      run: dbModule.run,
-      transaction: dbModule.transaction,
-      stringifyJson: dbModule.stringifyJson,
-      parseJson: dbModule.parseJson,
-    },
+// Container instance (set at bootstrap)
+let container: Infrastructure | null = null;
+
+export async function initializeInfrastructure(): Promise<void> {
+  const backend =
+    process.env.DATABASE_BACKEND === "postgres"
+      ? "postgres"
+      : process.env.DATABASE_BACKEND === "sqlite"
+        ? "sqlite"
+        : undefined;
+
+  const db = await createDatabase({
+    backend,
+    url: process.env.DATABASE_URL?.trim() || undefined,
+  });
+
+  container = {
+    db,
     logger: {
       info: (msg: string) => log("INFO", msg),
       error: (msg: string) => log("ERROR", msg),
@@ -41,17 +48,31 @@ function createDefaultInfrastructure(): Infrastructure {
   };
 }
 
-// Container instance (set at bootstrap)
-let container: Infrastructure | null = null;
-
-export function setInfrastructure(infra?: Infrastructure): void {
-  container = infra ?? createDefaultInfrastructure();
-}
-
+/**
+ * Get the initialized infrastructure.
+ * Throws if initializeInfrastructure() hasn't been called.
+ */
 export function getInfrastructure(): Infrastructure {
   if (!container) {
-    // Auto-initialize with defaults for backward compatibility
-    setInfrastructure();
+    throw new Error("Infrastructure not initialized. Call initializeInfrastructure() first.");
   }
-  return container!;
+  return container;
+}
+
+/**
+ * Set infrastructure manually (for testing or custom setups).
+ * @deprecated Use initializeInfrastructure() instead
+ */
+export function setInfrastructure(infra?: Infrastructure): void {
+  container = infra ?? null;
+}
+
+/**
+ * Close database connection gracefully.
+ */
+export async function closeInfrastructure(): Promise<void> {
+  if (container) {
+    await container.db.close();
+    container = null;
+  }
 }

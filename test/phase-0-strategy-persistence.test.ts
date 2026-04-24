@@ -19,7 +19,7 @@ let _dbReady = false;
 async function ensureDb(): Promise<void> {
   if (_dbReady) return;
   const { setupDatabase } = await import("../src/infrastructure/db-migrations.js");
-  setupDatabase();
+  await setupDatabase();
   // Also seed default strategies so getStrategy can find them
   // We need to reset the lazy flag because a fresh DB needs fresh defaults
   const strategyLib = await import("../src/domain/strategy-library.js");
@@ -64,7 +64,7 @@ const VALID_STRATEGY_CONFIG: Strategy = {
 
 describeAsync("resolveStrategy — strategy_config present", async () => {
   testAsync("prefers strategy_config snapshot when available", async () => {
-    const { resolved, strategyId, legacy } = resolveStrategy("spot", VALID_STRATEGY_CONFIG);
+    const { resolved, strategyId, legacy } = await resolveStrategy("spot", VALID_STRATEGY_CONFIG);
 
     expect(resolved).toBeTruthy();
     if (resolved) {
@@ -75,7 +75,7 @@ describeAsync("resolveStrategy — strategy_config present", async () => {
   });
 
   testAsync("uses strategy_config even when strategy field is a legacy value", async () => {
-    const { resolved, strategyId } = resolveStrategy("spot", VALID_STRATEGY_CONFIG);
+    const { resolved, strategyId } = await resolveStrategy("spot", VALID_STRATEGY_CONFIG);
 
     if (resolved) {
       expect(resolved.id).toBe("custom_ratio_spot");
@@ -84,7 +84,7 @@ describeAsync("resolveStrategy — strategy_config present", async () => {
   });
 
   testAsync("uses strategy_config even when strategy is empty string", async () => {
-    const { resolved, strategyId } = resolveStrategy("", VALID_STRATEGY_CONFIG);
+    const { resolved, strategyId } = await resolveStrategy("", VALID_STRATEGY_CONFIG);
 
     if (resolved) {
       expect(resolved.id).toBe("custom_ratio_spot");
@@ -95,7 +95,7 @@ describeAsync("resolveStrategy — strategy_config present", async () => {
 
 describeAsync("resolveStrategy — legacy lp_strategy values", async () => {
   testAsync("resolves legacy 'spot' to synthetic strategy", async () => {
-    const { resolved, strategyId, legacy } = resolveStrategy("spot", null);
+    const { resolved, strategyId, legacy } = await resolveStrategy("spot", null);
 
     expect(resolved).toBeTruthy();
     expect(strategyId).toBe("custom_ratio_spot");
@@ -107,7 +107,7 @@ describeAsync("resolveStrategy — legacy lp_strategy values", async () => {
   });
 
   testAsync("resolves legacy 'bid_ask' to synthetic strategy", async () => {
-    const { resolved, legacy } = resolveStrategy("bid_ask", null);
+    const { resolved, legacy } = await resolveStrategy("bid_ask", null);
 
     expect(resolved).toBeTruthy();
     expect(legacy).toBe(true);
@@ -117,7 +117,7 @@ describeAsync("resolveStrategy — legacy lp_strategy values", async () => {
   });
 
   testAsync("resolves legacy 'curve' to synthetic strategy", async () => {
-    const { resolved, legacy } = resolveStrategy("curve", null);
+    const { resolved, legacy } = await resolveStrategy("curve", null);
 
     expect(resolved).toBeTruthy();
     expect(legacy).toBe(true);
@@ -127,14 +127,14 @@ describeAsync("resolveStrategy — legacy lp_strategy values", async () => {
   });
 
   testAsync("resolves legacy 'any' to synthetic strategy", async () => {
-    const { resolved, legacy } = resolveStrategy("any", null);
+    const { resolved, legacy } = await resolveStrategy("any", null);
 
     expect(resolved).toBeTruthy();
     expect(legacy).toBe(true);
   });
 
   testAsync("resolves legacy 'mixed' to synthetic strategy", async () => {
-    const { resolved, legacy } = resolveStrategy("mixed", null);
+    const { resolved, legacy } = await resolveStrategy("mixed", null);
 
     expect(resolved).toBeTruthy();
     expect(legacy).toBe(true);
@@ -145,7 +145,7 @@ describeAsync("resolveStrategy — valid strategy id", async () => {
   testAsync("resolves known strategy id via getStrategy", async () => {
     await ensureDb();
     // "custom_ratio_spot" is a default strategy in the strategy library
-    const { resolved, strategyId, legacy } = resolveStrategy("custom_ratio_spot", null);
+    const { resolved, strategyId, legacy } = await resolveStrategy("custom_ratio_spot", null);
 
     expect(resolved).toBeTruthy();
     expect(strategyId).toBe("custom_ratio_spot");
@@ -159,14 +159,14 @@ describeAsync("resolveStrategy — valid strategy id", async () => {
 describeAsync("resolveStrategy — unknown strategy", async () => {
   testAsync("returns null for unknown non-legacy strategy id", async () => {
     await ensureDb();
-    const { resolved } = resolveStrategy("nonexistent_strategy_xyz", null);
+    const { resolved } = await resolveStrategy("nonexistent_strategy_xyz", null);
 
     // Unknown ID is not in legacy set, getStrategy returns error → null
     expect(resolved).toBe(null);
   });
 
   testAsync("returns null for empty string with no config", async () => {
-    const { resolved } = resolveStrategy("", null);
+    const { resolved } = await resolveStrategy("", null);
 
     // Empty string → not legacy → getStrategy("") → error → not legacy → null
     expect(resolved).toBe(null);
@@ -177,7 +177,7 @@ describeAsync("resolveStrategy — strategy_config without id", async () => {
   testAsync("falls through when strategy_config has no id", async () => {
     await ensureDb();
     const configNoId = { name: "test" } as unknown as Strategy;
-    const { resolved } = resolveStrategy("custom_ratio_spot", configNoId);
+    const { resolved } = await resolveStrategy("custom_ratio_spot", configNoId);
 
     // Should still resolve via getStrategy because config didn't have an id
     expect(resolved).toBeTruthy();
@@ -221,7 +221,7 @@ describeAsync("Persistence pipeline — strategy field propagation", async () =>
     };
 
     // When this flows through trackPosition → resolveStrategy:
-    const { resolved, legacy } = resolveStrategy(
+    const { resolved, legacy } = await resolveStrategy(
       legacyDeployResult.strategy,
       legacyDeployResult.strategy_config as Strategy | null
     );
@@ -253,7 +253,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
     await ensureDb();
     const position = `pos-canonical-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    trackPosition({
+    await trackPosition({
       position,
       pool: "pool-1",
       pool_name: "Pool 1",
@@ -279,7 +279,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
     expect(raw?.strategy).toBe("custom_ratio_spot");
     expect(raw?.strategy_config).toBeTruthy();
 
-    const tracked = getTrackedPosition(position);
+    const tracked = await getTrackedPosition(position);
     expect(tracked?.strategy).toBe("custom_ratio_spot");
     expect(tracked?.strategy_config?.id).toBe("custom_ratio_spot");
   });
@@ -330,7 +330,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
       expect(raw?.strategy).toBe("custom_ratio_spot");
       expect(raw?.strategy_config).toBeTruthy();
 
-      const tracked = getTrackedPosition(position);
+      const tracked = await getTrackedPosition(position);
       expect(tracked?.strategy).toBe("custom_ratio_spot");
       expect(tracked?.strategy_config?.id).toBe("custom_ratio_spot");
       expect(tracked?.strategy_config?.lp_strategy).toBe("spot");
@@ -341,7 +341,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
     await ensureDb();
     const position = `pos-mismatch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    trackPosition({
+    await trackPosition({
       position,
       pool: "pool-mismatch-1",
       pool_name: "Pool Mismatch 1",
@@ -359,7 +359,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
       signal_snapshot: null,
     });
 
-    const tracked = getTrackedPosition(position);
+    const tracked = await getTrackedPosition(position);
     expect(tracked?.strategy).toBe("custom_ratio_spot");
     expect(tracked?.strategy_config?.id).toBe("custom_ratio_spot");
   });
@@ -367,7 +367,7 @@ describeAsync("Persistence pipeline — DB round trip", async () => {
 
 describeAsync("resolveStrategy — edge cases", async () => {
   testAsync("undefined strategy_config treated as null", async () => {
-    const { resolved, legacy } = resolveStrategy("spot", undefined);
+    const { resolved, legacy } = await resolveStrategy("spot", undefined);
 
     expect(legacy).toBe(true);
     expect(resolved).toBeTruthy();
@@ -375,7 +375,7 @@ describeAsync("resolveStrategy — edge cases", async () => {
 
   testAsync("strategy_config with empty object falls through", async () => {
     await ensureDb();
-    const { resolved } = resolveStrategy("custom_ratio_spot", {} as Strategy);
+    const { resolved } = await resolveStrategy("custom_ratio_spot", {} as Strategy);
 
     // Empty object has no id → falls through to getStrategy
     expect(resolved).toBeTruthy();

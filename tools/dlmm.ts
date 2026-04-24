@@ -168,7 +168,7 @@ export async function deployPosition({
   const activeBinsBelow = bins_below ?? config.strategy.binsBelow;
   const activeBinsAbove = bins_above ?? config.strategy.binsAbove;
 
-  if (isPoolOnCooldown(pool_address)) {
+  if (await isPoolOnCooldown(pool_address)) {
     log("deploy", `Pool ${pool_address.slice(0, 8)} is on cooldown — skipping`);
     return {
       success: false,
@@ -197,7 +197,7 @@ export async function deployPosition({
   const wallet = getWallet();
   const pool = await getPool(pool_address);
   const baseMint = pool.lbPair.tokenXMint.toString();
-  if (isBaseMintOnCooldown(baseMint)) {
+  if (await isBaseMintOnCooldown(baseMint)) {
     log(
       "deploy",
       `Base mint ${baseMint.slice(0, 8)} is on cooldown — skipping deploy for pool ${pool_address.slice(0, 8)}`
@@ -366,10 +366,11 @@ export async function deployPosition({
       (baseFactor > 0 ? parseFloat((((baseFactor * actualBinStep) / 1e6) * 100).toFixed(4)) : null);
 
     // Resolve canonical strategy id + config snapshot for persistence
+    const activeStrategyDefinition = await getActiveStrategy();
     const resolvedStrategy =
-      isLegacyLpStrategy(activeStrategy) && getActiveStrategy()?.lp_strategy !== activeStrategy
-        ? getStrategyByLpStrategy(activeStrategy)
-        : getActiveStrategy();
+      isLegacyLpStrategy(activeStrategy) && activeStrategyDefinition?.lp_strategy !== activeStrategy
+        ? await getStrategyByLpStrategy(activeStrategy)
+        : activeStrategyDefinition;
 
     if (!resolvedStrategy) {
       log(
@@ -479,7 +480,7 @@ export async function addLiquidity({
     }
 
     // Check if position is closed
-    const tracked = getTrackedPosition(position_address);
+    const tracked = await getTrackedPosition(position_address);
     if (tracked?.closed) {
       return { success: false, error: "Position already closed — cannot add liquidity" };
     }
@@ -819,12 +820,14 @@ export async function getMyPositions({
       const positions: EnrichedPosition[] = [];
       for (const pool of pools) {
         for (const positionAddress of pool.listPositions || []) {
-          const tracked = getTrackedPosition(positionAddress);
+            const tracked = await getTrackedPosition(positionAddress);
           const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 
           // Mark OOR state and capture the effective out_of_range_since to
           // avoid a duplicate DB read in minutesOutOfRange below.
-          const oorSince = isOOR ? markOutOfRange(positionAddress) : markInRange(positionAddress);
+          const oorSince = isOOR
+            ? await markOutOfRange(positionAddress)
+            : await markInRange(positionAddress);
 
           // Bin data: from supplemental PnL call (OOR) or tracked state (in-range)
           const binData = binDataByPool[pool.poolAddress]?.[positionAddress];
@@ -927,7 +930,7 @@ export async function getMyPositions({
             age_minutes: binData?.createdAt
               ? Math.floor((Date.now() - binData.createdAt * 1000) / 60000)
               : ageFromState,
-            minutes_out_of_range: minutesOutOfRange(positionAddress, oorSince),
+            minutes_out_of_range: await minutesOutOfRange(positionAddress, oorSince),
             instruction: tracked?.instruction ?? null,
             tracked_state: tracked,
           });
@@ -1086,7 +1089,7 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
     };
   }
 
-  const tracked = getTrackedPosition(position_address);
+    const tracked = await getTrackedPosition(position_address);
   if (tracked?.closed) {
     return { success: false, error: "Position already closed — fees were claimed during close" };
   }
@@ -1187,7 +1190,7 @@ export async function withdrawLiquidity({
     };
   }
 
-  const tracked = getTrackedPosition(position_address);
+    const tracked = await getTrackedPosition(position_address);
   if (tracked?.closed) {
     return { success: false, error: "Position already closed — no liquidity to withdraw" };
   }
@@ -1470,7 +1473,7 @@ export async function closePosition({
     };
   }
 
-  const tracked = getTrackedPosition(position_address);
+    const tracked = await getTrackedPosition(position_address);
 
   try {
     log("close", `Closing position: ${position_address}`);
@@ -1751,7 +1754,7 @@ async function lookupPoolForPosition(
   walletAddress: string
 ): Promise<string> {
   // Check state registry first (fast path)
-  const tracked = getTrackedPosition(position_address);
+  const tracked = await getTrackedPosition(position_address);
   if (tracked?.pool) return tracked.pool;
 
   // Check in-memory positions cache

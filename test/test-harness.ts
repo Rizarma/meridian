@@ -22,6 +22,7 @@ let currentSuite: TestSuite | null = null;
 const suiteStack: TestSuite[] = [];
 const pendingSuites: Promise<void>[] = [];
 const pendingTests: Promise<void>[] = [];
+let executionChain: Promise<void> = Promise.resolve();
 
 /**
  * Define a test suite (group of related tests)
@@ -86,34 +87,32 @@ export function test(name: string, fn: () => void | Promise<void>): void {
     throw new Error("test() must be called inside describe() or describeAsync()");
   }
 
-  const start = Date.now();
-  let passed = true;
-  let error: string | undefined;
-
-  try {
-    const result = fn();
-
-    // Check if the test function returned a Promise (async test)
-    if (result && typeof result.then === "function") {
-      // For async tests within sync describe(), we can't properly await
-      // This is a limitation of the minimal harness
-      throw new Error(
-        "Async test function detected in sync describe(). " +
-          "Use describeAsync() for async test suites or handle async before test()."
-      );
-    }
-    // Sync test completed successfully
-  } catch (e) {
-    passed = false;
-    error = e instanceof Error ? e.message : String(e);
-  }
-
-  currentSuite.tests.push({
+  const testResult: TestResult = {
     name,
-    passed,
-    error,
-    durationMs: Date.now() - start,
+    passed: true,
+    error: undefined,
+    durationMs: 0,
+  };
+  currentSuite.tests.push(testResult);
+
+  const testPromise = executionChain.then(async () => {
+    const start = Date.now();
+    try {
+      await fn();
+      testResult.passed = true;
+    } catch (e) {
+      testResult.passed = false;
+      testResult.error = e instanceof Error ? e.message : String(e);
+    }
+    testResult.durationMs = Date.now() - start;
   });
+
+  executionChain = testPromise.then(
+    () => undefined,
+    () => undefined
+  );
+
+  pendingTests.push(testPromise);
 }
 
 /**
@@ -136,7 +135,7 @@ export function testAsync(name: string, fn: () => Promise<void>): void {
   activeSuite.tests.push(testResult);
 
   // Store the async execution to be awaited
-  const testPromise = (async () => {
+  const testPromise = executionChain.then(async () => {
     const start = Date.now();
     try {
       await fn();
@@ -146,7 +145,12 @@ export function testAsync(name: string, fn: () => Promise<void>): void {
       testResult.error = e instanceof Error ? e.message : String(e);
     }
     testResult.durationMs = Date.now() - start;
-  })();
+  });
+
+  executionChain = testPromise.then(
+    () => undefined,
+    () => undefined
+  );
 
   // Add to pending tests for this suite
   pendingTests.push(testPromise);
@@ -292,9 +296,9 @@ export function runTests(): void {
  * Use this when test files use describeAsync().
  */
 export async function runTestsAsync(): Promise<void> {
-  // Wait for all async suites to complete
-  if (pendingSuites.length > 0) {
-    await Promise.all(pendingSuites);
+  // Wait for all async suites/tests to complete
+  if (pendingSuites.length > 0 || pendingTests.length > 0) {
+    await Promise.all([...pendingSuites, ...pendingTests]);
   }
 
   printResults();

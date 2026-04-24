@@ -13,7 +13,7 @@ import { config } from "../src/config/config.js";
 import { calculateLessonCoverage, shouldUsePortfolioSync } from "../src/domain/portfolio-sync.js";
 import { run } from "../src/infrastructure/db.js";
 import type { LessonEntry } from "../src/types/lessons.js";
-import { describe, expect, runTests, test } from "./test-harness.js";
+import { describe, expect, runTestsAsync, test } from "./test-harness.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers — access private functions via module internals
@@ -135,7 +135,7 @@ describe("shouldUsePortfolioSync - Feature Flag", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
-  test("returns zero coverage when lessons table is empty", () => {
+  test("returns zero coverage when lessons table is empty", async () => {
     // Clear any existing lessons for a clean test
     try {
       run("DELETE FROM lessons WHERE rule LIKE '%__portfolio_sync_test__%'");
@@ -144,7 +144,7 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
     }
 
     // With no test-specific lessons, coverage should reflect actual state
-    const coverage = calculateLessonCoverage();
+    const coverage = await calculateLessonCoverage();
     // Coverage should have all required fields
     expect(typeof coverage.uniquePools).toBe("number");
     expect(typeof coverage.positiveCount).toBe("number");
@@ -152,8 +152,8 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
     expect(typeof coverage.newestLessonMs).toBe("number");
   });
 
-  test("returns proper structure with all fields", () => {
-    const coverage = calculateLessonCoverage();
+  test("returns proper structure with all fields", async () => {
+    const coverage = await calculateLessonCoverage();
     // newestLessonMs should be 0 or a positive number (timestamp)
     expect(coverage.newestLessonMs >= 0).toBe(true);
     // uniquePools should be non-negative
@@ -163,9 +163,9 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
     expect(coverage.negativeCount >= 0).toBe(true);
   });
 
-  test("coverage increases when lessons are added", () => {
+  test("coverage increases when lessons are added", async () => {
     // Record baseline
-    const before = calculateLessonCoverage();
+    const before = await calculateLessonCoverage();
 
     // Insert a test lesson
     const testPool = "__portfolio_sync_test_pool_1__";
@@ -187,7 +187,7 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
       '{"source":"portfolio_sync_test"}'
     );
 
-    const after = calculateLessonCoverage();
+    const after = await calculateLessonCoverage();
 
     // Coverage should have increased
     expect(after.uniquePools >= before.uniquePools).toBe(true);
@@ -199,7 +199,7 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
     run("DELETE FROM lessons WHERE rule LIKE '%__portfolio_sync_test__%'");
   });
 
-  test("counts negative outcomes separately from positive", () => {
+  test("counts negative outcomes separately from positive", async () => {
     // Insert a negative lesson
     const testPool = "__portfolio_sync_test_pool_neg__";
     const testRule = "__portfolio_sync_test__ Test avoid pool lesson";
@@ -220,7 +220,7 @@ describe("calculateLessonCoverage - Empty DB Returns Low Coverage", () => {
       '{"source":"portfolio_sync_test"}'
     );
 
-    const coverage = calculateLessonCoverage();
+    const coverage = await calculateLessonCoverage();
     expect(coverage.negativeCount >= 1).toBe(true);
 
     // Clean up
@@ -461,10 +461,10 @@ describe("Portfolio Sync - Config Default Values", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("calculateLessonCoverage - Resilience", () => {
-  test("returns zeroed coverage on DB error (fail-open)", () => {
+  test("returns zeroed coverage on DB error (fail-open)", async () => {
     // calculateLessonCoverage wraps everything in try/catch and returns
     // zero coverage on failure. We can verify the return type is correct.
-    const coverage = calculateLessonCoverage();
+    const coverage = await calculateLessonCoverage();
     expect(typeof coverage.uniquePools).toBe("number");
     expect(typeof coverage.positiveCount).toBe("number");
     expect(typeof coverage.negativeCount).toBe("number");
@@ -476,8 +476,8 @@ describe("calculateLessonCoverage - Resilience", () => {
     expect(coverage.newestLessonMs >= 0).toBe(true);
   });
 
-  test("newestLessonMs is 0 when no lessons exist or a valid timestamp", () => {
-    const coverage = calculateLessonCoverage();
+  test("newestLessonMs is 0 when no lessons exist or a valid timestamp", async () => {
+    const coverage = await calculateLessonCoverage();
     // Either 0 (no lessons) or a valid timestamp (> some reasonable epoch)
     const isValid = coverage.newestLessonMs === 0 || coverage.newestLessonMs > 1000000000000;
     expect(isValid).toBe(true);
@@ -485,4 +485,4 @@ describe("calculateLessonCoverage - Resilience", () => {
 });
 
 // Run tests immediately
-runTests();
+runTestsAsync();

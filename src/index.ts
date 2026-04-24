@@ -9,6 +9,12 @@ import "./bootstrap.js";
 // ═══════════════════════════════════════════
 //  MAIN ENTRY POINT
 // ═══════════════════════════════════════════
-import { start } from "./orchestrator.js";
+import { initializeInfrastructure } from "./di-container.js";
+import { initializeApp } from "./orchestrator.js";
 
-start();
+async function main(): Promise<void> {
+  await initializeInfrastructure();
+  await initializeApp();
+}
+
+void main().catch(console.error);

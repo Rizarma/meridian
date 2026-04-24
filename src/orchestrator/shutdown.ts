@@ -3,7 +3,7 @@
 
 import { getMyPositions, stopPoolCache } from "../../tools/dlmm.js";
 import { TIMEOUT } from "../config/constants.js";
-import { closeDb } from "../infrastructure/db.js";
+import { closeInfrastructure } from "../di-container.js";
 import { destroyConsensusCache } from "../infrastructure/hive-mind.js";
 import { closeLogStreams, log } from "../infrastructure/logger.js";
 import { stopPolling } from "../infrastructure/telegram.js";
@@ -43,7 +43,7 @@ export async function shutdown(signal: string): Promise<void> {
 
         // Close log streams properly
         closeLogStreams();
-        closeDb();
+        await closeInfrastructure();
 
         // Small delay to let final logs flush
         await new Promise((resolve) => setTimeout(resolve, TIMEOUT.LOG_FLUSH_MS));

@@ -11,9 +11,7 @@ import { config } from "../config/config.js";
 import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 
-function getDb() {
-  return getInfrastructure().db;
-}
+const infra = () => getInfrastructure();
 
 import type {
   PoolMemoryDB,
@@ -135,7 +133,7 @@ interface SnapshotRow {
 /**
  * Get or create a pool record in the database.
  */
-function getOrCreatePool(poolAddress: string, name?: string): PoolRow | null {
+async function getOrCreatePool(poolAddress: string, name?: string): Promise<PoolRow | null> {
   // Validate pool address - must be non-empty string
   if (!poolAddress || typeof poolAddress !== "string" || poolAddress.trim() === "") {
     log("pool-memory_warn", `Invalid pool address provided: ${JSON.stringify(poolAddress)}`);
@@ -143,16 +141,16 @@ function getOrCreatePool(poolAddress: string, name?: string): PoolRow | null {
   }
 
   const trimmedAddress = poolAddress.trim();
-  let pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress);
+  let pool = await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress);
 
   if (!pool) {
-    getDb().run(
+    await infra().db.run(
       `INSERT INTO pools (address, name, total_deploys, created_at, updated_at)
        VALUES (?, ?, 0, datetime('now'), datetime('now'))`,
       trimmedAddress,
       name || trimmedAddress.slice(0, 8)
     );
-    pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress)!;
+    pool = (await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress))!;
     log("pool-memory", `Created new pool record: ${trimmedAddress.slice(0, 8)}`);
   }
 
@@ -168,8 +166,8 @@ function getOrCreatePool(poolAddress: string, name?: string): PoolRow | null {
  * snapshots are keyed by the actual DLMM position PDA address (completely
  * different from the pool address).
  */
-function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
-  const rows = getDb().query<SnapshotRow>(
+async function getPoolSnapshots(poolAddress: string): Promise<PoolSnapshot[]> {
+  const rows = await infra().db.query<SnapshotRow>(
     `SELECT * FROM position_snapshots
      WHERE position_address IN (
        SELECT address FROM positions WHERE pool = ?
@@ -201,12 +199,12 @@ function getPoolSnapshots(poolAddress: string): PoolSnapshot[] {
  * Record a closed deploy into the database.
  * Called automatically from recordPerformance() in lessons.js.
  */
-export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): void {
+export async function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): Promise<void> {
   if (!poolAddress) return;
 
-  getDb().transaction(() => {
+  await infra().db.transaction(async () => {
     // Get or create pool
-    const pool = getOrCreatePool(poolAddress, deployData.pool_name);
+    const pool = await getOrCreatePool(poolAddress, deployData.pool_name);
     if (!pool) {
       log(
         "pool-memory_warn",
@@ -217,7 +215,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
 
     // Update pool base_mint if provided
     if (deployData.base_mint && !pool.base_mint) {
-      getDb().run(
+      await infra().db.run(
         "UPDATE pools SET base_mint = ?, updated_at = datetime('now') WHERE address = ?",
         deployData.base_mint,
         poolAddress
@@ -226,7 +224,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
 
     // Insert the deploy record
     const closedAt = deployData.closed_at || new Date().toISOString();
-    getDb().run(
+    await infra().db.run(
       `INSERT INTO pool_deploys
        (pool_address, deployed_at, closed_at, pnl_pct, pnl_usd, range_efficiency,
         minutes_held, close_reason, strategy, volatility_at_deploy, data_json)
@@ -241,11 +239,11 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       deployData.close_reason || null,
       deployData.strategy || null,
       deployData.volatility ?? null,
-      getDb().stringifyJson(deployData)
+      infra().db.stringifyJson(deployData)
     );
 
     // Get all deploys to recalculate aggregates
-    const deploys = getDb().query<PoolDeployRow>(
+    const deploys = await infra().db.query<PoolDeployRow>(
       "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
       poolAddress
     );
@@ -274,7 +272,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     }
 
     // Update pool aggregates
-    getDb().run(
+    await infra().db.run(
       `UPDATE pools SET
         total_deploys = ?,
         avg_pnl_pct = ?,
@@ -296,7 +294,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
     if (deployData.close_reason === "low yield") {
       const cooldownHours = 4;
       const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000).toISOString();
-      getDb().run(
+      await infra().db.run(
         `UPDATE pools SET cooldown_until = ?, cooldown_reason = ?, updated_at = datetime('now') WHERE address = ?`,
         cooldownUntil,
         "low yield",
@@ -318,7 +316,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       const cooldownUntil = new Date(Date.now() + oorCooldownHours * 60 * 60 * 1000).toISOString();
 
       // Set pool cooldown
-      getDb().run(
+      await infra().db.run(
         `UPDATE pools SET cooldown_until = ?, cooldown_reason = ?, updated_at = datetime('now') WHERE address = ?`,
         cooldownUntil,
         reason,
@@ -329,7 +327,7 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
       // Set base mint cooldown for all pools with same base mint
       if (deployData.base_mint || pool.base_mint) {
         const baseMint = deployData.base_mint || pool.base_mint;
-        getDb().run(
+        await infra().db.run(
           `UPDATE pools SET base_mint_cooldown_until = ?, base_mint_cooldown_reason = ?, updated_at = datetime('now') WHERE base_mint = ?`,
           cooldownUntil,
           reason,
@@ -389,17 +387,17 @@ export function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInpu
  * Returns the PoolRow that was fetched/created so callers can reuse it
  * (e.g. pass to recallForPool) and avoid a redundant pools query.
  */
-export function recordPositionSnapshot(
+export async function recordPositionSnapshot(
   poolAddress: string,
   snapshot: PositionSnapshotInput
-): PoolRow | null {
+): Promise<PoolRow | null> {
   if (!poolAddress) return null;
 
   let result: PoolRow | null = null;
 
-  getDb().transaction(() => {
+  await infra().db.transaction(async () => {
     // Ensure pool exists
-    const pool = getOrCreatePool(poolAddress, snapshot.pair);
+    const pool = await getOrCreatePool(poolAddress, snapshot.pair);
     if (!pool) {
       log(
         "pool-memory_warn",
@@ -410,7 +408,7 @@ export function recordPositionSnapshot(
     result = pool;
 
     const positionAddr = snapshot.position || `${poolAddress}_snapshot_${Date.now()}`;
-    getDb().run(
+    await infra().db.run(
       `INSERT INTO position_snapshots
        (position_address, ts, pnl_pct, pnl_usd, in_range, unclaimed_fees_usd,
         minutes_out_of_range, age_minutes, data_json)
@@ -422,17 +420,17 @@ export function recordPositionSnapshot(
       snapshot.unclaimed_fees_usd ?? null,
       snapshot.minutes_out_of_range ?? null,
       snapshot.age_minutes ?? null,
-      getDb().stringifyJson(snapshot)
+      infra().db.stringifyJson(snapshot)
     );
 
     // Keep only last 48 snapshots for this position
-    const count = getDb().get<{ cnt: number }>(
+    const count = await infra().db.get<{ cnt: number }>(
       "SELECT COUNT(*) as cnt FROM position_snapshots WHERE position_address = ?",
       positionAddr
     );
 
     if (count && count.cnt > 48) {
-      getDb().run(
+      await infra().db.run(
         `DELETE FROM position_snapshots
          WHERE position_address = ?
          AND id IN (
@@ -458,13 +456,13 @@ export function recordPositionSnapshot(
  * Used by screening to avoid full recallForPool() queries for unknown pools.
  * Returns a Set of addresses that exist in the pools table.
  */
-export function getKnownPoolAddresses(addresses: string[]): Set<string> {
+export async function getKnownPoolAddresses(addresses: string[]): Promise<Set<string>> {
   if (addresses.length === 0) return new Set();
 
   // Deduplicate to avoid unnecessary query parameters
   const unique = [...new Set(addresses)];
   const placeholders = unique.map(() => "?").join(", ");
-  const rows = getDb().query<{ address: string }>(
+  const rows = await infra().db.query<{ address: string }>(
     `SELECT address FROM pools WHERE address IN (${placeholders})`,
     ...unique
   );
@@ -475,11 +473,11 @@ export function getKnownPoolAddresses(addresses: string[]): Set<string> {
  * Get all pool deploys across all pools, joined with pool metadata.
  * Used by hive-mind sync to upload anonymized deploy history.
  */
-export function getAllPoolDeploys(): (PoolDeployRow & {
+export async function getAllPoolDeploys(): Promise<(PoolDeployRow & {
   pool_name: string | null;
   base_mint: string | null;
-})[] {
-  return getDb().query<PoolDeployRow & { pool_name: string | null; base_mint: string | null }>(
+})[]> {
+  return infra().db.query<PoolDeployRow & { pool_name: string | null; base_mint: string | null }>(
     `SELECT pd.*, p.name as pool_name, p.base_mint
      FROM pool_deploys pd
      LEFT JOIN pools p ON pd.pool_address = p.address
@@ -487,10 +485,10 @@ export function getAllPoolDeploys(): (PoolDeployRow & {
   );
 }
 
-export function isPoolOnCooldown(poolAddress: string): boolean {
+export async function isPoolOnCooldown(poolAddress: string): Promise<boolean> {
   if (!poolAddress) return false;
 
-  const pool = getDb().get<PoolRow>(
+  const pool = await infra().db.get<PoolRow>(
     "SELECT cooldown_until FROM pools WHERE address = ?",
     poolAddress
   );
@@ -499,10 +497,10 @@ export function isPoolOnCooldown(poolAddress: string): boolean {
   return new Date(pool.cooldown_until) > new Date();
 }
 
-export function isBaseMintOnCooldown(baseMint: string): boolean {
+export async function isBaseMintOnCooldown(baseMint: string): Promise<boolean> {
   if (!baseMint) return false;
 
-  const pool = getDb().get<PoolRow>(
+  const pool = await infra().db.get<PoolRow>(
     `SELECT base_mint_cooldown_until FROM pools
      WHERE base_mint = ? AND base_mint_cooldown_until IS NOT NULL
      LIMIT 1`,
@@ -518,7 +516,7 @@ export function isBaseMintOnCooldown(baseMint: string): boolean {
  * Returns a Set of pool addresses with an active cooldown_until (in the future).
  * Replaces per-candidate isPoolOnCooldown() calls in screening loops.
  */
-export function getPoolsOnCooldown(poolAddresses: string[]): Set<string> {
+export async function getPoolsOnCooldown(poolAddresses: string[]): Promise<Set<string>> {
   if (poolAddresses.length === 0) return new Set();
 
   const unique = [...new Set(poolAddresses.filter(Boolean))];
@@ -526,7 +524,7 @@ export function getPoolsOnCooldown(poolAddresses: string[]): Set<string> {
 
   const placeholders = unique.map(() => "?").join(", ");
   const now = new Date().toISOString();
-  const rows = getDb().query<{ address: string }>(
+  const rows = await infra().db.query<{ address: string }>(
     `SELECT address FROM pools WHERE address IN (${placeholders}) AND cooldown_until IS NOT NULL AND cooldown_until > ?`,
     ...unique,
     now
@@ -539,7 +537,7 @@ export function getPoolsOnCooldown(poolAddresses: string[]): Set<string> {
  * Returns a Set of base mint addresses with an active base_mint_cooldown_until (in the future).
  * Replaces per-candidate isBaseMintOnCooldown() calls in screening loops.
  */
-export function getBaseMintsOnCooldown(baseMints: string[]): Set<string> {
+export async function getBaseMintsOnCooldown(baseMints: string[]): Promise<Set<string>> {
   if (baseMints.length === 0) return new Set();
 
   const unique = [...new Set(baseMints.filter(Boolean))];
@@ -547,7 +545,7 @@ export function getBaseMintsOnCooldown(baseMints: string[]): Set<string> {
 
   const placeholders = unique.map(() => "?").join(", ");
   const now = new Date().toISOString();
-  const rows = getDb().query<{ base_mint: string }>(
+  const rows = await infra().db.query<{ base_mint: string }>(
     `SELECT DISTINCT base_mint FROM pools WHERE base_mint IN (${placeholders}) AND base_mint_cooldown_until IS NOT NULL AND base_mint_cooldown_until > ?`,
     ...unique,
     now
@@ -559,10 +557,10 @@ export function getBaseMintsOnCooldown(baseMints: string[]): Set<string> {
  * Tool handler: get_pool_memory
  * Returns deploy history and summary for a pool.
  */
-export function getPoolMemory({ pool_address }: { pool_address: string }): PoolMemoryResult {
+export async function getPoolMemory({ pool_address }: { pool_address: string }): Promise<PoolMemoryResult> {
   if (!pool_address) return { error: "pool_address required", pool_address: "", known: false };
 
-  const pool = getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", pool_address);
+  const pool = await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", pool_address);
 
   if (!pool) {
     return {
@@ -572,12 +570,12 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
     };
   }
 
-  const deploys = getDb().query<PoolDeployRow>(
+  const deploys = await infra().db.query<PoolDeployRow>(
     "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
     pool_address
   );
 
-  const noteEvents = getDb().query<PoolNoteRow>(
+  const noteEvents = await infra().db.query<PoolNoteRow>(
     "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
     pool_address
   );
@@ -638,19 +636,19 @@ export function getPoolMemory({ pool_address }: { pool_address: string }): PoolM
  * @param poolAddress - The pool address to look up
  * @param preloadedPool - Optional pre-fetched pool row to skip redundant DB read
  */
-export function recallForPool(poolAddress: string, preloadedPool?: PoolRow | null): string | null {
+export async function recallForPool(poolAddress: string, preloadedPool?: PoolRow | null): Promise<string | null> {
   if (!poolAddress) return null;
 
   const pool =
-    preloadedPool ?? getDb().get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress);
+    preloadedPool ?? (await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress));
   if (!pool) return null;
 
-  const deploys = getDb().query<PoolDeployRow>(
+  const deploys = await infra().db.query<PoolDeployRow>(
     "SELECT * FROM pool_deploys WHERE pool_address = ? ORDER BY closed_at",
     poolAddress
   );
 
-  const noteEvents = getDb().query<PoolNoteRow>(
+  const noteEvents = await infra().db.query<PoolNoteRow>(
     "SELECT * FROM position_events WHERE position_address = ? AND event_type = 'pool_note' ORDER BY ts",
     poolAddress
   );
@@ -664,7 +662,7 @@ export function recallForPool(poolAddress: string, preloadedPool?: PoolRow | nul
     }
   }
 
-  const snapshots = getPoolSnapshots(poolAddress);
+  const snapshots = await getPoolSnapshots(poolAddress);
 
   const lines: string[] = [];
 
@@ -728,31 +726,31 @@ export function recallForPool(poolAddress: string, preloadedPool?: PoolRow | nul
  * Tool handler: add_pool_note
  * Agent can annotate a pool with a freeform note.
  */
-export function addPoolNote({
+export async function addPoolNote({
   pool_address,
   note,
 }: {
   pool_address: string;
   note: string;
-}): PoolNoteResult {
+}): Promise<PoolNoteResult> {
   if (!pool_address)
     return { error: "pool_address required", saved: false, pool_address: "", note: "" };
   const safeNote = sanitizeStoredNote(note);
   if (!safeNote) return { error: "note required", saved: false, pool_address, note: "" };
 
-  getDb().transaction(() => {
+  await infra().db.transaction(async () => {
     // Ensure pool exists
-    const pool = getOrCreatePool(pool_address);
+    const pool = await getOrCreatePool(pool_address);
     if (!pool) {
       return;
     }
 
     // Insert note as position event (position_events FK constraint removed — also stores pool notes)
-    getDb().run(
+    await infra().db.run(
       `INSERT INTO position_events (position_address, event_type, ts, data_json) VALUES (?, ?, datetime('now'), ?)`,
       pool_address,
       "pool_note",
-      getDb().stringifyJson({ note: safeNote, added_at: new Date().toISOString() })
+      infra().db.stringifyJson({ note: safeNote, added_at: new Date().toISOString() })
     );
 
     // Dual-write to JSON if enabled

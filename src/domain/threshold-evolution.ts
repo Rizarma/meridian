@@ -82,7 +82,7 @@ export async function runThresholdEvolution(
 
     // 3. Darwinian signal weight recalculation
     if (config.features.darwinEvolution) {
-      const wResult = recalculateWeights(performanceHistory, { darwin: config.darwin });
+      const wResult = await recalculateWeights(performanceHistory, { darwin: config.darwin });
       if (wResult.changes.length > 0) {
         log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
       }
