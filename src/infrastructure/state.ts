@@ -20,6 +20,7 @@ import {
   TRAILING_PEAK_CONFIRM_TOLERANCE,
 } from "../config/constants.js";
 import { PROJECT_ROOT } from "../config/paths.js";
+import { getInfrastructure } from "../di-container.js";
 import { evaluateExitConditions, shouldActivateTrailingTP } from "../domain/exit-rules.js";
 import {
   getStrategy,
@@ -42,9 +43,8 @@ import type {
 } from "../types/state.js";
 import type { LPStrategyType, Strategy } from "../types/strategy.js";
 import { getErrorMessage } from "../utils/errors.js";
+import { parseJson, stringifyJson } from "../utils/json.js";
 import { clearAllConfirmationTimers } from "./confirmation-timers.js";
-import { parseJson, stringifyJson } from "./db.js";
-import { getInfrastructure } from "../di-container.js";
 import { log } from "./logger.js";
 
 const infra = () => getInfrastructure();
@@ -153,7 +153,10 @@ async function rowToTrackedPosition(row: Record<string, unknown>): Promise<Track
   const rawStrategyConfig = parseJson<Strategy>(row.strategy_config as string | null);
 
   // Resolve strategy with backward compatibility for legacy rows
-  const { resolved: resolvedStrategyConfig } = await resolveStrategy(rawStrategy, rawStrategyConfig);
+  const { resolved: resolvedStrategyConfig } = await resolveStrategy(
+    rawStrategy,
+    rawStrategyConfig
+  );
 
   return {
     position: row.position as string,
@@ -257,7 +260,9 @@ function rowToStateEvent(row: Record<string, unknown>): StateEvent {
 async function load(): Promise<PositionState> {
   try {
     const positions: Record<string, TrackedPosition> = {};
-    const positionRows = await infra().db.query<Record<string, unknown>>("SELECT * FROM position_state");
+    const positionRows = await infra().db.query<Record<string, unknown>>(
+      "SELECT * FROM position_state"
+    );
     for (const row of positionRows) {
       const pos = await rowToTrackedPosition(row);
       positions[pos.position] = pos;
@@ -546,7 +551,8 @@ export async function minutesOutOfRange(
     "SELECT out_of_range_since FROM position_state WHERE position = ?",
     position_address
   );
-  const oorSince = preloadedSince !== undefined ? preloadedSince : stored?.out_of_range_since ?? null;
+  const oorSince =
+    preloadedSince !== undefined ? preloadedSince : (stored?.out_of_range_since ?? null);
   if (!oorSince) return 0;
   const ms = Date.now() - new Date(oorSince).getTime();
   return Math.floor(ms / 60000);
@@ -723,7 +729,7 @@ export async function resolvePendingPeak(
 
   if (currentPnlPct != null && currentPnlPct >= pendingPeak * toleranceRatio) {
     const newPeak = Math.max(pos.peak_pnl_pct ?? 0, pendingPeak, currentPnlPct);
-      await infra().db.run(
+    await infra().db.run(
       "UPDATE position_state SET peak_pnl_pct = ?, pending_peak_pnl_pct = NULL, pending_peak_started_at = NULL, last_updated = ? WHERE position = ?",
       newPeak,
       now,
@@ -876,7 +882,9 @@ export async function getTrackedPositions(openOnly: boolean = false): Promise<Tr
 /**
  * Get a single tracked position.
  */
-export async function getTrackedPosition(position_address: string): Promise<TrackedPosition | null> {
+export async function getTrackedPosition(
+  position_address: string
+): Promise<TrackedPosition | null> {
   const row = await infra().db.get<Record<string, unknown>>(
     "SELECT * FROM position_state WHERE position = ?",
     position_address
@@ -889,7 +897,11 @@ export async function getTrackedPosition(position_address: string): Promise<Trac
  * Summarize state for the agent system prompt.
  */
 export async function getStateSummary(): Promise<StateSummary> {
-  const counts = await infra().db.get<{ open_count: number; closed_count: number; total_fees: number }>(`
+  const counts = await infra().db.get<{
+    open_count: number;
+    closed_count: number;
+    total_fees: number;
+  }>(`
     SELECT 
       SUM(CASE WHEN closed = 0 THEN 1 ELSE 0 END) as open_count,
       SUM(CASE WHEN closed = 1 THEN 1 ELSE 0 END) as closed_count,
@@ -913,21 +925,23 @@ export async function getStateSummary(): Promise<StateSummary> {
     open_positions: counts?.open_count ?? 0,
     closed_positions: counts?.closed_count ?? 0,
     total_fees_claimed_usd: Math.round((counts?.total_fees ?? 0) * 100) / 100,
-    positions: await Promise.all(openPositions.map(async (row) => {
-      const pos = await rowToTrackedPosition(row);
-      return {
-        position: pos.position,
-        pool: pos.pool,
-        strategy: pos.strategy,
-        deployed_at: pos.deployed_at,
-        out_of_range_since: pos.out_of_range_since,
-        minutes_out_of_range: 0,
-        total_fees_claimed_usd: pos.total_fees_claimed_usd,
-        initial_fee_tvl_24h: pos.initial_fee_tvl_24h,
-        rebalance_count: pos.rebalance_count,
-        instruction: pos.instruction || null,
-      };
-    })),
+    positions: await Promise.all(
+      openPositions.map(async (row) => {
+        const pos = await rowToTrackedPosition(row);
+        return {
+          position: pos.position,
+          pool: pos.pool,
+          strategy: pos.strategy,
+          deployed_at: pos.deployed_at,
+          out_of_range_since: pos.out_of_range_since,
+          minutes_out_of_range: 0,
+          total_fees_claimed_usd: pos.total_fees_claimed_usd,
+          initial_fee_tvl_24h: pos.initial_fee_tvl_24h,
+          rebalance_count: pos.rebalance_count,
+          instruction: pos.instruction || null,
+        };
+      })
+    ),
     last_updated: new Date().toISOString(),
     recent_events: mappedEvents,
   };
@@ -1006,7 +1020,9 @@ export async function updatePnlAndCheckExits(
   }
 
   // Reload position if changed
-  const currentPos = changed ? ((await getTrackedPosition(position_address)) as TrackedPosition) : pos;
+  const currentPos = changed
+    ? ((await getTrackedPosition(position_address)) as TrackedPosition)
+    : pos;
 
   // Delegate exit condition evaluation to exit-rules module
   // If no strategyConfig was passed, try loading from the tracked position

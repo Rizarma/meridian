@@ -5,7 +5,7 @@
  * No direct config mutation - all changes go through approval workflow.
  */
 
-import { get, getDb, query, run, transaction } from "./db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "./logger.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export interface ThresholdHistory {
 // ─── Schema Initialization ─────────────────────────────────────────
 
 export async function initThresholdEvolutionTables(): Promise<void> {
-  const db = getDb();
+  const db = getInfrastructure().db as unknown as { exec(sql: string): void };
 
   // Suggestions table - pending approvals
   db.exec(`
@@ -93,7 +93,7 @@ export async function initThresholdEvolutionTables(): Promise<void> {
 // ─── Suggestion Management ─────────────────────────────────────────
 
 export async function saveSuggestion(suggestion: ThresholdSuggestion): Promise<number> {
-  const result = run(
+  const result = await getInfrastructure().db.run(
     `INSERT INTO threshold_suggestions 
      (field, current_value, suggested_value, confidence, rationale, sample_size, 
       winner_count, loser_count, created_at, status)
@@ -118,7 +118,7 @@ export async function saveSuggestion(suggestion: ThresholdSuggestion): Promise<n
 }
 
 export async function getPendingSuggestions(): Promise<ThresholdSuggestion[]> {
-  const rows = query<{
+  const rows = await getInfrastructure().db.query<{
     id: number;
     field: string;
     current_value: number;
@@ -167,7 +167,7 @@ export async function approveSuggestion(
   id: number,
   reviewer: string
 ): Promise<{ success: boolean; suggestion?: ThresholdSuggestion; error?: string }> {
-  const suggestion = get<{
+  const suggestion = await getInfrastructure().db.get<{
     id: number;
     field: string;
     current_value: number;
@@ -183,9 +183,9 @@ export async function approveSuggestion(
 
   const now = new Date().toISOString();
 
-  transaction(() => {
+  await getInfrastructure().db.transaction(async () => {
     // Update suggestion status
-    run(
+    await getInfrastructure().db.run(
       `UPDATE threshold_suggestions 
        SET status = 'approved', reviewed_at = ?, reviewed_by = ?
        WHERE id = ?`,
@@ -195,7 +195,7 @@ export async function approveSuggestion(
     );
 
     // Log to history
-    run(
+    await getInfrastructure().db.run(
       `INSERT INTO threshold_history 
        (field, old_value, new_value, rationale, confidence, sample_size, triggered_by, applied_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -238,7 +238,7 @@ export async function rejectSuggestion(
   reviewer: string,
   reason?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const suggestion = get<{ id: number }>(
+  const suggestion = await getInfrastructure().db.get<{ id: number }>(
     `SELECT id FROM threshold_suggestions WHERE id = ? AND status = 'pending'`,
     id
   );
@@ -247,7 +247,7 @@ export async function rejectSuggestion(
     return { success: false, error: "Suggestion not found or not pending" };
   }
 
-  run(
+  await getInfrastructure().db.run(
     `UPDATE threshold_suggestions 
      SET status = 'rejected', reviewed_at = ?, reviewed_by = ?
      WHERE id = ?`,
@@ -262,7 +262,10 @@ export async function rejectSuggestion(
 
 // ─── History Queries ─────────────────────────────────────────────────
 
-export async function getThresholdHistory(field?: string, limit: number = 20): Promise<ThresholdHistory[]> {
+export async function getThresholdHistory(
+  field?: string,
+  limit: number = 20
+): Promise<ThresholdHistory[]> {
   let sql = `SELECT * FROM threshold_history`;
   const params: (string | number)[] = [];
 
@@ -274,7 +277,7 @@ export async function getThresholdHistory(field?: string, limit: number = 20): P
   sql += ` ORDER BY applied_at DESC LIMIT ?`;
   params.push(limit);
 
-  const rows = query<{
+  const rows = await getInfrastructure().db.query<{
     id: number;
     field: string;
     old_value: number;
@@ -326,7 +329,7 @@ export async function getCurrentThresholdsWithHistory(): Promise<{
   };
 
   // Get last evolved dates
-  const rows = query<{ field: string; applied_at: string }>(
+  const rows = await getInfrastructure().db.query<{ field: string; applied_at: string }>(
     `SELECT field, MAX(applied_at) as applied_at 
      FROM threshold_history 
      GROUP BY field`
@@ -346,7 +349,7 @@ export async function expireOldSuggestions(days: number = 7): Promise<number> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
-  const result = run(
+  const result = await getInfrastructure().db.run(
     `UPDATE threshold_suggestions 
      SET status = 'expired'
      WHERE status = 'pending' AND created_at < ?`,

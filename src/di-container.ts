@@ -20,7 +20,17 @@ export interface Infrastructure {
 let container: Infrastructure | null = null;
 
 export async function initializeInfrastructure(): Promise<void> {
-  const db = await createDatabase();
+  const backend =
+    process.env.DATABASE_BACKEND === "postgres"
+      ? "postgres"
+      : process.env.DATABASE_BACKEND === "sqlite"
+        ? "sqlite"
+        : undefined;
+
+  const db = await createDatabase({
+    backend,
+    url: process.env.DATABASE_URL?.trim() || undefined,
+  });
 
   container = {
     db,
@@ -44,9 +54,7 @@ export async function initializeInfrastructure(): Promise<void> {
  */
 export function getInfrastructure(): Infrastructure {
   if (!container) {
-    throw new Error(
-      "Infrastructure not initialized. Call initializeInfrastructure() first."
-    );
+    throw new Error("Infrastructure not initialized. Call initializeInfrastructure() first.");
   }
   return container;
 }

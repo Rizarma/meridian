@@ -8,7 +8,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PROJECT_ROOT } from "../config/paths.js";
-import { parseJson, query, run, stringifyJson, transaction } from "./db.js";
+import { parseJson, stringifyJson } from "../utils/json.js";
+import { query, run, transaction } from "./db.js";
 import { log } from "./logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -290,7 +291,10 @@ export async function exportPositionsToJson(
 /**
  * Export all pools and their deploys to JSON file
  */
-export async function exportPoolsToJson(outputPath?: string, options: ExportOptions = {}): Promise<ExportResult> {
+export async function exportPoolsToJson(
+  outputPath?: string,
+  options: ExportOptions = {}
+): Promise<ExportResult> {
   try {
     const { pretty = true, includeDataJson = true } = options;
 
@@ -520,7 +524,9 @@ export async function exportAllToJson(): Promise<BackupResult> {
     }
 
     // Export signal weights
-    const weightsResult = await exportSignalWeightsToJson(path.join(backupDir, "signal-weights.json"));
+    const weightsResult = await exportSignalWeightsToJson(
+      path.join(backupDir, "signal-weights.json")
+    );
     if (weightsResult.success && weightsResult.filePath) {
       files.push(weightsResult.filePath);
     }
@@ -849,7 +855,10 @@ export async function importPositionsFromJson(
 /**
  * Import pools from JSON file
  */
-export async function importPoolsFromJson(jsonPath: string, options: ImportOptions = {}): Promise<ImportResult> {
+export async function importPoolsFromJson(
+  jsonPath: string,
+  options: ImportOptions = {}
+): Promise<ImportResult> {
   try {
     const { validateOnly = false, skipInvalid = true } = options;
 
@@ -976,7 +985,10 @@ export async function importPoolsFromJson(jsonPath: string, options: ImportOptio
 /**
  * Import lessons from JSON file
  */
-export async function importLessonsFromJson(jsonPath: string, options: ImportOptions = {}): Promise<ImportResult> {
+export async function importLessonsFromJson(
+  jsonPath: string,
+  options: ImportOptions = {}
+): Promise<ImportResult> {
   try {
     const { validateOnly = false, skipInvalid = true } = options;
 

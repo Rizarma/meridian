@@ -1218,6 +1218,22 @@ export async function backfillLegacyStrategyFields(): Promise<void> {
  */
 export async function setupDatabase(): Promise<{ success: boolean; message: string }> {
   try {
+    const backend =
+      process.env.DATABASE_BACKEND === "postgres"
+        ? "postgres"
+        : process.env.DATABASE_BACKEND === "sqlite"
+          ? "sqlite"
+          : process.env.DATABASE_URL
+            ? "postgres"
+            : "sqlite";
+
+    if (backend === "postgres") {
+      return {
+        success: true,
+        message: "Database initialized using Postgres backend",
+      };
+    }
+
     await initSchema();
     initThresholdEvolutionTables();
     removePositionFkConstraints(); // Remove overly restrictive FK constraints

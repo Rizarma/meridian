@@ -1,6 +1,6 @@
+import type { DatabaseOperations, JsonOperations } from "../../domain/interfaces/database.js";
 import { PostgresAdapter } from "./adapters/postgres.js";
 import { SqliteAdapter } from "./adapters/sqlite.js";
-import type { DatabaseOperations, JsonOperations } from "../../domain/interfaces/database.js";
 
 export interface CreateDatabaseOptions {
   backend?: "sqlite" | "postgres";
@@ -10,8 +10,10 @@ export interface CreateDatabaseOptions {
 
 export type DatabaseInstance = DatabaseOperations & JsonOperations;
 
-export async function createDatabase(options: CreateDatabaseOptions = {}): Promise<DatabaseInstance> {
-  const backend = options.backend ?? (options.url ? "postgres" : "sqlite");
+export async function createDatabase(
+  options: CreateDatabaseOptions = {}
+): Promise<DatabaseInstance> {
+  const backend = options.backend ?? (options.url?.trim() ? "postgres" : "sqlite");
 
   if (backend === "postgres") {
     if (!options.url) {
