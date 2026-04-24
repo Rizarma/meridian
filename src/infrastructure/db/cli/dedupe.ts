@@ -1,4 +1,10 @@
-import type { ExportData, LessonExport, PerformanceExport, PoolExport, PositionEventExport } from "./types.js";
+import type {
+  ExportData,
+  LessonExport,
+  PerformanceExport,
+  PoolExport,
+  PositionEventExport,
+} from "./types.js";
 
 export function deduplicate(data: ExportData): ExportData {
   return {
@@ -7,12 +13,7 @@ export function deduplicate(data: ExportData): ExportData {
     lessons: dedupLessons(data.lessons),
     performance: dedupPerformance(data.performance),
     positionEvents: dedupPositionEvents(data.positionEvents),
-    positions: data.positions,
-    positionSnapshots: data.positionSnapshots,
     signalWeights: mergeSignalWeights(data.signalWeights),
-    poolDeploys: data.poolDeploys,
-    exportedAt: data.exportedAt,
-    source: data.source,
   };
 }
 

@@ -3,20 +3,26 @@ import fs from "node:fs";
 import process from "node:process";
 
 // Handle uncaught errors from better-sqlite3
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
   if (err instanceof Error) {
-    console.error('Message:', err.message);
-    console.error('Stack:', err.stack);
-  } else if (typeof err === 'object' && err !== null) {
-    console.error('Error details:', Object.getOwnPropertyNames(err).reduce((acc, key) => {
-      try {
-        acc[key] = (err as Record<string, unknown>)[key];
-      } catch {
-        acc[key] = '[unreadable]';
-      }
-      return acc;
-    }, {} as Record<string, unknown>));
+    console.error("Message:", err.message);
+    console.error("Stack:", err.stack);
+  } else if (typeof err === "object" && err !== null) {
+    console.error(
+      "Error details:",
+      Object.getOwnPropertyNames(err).reduce(
+        (acc, key) => {
+          try {
+            acc[key] = (err as Record<string, unknown>)[key];
+          } catch {
+            acc[key] = "[unreadable]";
+          }
+          return acc;
+        },
+        {} as Record<string, unknown>
+      )
+    );
   }
   process.exit(1);
 });
@@ -62,6 +68,8 @@ async function main() {
       const data2 = JSON.parse(fs.readFileSync(inputPath2, "utf-8"));
 
       const merged: typeof data1 = {
+        ...data1,
+        ...data2,
         lessons: [...data1.lessons, ...data2.lessons],
         performance: [...data1.performance, ...data2.performance],
         pools: [...data1.pools, ...data2.pools],
@@ -69,6 +77,20 @@ async function main() {
         positionSnapshots: [...data1.positionSnapshots, ...data2.positionSnapshots],
         positionEvents: [...data1.positionEvents, ...data2.positionEvents],
         signalWeights: [...data1.signalWeights, ...data2.signalWeights],
+        signalWeightHistory: [...data1.signalWeightHistory, ...data2.signalWeightHistory],
+        positionState: [...data1.positionState, ...data2.positionState],
+        positionStateEvents: [...data1.positionStateEvents, ...data2.positionStateEvents],
+        stateMetadata: [...data1.stateMetadata, ...data2.stateMetadata],
+        strategies: [...data1.strategies, ...data2.strategies],
+        activeStrategy: [...data1.activeStrategy, ...data2.activeStrategy],
+        tokenBlacklist: [...data1.tokenBlacklist, ...data2.tokenBlacklist],
+        smartWallets: [...data1.smartWallets, ...data2.smartWallets],
+        devBlocklist: [...data1.devBlocklist, ...data2.devBlocklist],
+        cycleState: [...data1.cycleState, ...data2.cycleState],
+        thresholdSuggestions: [...data1.thresholdSuggestions, ...data2.thresholdSuggestions],
+        thresholdHistory: [...data1.thresholdHistory, ...data2.thresholdHistory],
+        portfolioHistory: [...data1.portfolioHistory, ...data2.portfolioHistory],
+        schemaVersion: [...data1.schemaVersion, ...data2.schemaVersion],
         poolDeploys: [...data1.poolDeploys, ...data2.poolDeploys],
         exportedAt: new Date().toISOString(),
         source: `merged: ${inputPath1}, ${inputPath2}`,
@@ -118,7 +140,7 @@ async function main() {
 
       console.log("WARNING: This will drop ALL tables in the database.");
       console.log("Database:", dbUrl.replace(/:.*@/, ":***@")); // Hide password
-      
+
       const { createDatabase } = await import("../index.js");
       const db = await createDatabase({ backend: "postgres", url: dbUrl });
 
@@ -179,7 +201,7 @@ main().catch((err) => {
   if (err instanceof Error) {
     console.error("Error:", err.message);
     console.error("Stack:", err.stack);
-  } else if (typeof err === 'object' && err !== null) {
+  } else if (typeof err === "object" && err !== null) {
     console.error("Error object:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
   } else {
     console.error("Error:", err);

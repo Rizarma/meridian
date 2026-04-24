@@ -1,6 +1,6 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import type { ExportData } from "./types.js";
 
 export async function exportSqlite(dbPath: string, outputPath: string): Promise<void> {
@@ -13,20 +13,59 @@ export async function exportSqlite(dbPath: string, outputPath: string): Promise<
   const db = new Database(dbPath);
 
   try {
-    // Check which tables exist
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
-    const tableNames = tables.map(t => t.name);
-    console.log(`Found tables: ${tableNames.join(', ')}`);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+      name: string;
+    }[];
+    const tableNames = new Set(tables.map((t) => t.name));
+    console.log(`Found tables: ${Array.from(tableNames).join(", ")}`);
 
     const data: ExportData = {
-      lessons: tableNames.includes('lessons') ? db.prepare("SELECT * FROM lessons").all() as ExportData["lessons"] : [],
-      performance: tableNames.includes('performance') ? db.prepare("SELECT * FROM performance").all() as ExportData["performance"] : [],
-      pools: tableNames.includes('pools') ? db.prepare("SELECT * FROM pools").all() as ExportData["pools"] : [],
-      positions: tableNames.includes('positions') ? db.prepare("SELECT * FROM positions").all() as ExportData["positions"] : [],
-      positionSnapshots: tableNames.includes('position_snapshots') ? db.prepare("SELECT * FROM position_snapshots").all() as ExportData["positionSnapshots"] : [],
-      positionEvents: tableNames.includes('position_events') ? db.prepare("SELECT * FROM position_events").all() as ExportData["positionEvents"] : [],
-      signalWeights: tableNames.includes('signal_weights') ? db.prepare("SELECT * FROM signal_weights").all() as ExportData["signalWeights"] : [],
-      poolDeploys: tableNames.includes('pool_deploys') ? db.prepare("SELECT * FROM pool_deploys").all() as ExportData["poolDeploys"] : [],
+      schemaVersion: readTable(db, tableNames, "schema_version") as ExportData["schemaVersion"],
+      lessons: readTable(db, tableNames, "lessons") as ExportData["lessons"],
+      performance: readTable(db, tableNames, "performance") as ExportData["performance"],
+      pools: readTable(db, tableNames, "pools") as ExportData["pools"],
+      positions: readTable(db, tableNames, "positions") as ExportData["positions"],
+      positionSnapshots: readTable(
+        db,
+        tableNames,
+        "position_snapshots"
+      ) as ExportData["positionSnapshots"],
+      positionEvents: readTable(db, tableNames, "position_events") as ExportData["positionEvents"],
+      signalWeights: readTable(db, tableNames, "signal_weights") as ExportData["signalWeights"],
+      signalWeightHistory: readTable(
+        db,
+        tableNames,
+        "signal_weight_history"
+      ) as ExportData["signalWeightHistory"],
+      positionState: readTable(db, tableNames, "position_state") as ExportData["positionState"],
+      positionStateEvents: readTable(
+        db,
+        tableNames,
+        "position_state_events"
+      ) as ExportData["positionStateEvents"],
+      stateMetadata: readTable(db, tableNames, "state_metadata") as ExportData["stateMetadata"],
+      strategies: readTable(db, tableNames, "strategies") as ExportData["strategies"],
+      activeStrategy: readTable(db, tableNames, "active_strategy") as ExportData["activeStrategy"],
+      tokenBlacklist: readTable(db, tableNames, "token_blacklist") as ExportData["tokenBlacklist"],
+      smartWallets: readTable(db, tableNames, "smart_wallets") as ExportData["smartWallets"],
+      devBlocklist: readTable(db, tableNames, "dev_blocklist") as ExportData["devBlocklist"],
+      cycleState: readTable(db, tableNames, "cycle_state") as ExportData["cycleState"],
+      thresholdSuggestions: readTable(
+        db,
+        tableNames,
+        "threshold_suggestions"
+      ) as ExportData["thresholdSuggestions"],
+      thresholdHistory: readTable(
+        db,
+        tableNames,
+        "threshold_history"
+      ) as ExportData["thresholdHistory"],
+      portfolioHistory: readTable(
+        db,
+        tableNames,
+        "portfolio_history"
+      ) as ExportData["portfolioHistory"],
+      poolDeploys: readTable(db, tableNames, "pool_deploys") as ExportData["poolDeploys"],
       exportedAt: new Date().toISOString(),
       source: dbPath,
     };
@@ -38,6 +77,7 @@ export async function exportSqlite(dbPath: string, outputPath: string): Promise<
 
     fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
 
+    console.log(`Exported ${data.schemaVersion.length} schema versions`);
     console.log(`Exported ${data.lessons.length} lessons`);
     console.log(`Exported ${data.performance.length} performance records`);
     console.log(`Exported ${data.pools.length} pools`);
@@ -46,4 +86,9 @@ export async function exportSqlite(dbPath: string, outputPath: string): Promise<
   } finally {
     db.close();
   }
+}
+
+function readTable<T>(db: Database.Database, tables: Set<string>, tableName: string): T[] {
+  if (!tables.has(tableName)) return [];
+  return db.prepare(`SELECT * FROM ${tableName}`).all() as T[];
 }
