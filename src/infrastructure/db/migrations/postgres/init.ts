@@ -87,6 +87,30 @@ async function runMigrations(sql: Sql): Promise<void> {
   await addColumnIfNotExists(sql, "position_state", "notes", "TEXT");
 }
 
+/**
+ * Reset SERIAL sequences to match the current max(id) values.
+ * This prevents duplicate key errors when sequence values drift behind data.
+ */
+async function resetSequences(sql: Sql): Promise<void> {
+  const tables = [
+    "position_snapshots",
+    "position_events",
+    "pool_deploys",
+    "performance",
+    "signal_weight_history",
+    "position_state_events",
+    "threshold_suggestions",
+    "threshold_history",
+    "portfolio_history",
+  ];
+
+  for (const table of tables) {
+    await sql.unsafe(
+      `SELECT setval('${table}_id_seq', COALESCE((SELECT MAX(id) FROM ${table}), 1), true);`
+    );
+  }
+}
+
 export async function initPostgresSchema(connectionString: string): Promise<void> {
   const sql = postgres(connectionString, { ssl: "require" });
 
@@ -105,6 +129,9 @@ export async function initPostgresSchema(connectionString: string): Promise<void
 
     // Run migrations to add missing columns to existing tables
     await runMigrations(sql);
+
+    // Reset SERIAL sequences so they stay in sync with table data
+    await resetSequences(sql);
 
     console.log("Postgres schema initialized successfully");
   } finally {
