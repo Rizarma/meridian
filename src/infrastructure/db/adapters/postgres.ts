@@ -53,14 +53,14 @@ export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
   async query<T>(sql: string, ...params: unknown[]): Promise<T[]> {
     if (!this.sql) throw new Error("Database not initialized");
 
-    const convertedSql = this.convertPlaceholders(sql);
+    const convertedSql = this.convertSql(sql);
     return (await this.sql.unsafe(convertedSql, params)) as T[];
   }
 
   async get<T>(sql: string, ...params: unknown[]): Promise<T | undefined> {
     if (!this.sql) throw new Error("Database not initialized");
 
-    const convertedSql = this.convertPlaceholders(sql);
+    const convertedSql = this.convertSql(sql);
     const results = (await this.sql.unsafe(convertedSql, params)) as T[];
     return results[0];
   }
@@ -71,7 +71,7 @@ export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
   ): Promise<{ lastInsertRowid: number | bigint; changes: number }> {
     if (!this.sql) throw new Error("Database not initialized");
 
-    const convertedSql = this.convertPlaceholders(sql);
+    const convertedSql = this.convertSql(sql);
     const result = await this.sql.unsafe(convertedSql, params);
 
     return {
