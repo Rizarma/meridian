@@ -124,7 +124,7 @@ export async function initPostgresSchema(connectionString: string): Promise<void
       .filter((s) => s.length > 0);
 
     for (const statement of statements) {
-      await sql.unsafe(statement + ";");
+      await sql.unsafe(`${statement};`);
     }
 
     // Run migrations to add missing columns to existing tables

@@ -18,7 +18,7 @@ import type {
   TokenNarrativeInput,
   TokenStats1h,
 } from "../src/types/index.js";
-import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
+import type { SmartWallet } from "../src/types/smart-wallets.js";
 import type { TokenInfoResult } from "../src/types/token.js";
 import { cache } from "../src/utils/cache.js";
 import { getErrorMessage } from "../src/utils/errors.js";
