@@ -10,6 +10,7 @@
 
 import Database from "better-sqlite3";
 import { setInfrastructure } from "../src/di-container.js";
+import type { DatabaseOperations, JsonOperations } from "../src/domain/interfaces/database.js";
 import {
   getBaseMintsOnCooldown,
   getKnownPoolAddresses,
@@ -157,7 +158,8 @@ function createTestDb(): Database.Database {
 /** Wire the test database into the DI container. */
 function wireTestDb(db: Database.Database): void {
   // Create a wrapper matching the DatabaseOperations + JsonOperations interface
-  const dbOps = {
+  let transactionQueue: Promise<void> = Promise.resolve();
+  const dbOps: DatabaseOperations & JsonOperations = {
     init: async () => {},
     close: async () => {},
     query: <T>(sql: string, ...params: unknown[]): T[] => {
@@ -173,8 +175,13 @@ function wireTestDb(db: Database.Database): void {
       const result = db.prepare(sql).run(...params);
       return { lastInsertRowid: result.lastInsertRowid, changes: result.changes };
     },
-    transaction: <T>(callback: () => T): T => {
-      return db.transaction(callback)();
+    transaction: async <T>(callback: (tx: DatabaseOperations) => Promise<T> | T): Promise<T> => {
+      const run = transactionQueue.then(() => callback(dbOps));
+      transactionQueue = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return await run;
     },
     stringifyJson: <T>(value: T): string => JSON.stringify(value),
     parseJson: <T>(value: string | null | undefined): T | null => {
@@ -210,9 +217,7 @@ const POSITION_ADDR_2 = "PosAddr3333333333333333333333333333333333333";
 
 describe("Pool Memory - Snapshot Recall", () => {
   let testDb: Database.Database;
-
-  // Set up fresh DB for each logical group
-  test("setup test database", async () => {
+  const setupReady = (async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -253,11 +258,16 @@ describe("Pool Memory - Snapshot Recall", () => {
        VALUES (?, datetime('now'), 10.0, 5.0, 1, 60)`
       )
       .run(POSITION_ADDR_2);
+  })();
 
+  // Set up fresh DB for each logical group
+  test("setup test database", async () => {
+    await setupReady;
     expect(true).toBe(true); // setup succeeded
   });
 
   test("recallForPool finds snapshots via position lookup", async () => {
+    await setupReady;
     const result = await recallForPool(POOL_ADDR);
     // Should return non-null because pool has deploys via snapshots
     // The recall should include RECENT TREND since we have 5 snapshots
@@ -269,16 +279,19 @@ describe("Pool Memory - Snapshot Recall", () => {
   });
 
   test("recallForPool returns null for unknown pool", async () => {
+    await setupReady;
     const result = await recallForPool("UnknownPool0000000000000000000000000");
     expect(result).toBe(null);
   });
 
   test("recallForPool returns null for empty string", async () => {
+    await setupReady;
     const result = await recallForPool("");
     expect(result).toBe(null);
   });
 
   test("snapshots from multiple positions are found", async () => {
+    await setupReady;
     // Both POSITION_ADDR and POSITION_ADDR_2 belong to POOL_ADDR
     // recallForPool should find snapshots from both
     const result = await recallForPool(POOL_ADDR);
@@ -291,6 +304,7 @@ describe("Pool Memory - Snapshot Recall", () => {
   });
 
   test("fallback snapshot pattern also works", async () => {
+    await setupReady;
     // Insert a fallback-style snapshot: poolAddress + "_snapshot_" + timestamp
     const fallbackAddr = `${POOL_ADDR}_snapshot_1700000000000`;
     testDb
@@ -309,6 +323,7 @@ describe("Pool Memory - Snapshot Recall", () => {
   });
 
   test("snapshot stored under pool address directly is NOT incorrectly matched", async () => {
+    await setupReady;
     // A snapshot stored with position_address = exact pool address
     // (which is wrong but could happen) should be found via the fallback pattern
     // only if it matches the _snapshot_ pattern — NOT by the old broken LIKE
@@ -328,14 +343,18 @@ describe("Pool Memory - Snapshot Recall", () => {
 
 describe("Pool Memory - recordPositionSnapshot return value", () => {
   let testDb: Database.Database;
-
-  test("setup", async () => {
+  const setupReady = (async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
+  })();
+
+  test("setup", async () => {
+    await setupReady;
     expect(true).toBe(true);
   });
 
   test("recordPositionSnapshot returns PoolRow for new pool", async () => {
+    await setupReady;
     const poolRow = await recordPositionSnapshot(POOL_ADDR, {
       position: POSITION_ADDR,
       pair: "NEW/SOL",
@@ -352,6 +371,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
   });
 
   test("recordPositionSnapshot returns null for empty pool address", async () => {
+    await setupReady;
     const poolRow = await recordPositionSnapshot("", {
       position: POSITION_ADDR,
     });
@@ -359,6 +379,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
   });
 
   test("recorded snapshot is findable via recallForPool", async () => {
+    await setupReady;
     // First ensure a position→pool mapping exists so getPoolSnapshots can find it
     testDb
       .prepare(
@@ -389,8 +410,7 @@ describe("Pool Memory - recordPositionSnapshot return value", () => {
 
 describe("Pool Memory - recallForPool with preloadedPool", () => {
   let testDb: Database.Database;
-
-  test("setup", async () => {
+  const setupReady = (async () => {
     testDb = createTestDb();
     wireTestDb(testDb);
 
@@ -418,11 +438,15 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
         )
         .run(POSITION_ADDR, i * 1.5, i * 0.3, i * 10);
     }
+  })();
 
+  test("setup", async () => {
+    await setupReady;
     expect(true).toBe(true);
   });
 
   test("recallForPool accepts preloadedPool and skips DB read", async () => {
+    await setupReady;
     // Pre-fetched pool row (simulates what recordPositionSnapshot returns)
     const preloadedPool = {
       address: POOL_ADDR,
@@ -449,6 +473,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
   });
 
   test("recallForPool with null preloadedPool falls back to DB read", async () => {
+    await setupReady;
     const result = await recallForPool(POOL_ADDR, null);
     // Should still work — falls back to querying DB
     expect(result).toBeTruthy();
@@ -458,6 +483,7 @@ describe("Pool Memory - recallForPool with preloadedPool", () => {
   });
 
   test("management cycle pattern: recordPositionSnapshot then recallForPool with returned row", async () => {
+    await setupReady;
     // This tests the exact pattern used in management.ts
     const poolRow = await recordPositionSnapshot(POOL_ADDR, {
       position: POSITION_ADDR,

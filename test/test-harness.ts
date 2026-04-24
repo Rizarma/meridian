@@ -22,6 +22,7 @@ let currentSuite: TestSuite | null = null;
 const suiteStack: TestSuite[] = [];
 const pendingSuites: Promise<void>[] = [];
 const pendingTests: Promise<void>[] = [];
+let executionChain: Promise<void> = Promise.resolve();
 
 /**
  * Define a test suite (group of related tests)
@@ -94,7 +95,7 @@ export function test(name: string, fn: () => void | Promise<void>): void {
   };
   currentSuite.tests.push(testResult);
 
-  const testPromise = (async () => {
+  const testPromise = executionChain.then(async () => {
     const start = Date.now();
     try {
       await fn();
@@ -104,7 +105,12 @@ export function test(name: string, fn: () => void | Promise<void>): void {
       testResult.error = e instanceof Error ? e.message : String(e);
     }
     testResult.durationMs = Date.now() - start;
-  })();
+  });
+
+  executionChain = testPromise.then(
+    () => undefined,
+    () => undefined
+  );
 
   pendingTests.push(testPromise);
 }
@@ -129,7 +135,7 @@ export function testAsync(name: string, fn: () => Promise<void>): void {
   activeSuite.tests.push(testResult);
 
   // Store the async execution to be awaited
-  const testPromise = (async () => {
+  const testPromise = executionChain.then(async () => {
     const start = Date.now();
     try {
       await fn();
@@ -139,7 +145,12 @@ export function testAsync(name: string, fn: () => Promise<void>): void {
       testResult.error = e instanceof Error ? e.message : String(e);
     }
     testResult.durationMs = Date.now() - start;
-  })();
+  });
+
+  executionChain = testPromise.then(
+    () => undefined,
+    () => undefined
+  );
 
   // Add to pending tests for this suite
   pendingTests.push(testPromise);

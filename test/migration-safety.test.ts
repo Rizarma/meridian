@@ -310,15 +310,15 @@ describe("Migration Safety", () => {
     }
   });
 
-  test("fresh JSON migration loads data into SQLite", () => {
+  test("fresh JSON migration loads data into SQLite", async () => {
     const fixture = makeFixtureRoot("meridian-migrate-fresh-");
     writeFixtureFiles(fixture);
 
     try {
       const result = runChildModule(
         `const { setupDatabase, migrateFromJson } = await import(${JSON.stringify(DB_MIGRATIONS_URL)});
-         const setup = setupDatabase();
-         const migrate = migrateFromJson();
+          const setup = await setupDatabase();
+          const migrate = await migrateFromJson();
           process.stdout.write("__RESULT__" + JSON.stringify({ setup, migrate }) + "\\n");`,
         {
           MERIDIAN_ROOT: fixture.root,
@@ -375,14 +375,14 @@ describe("Migration Safety", () => {
     }
   });
 
-  test("partial JSON failure marks migration failed", () => {
+  test("partial JSON failure marks migration failed", async () => {
     const fixture = makeFixtureRoot("meridian-migrate-partial-");
     writeFixtureFiles(fixture, true);
 
     try {
       const result = runChildModule(
         `const { setupDatabase } = await import(${JSON.stringify(DB_MIGRATIONS_URL)});
-         const setup = setupDatabase();
+          const setup = await setupDatabase();
          process.stdout.write("__RESULT__" + JSON.stringify({ setup }) + "\\n");`,
         {
           MERIDIAN_ROOT: fixture.root,
@@ -410,16 +410,16 @@ describe("Migration Safety", () => {
     }
   });
 
-  test("migration is idempotent", () => {
+  test("migration is idempotent", async () => {
     const fixture = makeFixtureRoot("meridian-migrate-idempotent-");
     writeFixtureFiles(fixture);
 
     try {
       const result = runChildModule(
         `const { initSchema, migrateFromJson } = await import(${JSON.stringify(DB_MIGRATIONS_URL)});
-         initSchema();
-         const first = migrateFromJson();
-         const second = migrateFromJson();
+          await initSchema();
+          const first = await migrateFromJson();
+          const second = await migrateFromJson();
          process.stdout.write("__RESULT__" + JSON.stringify({ first, second }) + "\\n");`,
         {
           MERIDIAN_ROOT: fixture.root,
@@ -450,7 +450,7 @@ describe("Migration Safety", () => {
     }
   });
 
-  test("schema upgrade bumps schema_version to 2", () => {
+  test("schema upgrade bumps schema_version to 2", async () => {
     const fixture = makeFixtureRoot("meridian-schema-upgrade-");
     const db = openDb(fixture.dbPath);
     try {
@@ -468,7 +468,7 @@ describe("Migration Safety", () => {
     try {
       const result = runChildModule(
         `const { setupDatabase } = await import(${JSON.stringify(DB_MIGRATIONS_URL)});
-         const setup = setupDatabase();
+          const setup = await setupDatabase();
          process.stdout.write("__RESULT__" + JSON.stringify({ setup }) + "\\n");`,
         {
           MERIDIAN_ROOT: fixture.root,
@@ -497,7 +497,7 @@ describe("Migration Safety", () => {
     }
   });
 
-  test("rollback restores JSON and clears SQLite tables", () => {
+  test("rollback restores JSON and clears SQLite tables", async () => {
     const fixture = makeFixtureRoot("meridian-rollback-");
     writeFixtureFiles(fixture, true);
 
@@ -508,8 +508,8 @@ describe("Migration Safety", () => {
     try {
       const result = runChildModule(
         `const { setupDatabase, rollbackMigration } = await import(${JSON.stringify(DB_MIGRATIONS_URL)});
-         const setup = setupDatabase();
-         const rollback = rollbackMigration();
+          const setup = await setupDatabase();
+          const rollback = await rollbackMigration();
          process.stdout.write("__RESULT__" + JSON.stringify({ setup, rollback }) + "\\n");`,
         {
           MERIDIAN_ROOT: fixture.root,
