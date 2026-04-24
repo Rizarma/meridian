@@ -173,8 +173,6 @@ export async function agentLoop(
     "swap_token",
     "close_position",
   ]);
-  // These lock after first attempt regardless of success — retrying them is always wrong
-  const NO_RETRY_TOOLS: Set<string> = new Set(["deploy_position"]);
   const firedOnce = new Set<string>();
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, requireTool);
   let sawToolCall = false;
@@ -321,58 +319,64 @@ export async function agentLoop(
       }
       sawToolCall = true;
 
-      // Execute each tool call in parallel
+      // Pre-reserve once-per-session tools BEFORE parallel execution to prevent
+      // race conditions where multiple destructive calls pass the guard simultaneously
+      const reservedOncePerSession = new Set<string>();
+      const preCheckedCalls = msg.tool_calls.map((toolCall) => {
+        const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
+
+        // Not a once-per-session tool — always allowed
+        if (!ONCE_PER_SESSION.has(functionName)) {
+          return { toolCall, functionName, blocked: false as const };
+        }
+
+        // Already fired in a previous step, or already reserved by a sibling call
+        if (firedOnce.has(functionName) || reservedOncePerSession.has(functionName)) {
+          return {
+            toolCall,
+            functionName,
+            blocked: true as const,
+            reason: `${functionName} is allowed only once per session`,
+          };
+        }
+
+        // Reserve this tool — mark BEFORE async execution starts
+        reservedOncePerSession.add(functionName);
+        firedOnce.add(functionName);
+        return { toolCall, functionName, blocked: false as const };
+      });
+
+      // Execute unblocked calls in parallel; blocked calls resolve immediately
       const toolResults: ToolResult[] = await Promise.all(
-        msg.tool_calls.map(async (toolCall) => {
+        preCheckedCalls.map(async (entry) => {
+          const { toolCall, functionName } = entry;
+
+          // Handle blocked once-per-session duplicates
+          if (entry.blocked) {
+            log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
+            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
+            await onToolFinish?.({
+              name: functionName,
+              args: functionArgs,
+              result: {
+                blocked: true,
+                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+              },
+              success: false,
+              step,
+            });
+            return {
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify({
+                blocked: true,
+                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+              }),
+            };
+          }
+
           try {
-            const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
-            let functionArgs: Record<string, unknown>;
-
-            try {
-              functionArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-            } catch {
-              try {
-                const repaired = jsonrepair(toolCall.function.arguments);
-                // Validate repaired JSON is safe (no prototype pollution)
-                if (repaired.includes("__proto__") || repaired.includes("constructor")) {
-                  throw new Error("Potentially malicious JSON detected");
-                }
-                functionArgs = JSON.parse(repaired) as Record<string, unknown>;
-                log("warn", `Repaired malformed JSON args for ${functionName}`);
-              } catch (parseError) {
-                log(
-                  "error",
-                  `Failed to parse args for ${functionName}: ${getErrorMessage(parseError)}`
-                );
-                functionArgs = {};
-              }
-            }
-
-            // Block once-per-session tools from firing a second time
-            if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
-              log(
-                "agent",
-                `Blocked duplicate ${functionName} call — already executed this session`
-              );
-              await onToolFinish?.({
-                name: functionName,
-                args: functionArgs,
-                result: {
-                  blocked: true,
-                  reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-                },
-                success: false,
-                step,
-              });
-              return {
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify({
-                  blocked: true,
-                  reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-                }),
-              };
-            }
+            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
 
             // Validate tool arguments before execution for write operations
             const writeToolsRequiringValidation = [
@@ -437,11 +441,9 @@ export async function agentLoop(
               step,
             });
 
-            // Lock deploy_position after first attempt regardless of outcome — retrying is never right
-            // For close/swap: only lock on success so genuine failures can be retried
-            if (NO_RETRY_TOOLS.has(functionName)) firedOnce.add(functionName);
-            else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
-              firedOnce.add(functionName);
+            // Note: firedOnce was already set during pre-reservation for once-per-session
+            // tools. This prevents race conditions where multiple identical tool calls in
+            // the same LLM response could all pass the guard before any marks as fired.
 
             // Special formatting for wallet balance to ensure clean Telegram output
             if (functionName === "get_wallet_balance") {
@@ -519,4 +521,26 @@ export async function agentLoop(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Safely parse tool call arguments with JSON repair fallback.
+ * Extracted from the tool execution loop to avoid duplication.
+ */
+function safeParseArgs(raw: string, functionName: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    try {
+      const repaired = jsonrepair(raw);
+      if (repaired.includes("__proto__") || repaired.includes("constructor")) {
+        throw new Error("Potentially malicious JSON detected");
+      }
+      log("warn", `Repaired malformed JSON args for ${functionName}`);
+      return JSON.parse(repaired) as Record<string, unknown>;
+    } catch (parseError) {
+      log("error", `Failed to parse args for ${functionName}: ${getErrorMessage(parseError)}`);
+      return {};
+    }
+  }
 }

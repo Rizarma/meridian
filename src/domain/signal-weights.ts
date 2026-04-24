@@ -73,6 +73,7 @@ interface SignalWeightHistoryRow {
   weight_to: number;
   lift: number | null;
   action: string | null;
+  confidence: number | null;
   window_size: number | null;
   win_count: number | null;
   loss_count: number | null;
@@ -123,7 +124,7 @@ export async function loadWeights(): Promise<SignalWeights> {
     for (const row of historyRows) {
       // Get all changes for this recalc event
       const changeRows = await infra().db.query<SignalWeightHistoryRow>(
-        `SELECT signal, weight_from, weight_to, lift, action
+        `SELECT signal, weight_from, weight_to, lift, action, confidence
          FROM signal_weight_history
          WHERE changed_at = ? AND action IS NOT NULL`,
         row.changed_at
@@ -135,7 +136,7 @@ export async function loadWeights(): Promise<SignalWeights> {
         to: c.weight_to,
         lift: c.lift ?? 0,
         action: (c.action as "boosted" | "decayed") || "boosted",
-        confidence: (c as { confidence?: number | null }).confidence ?? undefined,
+        confidence: c.confidence ?? undefined,
       }));
 
       history.push({
@@ -287,10 +288,10 @@ export async function recalculateWeights(
   cfg: RecalculateConfig = {}
 ): Promise<RecalculateResult> {
   const darwin = cfg.darwin || {};
-  const windowDays = darwin.windowDays ?? 60;
+  const windowDays = darwin.windowDays ?? 30;
   const minSamples = darwin.minSamples ?? 10;
-  const weightFloor = darwin.weightFloor ?? 0.3;
-  const weightCeiling = darwin.weightCeiling ?? 2.5;
+  const weightFloor = darwin.weightFloor ?? 0.5;
+  const weightCeiling = darwin.weightCeiling ?? 2.0;
 
   const data = await loadWeights();
   const weights: Record<string, number> = data.weights || { ...DEFAULT_WEIGHTS };
