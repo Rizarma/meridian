@@ -28,6 +28,7 @@ import {
   importPositionsFromJson,
   listBackups,
   resetDatabase,
+  runMigrations,
   validateImportData,
 } from "../infrastructure/db-backup.js";
 
@@ -373,6 +374,24 @@ export async function handleRestore(args: string[]): Promise<void> {
   });
 }
 
+/**
+ * Handle `meridian db migrate` command
+ */
+export async function handleMigrate(): Promise<void> {
+  log("Running database migrations...");
+  const result = await runMigrations();
+
+  if (result.success) {
+    out({
+      success: true,
+      message: result.message,
+      details: result.details,
+    });
+  } else {
+    die(result.message, { details: result.details });
+  }
+}
+
 // ─── Main Handler ────────────────────────────────────────────────
 
 export async function handleDbCommand(
@@ -402,6 +421,9 @@ export async function handleDbCommand(
     case "restore":
       await handleRestore(args);
       break;
+    case "migrate":
+      await handleMigrate();
+      break;
     default:
       die(
         `Unknown db subcommand: ${subcommand}.\n\n` +
@@ -412,7 +434,8 @@ export async function handleDbCommand(
           "  meridian db reset [--force|--yes]\n" +
           "  meridian db list\n" +
           "  meridian db validate <type> <file>\n" +
-          "  meridian db restore [backupName] [--force|--yes]"
+          "  meridian db restore [backupName] [--force|--yes]\n" +
+          "  meridian db migrate"
       );
   }
 }

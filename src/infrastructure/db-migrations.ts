@@ -1234,6 +1234,114 @@ export async function backfillLegacyStrategyFields(): Promise<void> {
 }
 
 /**
+ * Run migrations on an existing database.
+ * Idempotent - safe to run multiple times. Only adds missing columns/tables.
+ */
+export async function runMigrations(): Promise<{
+  success: boolean;
+  message: string;
+  details: string[];
+}> {
+  const backend =
+    process.env.DATABASE_BACKEND === "postgres"
+      ? "postgres"
+      : process.env.DATABASE_BACKEND === "sqlite"
+        ? "sqlite"
+        : process.env.DATABASE_URL
+          ? "postgres"
+          : "sqlite";
+
+  const details: string[] = [];
+
+  try {
+    if (backend === "postgres") {
+      // Postgres migrations run via initPostgresSchema which is idempotent
+      const { initPostgresSchema } = await import("./db/migrations/postgres/init.js");
+      const connectionString = process.env.DATABASE_URL;
+      if (!connectionString) {
+        return {
+          success: false,
+          message: "DATABASE_URL not set for Postgres backend",
+          details: [],
+        };
+      }
+      await initPostgresSchema(connectionString);
+      return {
+        success: true,
+        message: "Postgres migrations completed successfully",
+        details: ["Checked and added missing columns to all tables"],
+      };
+    }
+
+    // SQLite migrations
+    const db = getDb();
+
+    // Check if signal_weight_history.confidence exists
+    const columns = db.pragma("pragma_table_info('signal_weight_history')") as Array<{
+      name: string;
+    }>;
+    const hasConfidence = columns.some((col) => col.name === "confidence");
+
+    if (!hasConfidence) {
+      migrateSignalWeightHistoryV2();
+      details.push("Added confidence column to signal_weight_history");
+    } else {
+      details.push("signal_weight_history.confidence: already exists");
+    }
+
+    // Check FK constraints on position_snapshots
+    const snapshotsSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='position_snapshots'")
+      .get() as { sql: string } | undefined;
+    const snapshotsHasFk = snapshotsSql?.sql?.includes("FOREIGN KEY") ?? false;
+
+    if (snapshotsHasFk) {
+      removePositionFkConstraints();
+      details.push("Removed FK constraints from position_snapshots and position_events");
+    } else {
+      details.push("FK constraints: already removed");
+    }
+
+    // Check threshold evolution tables
+    const hasSuggestions = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='threshold_suggestions'")
+      .get() as { name: string } | undefined;
+    if (!hasSuggestions) {
+      initThresholdEvolutionTables();
+      details.push("Created threshold_suggestions and threshold_history tables");
+    } else {
+      details.push("Threshold evolution tables: already exist");
+    }
+
+    // Check legacy strategy backfill
+    const legacyRows = query<{ count: number }>(
+      `SELECT COUNT(*) as count FROM position_state WHERE strategy_config IS NULL`
+    );
+    const hasLegacyRows = (legacyRows[0]?.count ?? 0) > 0;
+
+    if (hasLegacyRows) {
+      await backfillLegacyStrategyFields();
+      details.push("Backfilled legacy strategy fields in position_state");
+    } else {
+      details.push("Legacy strategy fields: already backfilled");
+    }
+
+    return {
+      success: true,
+      message: "SQLite migrations completed successfully",
+      details,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `Migration failed: ${errorMessage}`,
+      details,
+    };
+  }
+}
+
+/**
  * Full database setup - initialize schema and migrate if needed.
  */
 export async function setupDatabase(): Promise<{ success: boolean; message: string }> {
