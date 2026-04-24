@@ -12,10 +12,12 @@
  */
 
 import { config } from "../config/config.js";
-import { get, query, run, stringifyJson, transaction } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 import type { PortfolioSyncConfig } from "../types/config.js";
 import type { LessonEntry, LessonOutcome } from "../types/lessons.js";
+
+const infra = () => getInfrastructure();
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -82,6 +84,8 @@ interface PortfolioHistoryRow {
 
 // ─── Lesson Coverage ──────────────────────────────────────────────
 
+const db = () => getInfrastructure().db;
+
 /** Coverage metrics for existing lessons, used to decide if bootstrap is needed. */
 export interface LessonCoverage {
   /** Number of distinct pools represented in lessons */
@@ -98,9 +102,9 @@ export interface LessonCoverage {
  * Calculate lesson coverage metrics from the lessons table.
  * Used to determine whether portfolio bootstrap is still useful.
  */
-export function calculateLessonCoverage(): LessonCoverage {
+export async function calculateLessonCoverage(): Promise<LessonCoverage> {
   try {
-    const row = get<{
+    const row = await db().get<{
       unique_pools: number;
       positive_count: number;
       negative_count: number;
@@ -219,7 +223,7 @@ export async function storePortfolioSnapshot(
     totalDeposit > 0 && totalFee > 0 ? (totalFee / totalDeposit) * (365 / daysBack) * 100 : null;
 
   // Check if we already have a record for this pool+wallet to preserve first_seen_at
-  const existing = get<{ first_seen_at: string }>(
+  const existing = await db().get<{ first_seen_at: string }>(
     `SELECT first_seen_at FROM portfolio_history
      WHERE wallet_address = ? AND pool_address = ?
      ORDER BY fetched_at DESC LIMIT 1`,
@@ -230,7 +234,7 @@ export async function storePortfolioSnapshot(
   const firstSeenAt = existing?.first_seen_at ?? now;
 
   // Check if we have our own positions for this pool
-  const ourPerf = get<{ count: number; avg_pnl: number }>(
+  const ourPerf = await db().get<{ count: number; avg_pnl: number }>(
     `SELECT COUNT(*) as count, AVG(pnl_pct) as avg_pnl
      FROM performance WHERE pool = ?`,
     pool.poolAddress
@@ -244,13 +248,13 @@ export async function storePortfolioSnapshot(
     ourTotalPnlPct != null && poolPnlPct != null ? ourTotalPnlPct - poolPnlPct : null;
 
   // Check if pool is currently active (has open position_state)
-  const activePool = get<{ count: number }>(
+  const activePool = await db().get<{ count: number }>(
     `SELECT COUNT(*) as count FROM position_state WHERE pool = ? AND closed = 0`,
     pool.poolAddress
   );
   const isActivePool = (activePool?.count ?? 0) > 0 ? 1 : 0;
 
-  run(
+  await db().run(
     `INSERT OR REPLACE INTO portfolio_history (
       wallet_address, pool_address, pool_name,
       token_x_mint, token_y_mint, token_x_symbol, token_y_symbol,
@@ -284,7 +288,7 @@ export async function storePortfolioSnapshot(
     parseNum(pool.pnlSol),
     poolPnlPct,
     parseNum(pool.pnlSolPctChange),
-    pool.tokenBreakdown ? stringifyJson(pool.tokenBreakdown) : null,
+    pool.tokenBreakdown ? db().stringifyJson(pool.tokenBreakdown) : null,
     pool.lastClosedAt,
     null, // total_positions_count — not available from API
     daysBack,
@@ -314,13 +318,13 @@ export async function storePortfolioSnapshot(
  * Uses ISO date (YYYY-MM-DD) comparison on fetched_at.
  * Fail-open: errors are logged but never thrown.
  */
-export function cleanupOldPortfolioData(daysToKeep: number = 180): void {
+export async function cleanupOldPortfolioData(daysToKeep: number = 180): Promise<void> {
   try {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
     const cutoffIso = cutoffDate.toISOString().split("T")[0]; // YYYY-MM-DD
 
-    const result = run(`DELETE FROM portfolio_history WHERE fetched_at < ?`, cutoffIso);
+    const result = await db().run(`DELETE FROM portfolio_history WHERE fetched_at < ?`, cutoffIso);
 
     if (result.changes > 0) {
       log(
@@ -382,7 +386,7 @@ export async function bootstrapFromPortfolio(
     }
 
     // Clean up old records after fetching new data
-    cleanupOldPortfolioData();
+    await cleanupOldPortfolioData();
   } catch (err) {
     log(
       "portfolio_sync_error",
@@ -403,7 +407,7 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
   log("portfolio_sync", `Syncing portfolio for pool ${poolAddress.slice(0, 8)}...`);
 
   // Warn if existing data is stale
-  validateDataFreshness(poolAddress);
+  await validateDataFreshness(poolAddress);
 
   try {
     const items = await fetchMeteoraPortfolio(wallet, syncConfig.daysBack);
@@ -428,9 +432,9 @@ export async function syncPoolPortfolio(wallet: string, poolAddress: string): Pr
  * Validate data freshness for a pool and log warnings if stale (>48h).
  * Fail-open: errors are caught and logged, never blocking.
  */
-export function validateDataFreshness(poolAddress: string): void {
+export async function validateDataFreshness(poolAddress: string): Promise<void> {
   try {
-    const row = get<{ data_freshness_hours: number; fetched_at: string }>(
+    const row = await infra().db.get<{ data_freshness_hours: number; fetched_at: string }>(
       `SELECT data_freshness_hours, fetched_at
        FROM portfolio_history
        WHERE pool_address = ?
@@ -456,14 +460,14 @@ export function validateDataFreshness(poolAddress: string): void {
  * Compares pool, outcome, source, and the first 100 chars of the rule text.
  * Fail-open: returns false if the check itself fails.
  */
-function isDuplicateLesson(
+async function isDuplicateLesson(
   pool: string,
   outcome: string,
   rule: string,
   source: string = "portfolio_sync"
-): boolean {
+): Promise<boolean> {
   try {
-    const existing = query<{ rule: string }>(
+    const existing = await db().query<{ rule: string }>(
       `SELECT rule FROM lessons
        WHERE pool = ? AND outcome = ?
        AND json_extract(data_json, '$.source') = ?`,
@@ -533,15 +537,15 @@ export async function generatePortfolioLessons(
 
   try {
     // Generate pool character lessons (reliable pools)
-    const charLessons = generatePoolCharacterLessons(wallet, syncConfig);
+    const charLessons = await generatePoolCharacterLessons(wallet, syncConfig);
     lessons.push(...charLessons);
 
     // Generate avoid lessons
-    const avoidLessons = generateAvoidLessons(wallet, syncConfig);
+    const avoidLessons = await generateAvoidLessons(wallet, syncConfig);
     lessons.push(...avoidLessons);
 
     // Generate outperformance lessons
-    const perfLessons = generateOutperformanceLessons(wallet, syncConfig);
+    const perfLessons = await generateOutperformanceLessons(wallet, syncConfig);
     lessons.push(...perfLessons);
 
     // Diversity guard — validate before inserting
@@ -567,14 +571,14 @@ export async function generatePortfolioLessons(
       }
 
       // Store generated lessons
-      transaction(() => {
+      await db().transaction(async () => {
         for (const lesson of lessons) {
-          run(
+          await db().run(
             `INSERT OR IGNORE INTO lessons (id, rule, tags, outcome, context, pool, pnl_pct, range_efficiency, created_at, pinned, role, data_json)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             lesson.id,
             lesson.rule,
-            stringifyJson(lesson.tags),
+            db().stringifyJson(lesson.tags),
             lesson.outcome,
             lesson.context ?? null,
             lesson.pool ?? null,
@@ -583,12 +587,12 @@ export async function generatePortfolioLessons(
             lesson.created_at,
             lesson.pinned ? 1 : 0,
             lesson.role ?? null,
-            stringifyJson({ source: "portfolio_sync", ...lesson })
+            db().stringifyJson({ source: "portfolio_sync", ...lesson })
           );
         }
 
         // Mark all portfolio rows as lesson-generated
-        run(
+        await db().run(
           `UPDATE portfolio_history SET lesson_generated = 1 WHERE wallet_address = ? AND lesson_generated = 0`,
           wallet
         );
@@ -608,15 +612,15 @@ export async function generatePortfolioLessons(
  * Identify reliable pools from portfolio history — pools where we (or the wallet)
  * have consistently positive results.
  */
-function generatePoolCharacterLessons(
+async function generatePoolCharacterLessons(
   wallet: string,
   syncConfig: PortfolioSyncConfig
-): LessonEntry[] {
+): Promise<LessonEntry[]> {
   const lessons: LessonEntry[] = [];
   const now = new Date().toISOString();
 
   // Find pools with consistently positive PnL from portfolio history (recency-weighted)
-  const reliablePools = query<
+  const reliablePools = await db().query<
     PortfolioHistoryRow & { weighted_avg_pnl_pct: number; snap_count: number; recent_count: number }
   >(
     `SELECT *, 
@@ -642,7 +646,7 @@ function generatePoolCharacterLessons(
     const avgPnl = pool.weighted_avg_pnl_pct.toFixed(1);
     const rule = `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} positive portfolio snapshots (${pool.recent_count} recent) with weighted avg PnL +${avgPnl}% — historically reliable [Note: based on surviving pools only; verify current TVL/volume]`;
 
-    if (isDuplicateLesson(pool.pool_address, "good", rule)) {
+    if (await isDuplicateLesson(pool.pool_address, "good", rule)) {
       log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
       continue;
     }
@@ -667,11 +671,14 @@ function generatePoolCharacterLessons(
 /**
  * Identify pools to avoid — consistently negative PnL across multiple snapshots.
  */
-function generateAvoidLessons(wallet: string, syncConfig: PortfolioSyncConfig): LessonEntry[] {
+async function generateAvoidLessons(
+  wallet: string,
+  syncConfig: PortfolioSyncConfig
+): Promise<LessonEntry[]> {
   const lessons: LessonEntry[] = [];
   const now = new Date().toISOString();
 
-  const avoidPools = query<
+  const avoidPools = await db().query<
     PortfolioHistoryRow & { weighted_avg_pnl_pct: number; snap_count: number; recent_count: number }
   >(
     `SELECT *, 
@@ -697,7 +704,7 @@ function generateAvoidLessons(wallet: string, syncConfig: PortfolioSyncConfig): 
     const avgPnl = pool.weighted_avg_pnl_pct.toFixed(1);
     const rule = `Pool ${pool.pool_name || pool.pool_address.slice(0, 8)} has ${pool.snap_count} losing portfolio snapshots (${pool.recent_count} recent) with weighted avg PnL ${avgPnl}% — avoid deploying here [Note: based on surviving pools; worse pools may have already failed]`;
 
-    if (isDuplicateLesson(pool.pool_address, "bad", rule)) {
+    if (await isDuplicateLesson(pool.pool_address, "bad", rule)) {
       log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
       continue;
     }
@@ -722,15 +729,15 @@ function generateAvoidLessons(wallet: string, syncConfig: PortfolioSyncConfig): 
 /**
  * Compare our performance vs portfolio-wide averages to identify outperformance patterns.
  */
-function generateOutperformanceLessons(
+async function generateOutperformanceLessons(
   wallet: string,
   _syncConfig: PortfolioSyncConfig
-): LessonEntry[] {
+): Promise<LessonEntry[]> {
   const lessons: LessonEntry[] = [];
   const now = new Date().toISOString();
 
   // Find pools where our performance exceeds the portfolio average
-  const outperformers = query<{
+  const outperformers = await db().query<{
     pool_address: string;
     pool_name: string | null;
     our_pnl: number;
@@ -754,7 +761,7 @@ function generateOutperformanceLessons(
   for (const pool of outperformers) {
     const rule = `Outperforming portfolio avg by +${pool.delta.toFixed(1)}% on ${pool.pool_name || pool.pool_address.slice(0, 8)} — our strategy works well here [Note: comparison against surviving pools only]`;
 
-    if (isDuplicateLesson(pool.pool_address, "worked", rule)) {
+    if (await isDuplicateLesson(pool.pool_address, "worked", rule)) {
       log("portfolio_sync", `Skipping duplicate lesson for pool ${pool.pool_address.slice(0, 8)}`);
       continue;
     }

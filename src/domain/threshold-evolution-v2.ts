@@ -94,7 +94,7 @@ export async function runThresholdEvolution(
 
     // 3. Darwinian signal weight recalculation (separate concern)
     if (config.features.darwinEvolution) {
-      const wResult = recalculateWeights(performanceHistory, { darwin: config.darwin });
+      const wResult = await recalculateWeights(performanceHistory, { darwin: config.darwin });
       if (wResult.changes.length > 0) {
         log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
       }
@@ -161,8 +161,8 @@ export interface ReviewableSuggestion extends AnalysisSuggestion {
  * Get all pending suggestions for review.
  * Called by CLI or admin interface.
  */
-export function getSuggestionsForReview(): ReviewableSuggestion[] {
-  return getPendingSuggestions().map(
+export async function getSuggestionsForReview(): Promise<ReviewableSuggestion[]> {
+  return (await getPendingSuggestions()).map(
     (s: {
       id?: number;
       field: string;
@@ -195,11 +195,11 @@ export function getSuggestionsForReview(): ReviewableSuggestion[] {
  * Apply an approved suggestion.
  * This is the ONLY place where config is mutated.
  */
-export function applySuggestion(
+export async function applySuggestion(
   suggestionId: number,
   reviewer: string
-): { success: boolean; message: string } {
-  const result = approveSuggestion(suggestionId, reviewer);
+): Promise<{ success: boolean; message: string }> {
+  const result = await approveSuggestion(suggestionId, reviewer);
 
   if (!result.success || !result.suggestion) {
     return { success: false, message: result.error || "Failed to approve suggestion" };
@@ -230,12 +230,12 @@ export function applySuggestion(
 /**
  * Reject a suggestion.
  */
-export function dismissSuggestion(
+export async function dismissSuggestion(
   suggestionId: number,
   reviewer: string,
   reason?: string
-): { success: boolean; message: string } {
-  const result = rejectSuggestion(suggestionId, reviewer, reason);
+): Promise<{ success: boolean; message: string }> {
+  const result = await rejectSuggestion(suggestionId, reviewer, reason);
 
   if (!result.success) {
     return { success: false, message: result.error || "Failed to reject suggestion" };
@@ -249,17 +249,17 @@ export function dismissSuggestion(
 
 // ─── History & Reporting ────────────────────────────────────────────
 
-export function getEvolutionHistory(field?: string, limit?: number) {
+export async function getEvolutionHistory(field?: string, limit?: number) {
   return getThresholdHistory(field, limit);
 }
 
-export function getEvolutionReport(): {
+export async function getEvolutionReport(): Promise<{
   pendingSuggestions: number;
   totalApplied: number;
-  recentChanges: ReturnType<typeof getThresholdHistory>;
-} {
-  const pending = getPendingSuggestions();
-  const history = getThresholdHistory(undefined, 10);
+  recentChanges: Awaited<ReturnType<typeof getThresholdHistory>>;
+}> {
+  const pending = await getPendingSuggestions();
+  const history = await getThresholdHistory(undefined, 10);
 
   return {
     pendingSuggestions: pending.length,

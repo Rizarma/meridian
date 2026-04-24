@@ -362,7 +362,7 @@ switch (subcommand as CLISubcommand) {
     const { getPositionPnl, getMyPositions } = await import("../../tools/dlmm.js");
 
     let poolAddress: string | undefined;
-    const tracked = getTrackedPosition(positionAddress);
+    const tracked = await getTrackedPosition(positionAddress);
     if (tracked?.pool) {
       poolAddress = tracked.pool;
     } else {
@@ -372,6 +372,8 @@ switch (subcommand as CLISubcommand) {
       if (!found) die("Position not found", { position: positionAddress });
       poolAddress = found.pool;
     }
+
+    if (!poolAddress) die("Position not found", { position: positionAddress });
 
     const pnlResult = await getPositionPnl({
       pool_address: poolAddress,
@@ -461,7 +463,7 @@ switch (subcommand as CLISubcommand) {
           narrative.status === "fulfilled"
             ? ((narrative.value as TokenNarrative | null)?.narrative ?? null)
             : null,
-        pool_memory: recallForPool(pool.pool),
+        pool_memory: await recallForPool(pool.pool),
       });
       await new Promise<void>((r) => setTimeout(() => r(), 150)); // avoid 429s
     }
@@ -704,16 +706,16 @@ switch (subcommand as CLISubcommand) {
       await import("../domain/threshold-evolution-v2.js");
 
     if (sub2 === "review") {
-      const suggestions = getSuggestionsForReview();
+      const suggestions = await getSuggestionsForReview();
       out({ pending: suggestions.length, suggestions });
     } else if (sub2 === "apply" && argv[3]) {
-      const result = applySuggestion(Number(argv[3]), "cli");
+      const result = await applySuggestion(Number(argv[3]), "cli");
       out(result);
     } else if (sub2 === "reject" && argv[3]) {
-      const result = dismissSuggestion(Number(argv[3]), "cli");
+      const result = await dismissSuggestion(Number(argv[3]), "cli");
       out(result);
     } else if (sub2 === "report") {
-      out(getEvolutionReport());
+      out(await getEvolutionReport());
     } else {
       // Default: run evolution analysis
       const { config } = await import("../config/config.js");
@@ -783,8 +785,8 @@ switch (subcommand as CLISubcommand) {
   case "performance": {
     const { getPerformanceHistory, getPerformanceSummary } = await import("../domain/lessons.js");
     const limit: number = typedFlags.limit ? parseInt(typedFlags.limit, 10) : 200;
-    const history = getPerformanceHistory({ hours: 999999, limit });
-    const summary = getPerformanceSummary();
+    const history = await getPerformanceHistory({ hours: 999999, limit });
+    const summary = await getPerformanceSummary();
     const output: PerformanceOutput = {
       summary: summary as PerformanceOutput["summary"],
       count: history.count,

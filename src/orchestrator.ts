@@ -3,6 +3,7 @@
 
 import { config } from "./config/config.js";
 import { TIMEOUT } from "./config/constants.js";
+import { getInfrastructure, initializeInfrastructure } from "./di-container.js";
 import { bootstrapFromPortfolio, calculateLessonCoverage } from "./domain/portfolio-sync.js";
 import { cycleState } from "./infrastructure/cycle-state.js";
 import { setupDatabase } from "./infrastructure/db-migrations.js";
@@ -82,9 +83,15 @@ function launchCron(): void {
   }
 }
 
-export async function start(): Promise<void> {
+export async function initializeApp(): Promise<void> {
+  try {
+    getInfrastructure();
+  } catch {
+    await initializeInfrastructure();
+  }
+
   // Initialize database schema first (creates tables if they don't exist)
-  const dbSetup = setupDatabase();
+  const dbSetup = await setupDatabase();
   if (!dbSetup.success) {
     log("startup_error", `Database setup failed: ${dbSetup.message}`);
     throw new Error(dbSetup.message);
@@ -117,7 +124,7 @@ export async function start(): Promise<void> {
         const walletAddress = wallet.publicKey.toString();
 
         // Coverage-based check to decide if bootstrap is useful
-        const coverage = calculateLessonCoverage();
+        const coverage = await calculateLessonCoverage();
         const threshold = config.portfolioSync.bootstrapThreshold;
         const needsBootstrap =
           coverage.uniquePools < (threshold?.minUniquePools ?? 3) ||
@@ -173,3 +180,5 @@ export async function start(): Promise<void> {
     await startNonTTY(replDeps);
   }
 }
+
+export const start = initializeApp;

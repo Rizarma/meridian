@@ -113,7 +113,6 @@ export function createNotificationService(deps: NotificationServiceDeps): Notifi
     },
 
     async notifyClose(pair: string, pnlUsd: number, pnlPct: number): Promise<void> {
-      if (telegram.hasActiveLiveMessage()) return;
       try {
         await telegram.notifyClose({ pair, pnlUsd, pnlPct });
       } catch (e) {

@@ -120,7 +120,7 @@ export async function scoreAndRankCandidates(
     candidates.map(({ pool }) => getActiveBin({ pool_address: pool.pool }))
   );
 
-  const weights = loadWeights().weights;
+  const weights = (await loadWeights()).weights;
 
   const scoredCandidates: ScoredCandidate[] = candidates.map((candidate, i) => ({
     candidate,

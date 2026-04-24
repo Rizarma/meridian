@@ -9,9 +9,11 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
-import { get, query, run } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 import type { BlockedDev } from "../types/blocklist.js";
+
+const infra = () => getInfrastructure();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Database Types
@@ -31,9 +33,9 @@ interface DevBlocklistRow {
 /**
  * Check if a deployer wallet is blocked.
  */
-export function isDevBlocked(devWallet: string): boolean {
+export async function isDevBlocked(devWallet: string): Promise<boolean> {
   if (!devWallet) return false;
-  const row = get<{ count: number }>(
+  const row = await infra().db.get<{ count: number }>(
     "SELECT COUNT(*) as count FROM dev_blocklist WHERE wallet = ?",
     devWallet
   );
@@ -43,9 +45,14 @@ export function isDevBlocked(devWallet: string): boolean {
 /**
  * Get a single blocked dev entry.
  */
-export function getBlockedDevEntry(wallet: string): (BlockedDev & { wallet: string }) | null {
+export async function getBlockedDevEntry(
+  wallet: string
+): Promise<(BlockedDev & { wallet: string }) | null> {
   if (!wallet) return null;
-  const row = get<DevBlocklistRow>("SELECT * FROM dev_blocklist WHERE wallet = ?", wallet);
+  const row = await infra().db.get<DevBlocklistRow>(
+    "SELECT * FROM dev_blocklist WHERE wallet = ?",
+    wallet
+  );
   if (!row) return null;
   return {
     wallet: row.wallet,
@@ -58,8 +65,8 @@ export function getBlockedDevEntry(wallet: string): (BlockedDev & { wallet: stri
 /**
  * Get all blocked devs as a record (for compatibility with old API).
  */
-export function getBlockedDevs(): Record<string, BlockedDev> {
-  const rows = query<DevBlocklistRow>("SELECT * FROM dev_blocklist");
+export async function getBlockedDevs(): Promise<Record<string, BlockedDev>> {
+  const rows = await infra().db.query<DevBlocklistRow>("SELECT * FROM dev_blocklist");
   const result: Record<string, BlockedDev> = {};
   for (const row of rows) {
     result[row.wallet] = {
@@ -78,7 +85,7 @@ export function getBlockedDevs(): Record<string, BlockedDev> {
 /**
  * Tool handler: block_deployer
  */
-export function blockDev({
+export async function blockDev({
   wallet,
   reason,
   label,
@@ -86,14 +93,15 @@ export function blockDev({
   wallet: string;
   reason?: string;
   label?: string;
-}):
+}): Promise<
   | { blocked: boolean; wallet: string; label?: string; reason?: string }
   | { already_blocked: boolean; wallet: string; label: string; reason: string }
-  | { error: string } {
+  | { error: string }
+> {
   if (!wallet) return { error: "wallet required" };
 
   // Check if already blocked
-  const existing = getBlockedDevEntry(wallet);
+  const existing = await getBlockedDevEntry(wallet);
   if (existing) {
     return {
       already_blocked: true,
@@ -111,7 +119,7 @@ export function blockDev({
   };
 
   try {
-    run(
+    await infra().db.run(
       "INSERT INTO dev_blocklist (wallet, label, reason, added_at) VALUES (?, ?, ?, ?)",
       entry.wallet,
       entry.label,
@@ -130,20 +138,20 @@ export function blockDev({
 /**
  * Tool handler: unblock_deployer
  */
-export function unblockDev({
+export async function unblockDev({
   wallet,
 }: {
   wallet: string;
-}): { unblocked: boolean; wallet: string; was: BlockedDev } | { error: string } {
+}): Promise<{ unblocked: boolean; wallet: string; was: BlockedDev } | { error: string }> {
   if (!wallet) return { error: "wallet required" };
 
-  const existing = getBlockedDevEntry(wallet);
+  const existing = await getBlockedDevEntry(wallet);
   if (!existing) {
     return { error: `Wallet ${wallet} not on dev blocklist` };
   }
 
   try {
-    run("DELETE FROM dev_blocklist WHERE wallet = ?", wallet);
+    await infra().db.run("DELETE FROM dev_blocklist WHERE wallet = ?", wallet);
     log("dev_blocklist", `Removed deployer ${existing.label} (${wallet}) from blocklist`);
     return {
       unblocked: true,
@@ -164,11 +172,13 @@ export function unblockDev({
 /**
  * Tool handler: list_blocked_deployers
  */
-export function listBlockedDevs(): {
+export async function listBlockedDevs(): Promise<{
   count: number;
   blocked_devs: Array<BlockedDev & { wallet: string }>;
-} {
-  const rows = query<DevBlocklistRow>("SELECT * FROM dev_blocklist ORDER BY added_at DESC");
+}> {
+  const rows = await infra().db.query<DevBlocklistRow>(
+    "SELECT * FROM dev_blocklist ORDER BY added_at DESC"
+  );
 
   const entries = rows.map((row) => ({
     wallet: row.wallet,
@@ -183,8 +193,8 @@ export function listBlockedDevs(): {
 /**
  * Clear all blocked devs (useful for testing).
  */
-export function clearDevBlocklist(): { cleared: number } {
-  const result = run("DELETE FROM dev_blocklist");
+export async function clearDevBlocklist(): Promise<{ cleared: number }> {
+  const result = await infra().db.run("DELETE FROM dev_blocklist");
   log("dev_blocklist", `Cleared ${result.changes} blocked deployers`);
   return { cleared: Number(result.changes) };
 }

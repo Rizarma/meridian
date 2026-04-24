@@ -18,7 +18,7 @@ import type {
   TokenNarrativeInput,
   TokenStats1h,
 } from "../src/types/index.js";
-import type { SmartWallet, SmartWalletList } from "../src/types/smart-wallets.js";
+import type { SmartWallet } from "../src/types/smart-wallets.js";
 import type { TokenInfoResult } from "../src/types/token.js";
 import { cache } from "../src/utils/cache.js";
 import { getErrorMessage } from "../src/utils/errors.js";
@@ -332,7 +332,7 @@ export async function getTokenHolders({
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────
   // Use targeted holders endpoint — only returns matching wallets, no noise
   const { listSmartWallets } = await import("../src/domain/smart-wallets.js");
-  const { wallets: smartWallets } = listSmartWallets() as SmartWalletList;
+  const { wallets: smartWallets } = await listSmartWallets();
   const smartWalletsHolding: SmartWalletHolding[] = [];
 
   if (smartWallets.length > 0) {

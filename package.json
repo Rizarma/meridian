@@ -57,7 +57,8 @@
     "jsonrepair": "^3.13.3",
     "log-update": "^6.0.0",
     "node-cron": "^3.0.3",
-    "openai": "^4.73.0"
+    "openai": "^4.73.0",
+    "postgres": "^3.4.4"
   },
   "engines": {
     "node": ">=18.0.0"

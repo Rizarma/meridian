@@ -27,7 +27,7 @@ async function runBriefing(): Promise<void> {
  */
 export async function maybeRunMissedBriefing(): Promise<void> {
   const todayUtc = new Date().toISOString().slice(0, 10);
-  const lastSent = getLastBriefingDate();
+  const lastSent = await getLastBriefingDate();
 
   if (lastSent === todayUtc) return; // already sent today
 

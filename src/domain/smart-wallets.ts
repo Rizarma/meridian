@@ -8,7 +8,7 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
-import { get, query, run } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 import type {
   AddSmartWalletInput,
@@ -52,24 +52,27 @@ const CACHE_TTL = 5 * 60 * 1000;
 /**
  * Add a smart wallet to track.
  */
-export function addSmartWallet({
+export async function addSmartWallet({
   name,
   address,
   category = "alpha",
   type = "lp",
-}: AddSmartWalletInput): SmartWalletResult {
+}: AddSmartWalletInput): Promise<SmartWalletResult> {
   if (!SOLANA_PUBKEY_RE.test(address)) {
     return { success: false, error: "Invalid Solana address format" };
   }
 
   // Check if already exists
-  const existing = get<SmartWalletRow>("SELECT * FROM smart_wallets WHERE address = ?", address);
+  const existing = await infra().db.get<SmartWalletRow>(
+    "SELECT * FROM smart_wallets WHERE address = ?",
+    address
+  );
   if (existing) {
     return { success: false, error: `Already tracked as "${existing.name}"` };
   }
 
   try {
-    run(
+    await infra().db.run(
       "INSERT INTO smart_wallets (address, name, category, type, added_at) VALUES (?, ?, ?, ?, ?)",
       address,
       name,
@@ -98,14 +101,19 @@ export function addSmartWallet({
 /**
  * Remove a tracked smart wallet.
  */
-export function removeSmartWallet({ address }: RemoveSmartWalletInput): SmartWalletResult {
-  const existing = get<SmartWalletRow>("SELECT * FROM smart_wallets WHERE address = ?", address);
+export async function removeSmartWallet({
+  address,
+}: RemoveSmartWalletInput): Promise<SmartWalletResult> {
+  const existing = await infra().db.get<SmartWalletRow>(
+    "SELECT * FROM smart_wallets WHERE address = ?",
+    address
+  );
   if (!existing) {
     return { success: false, error: "Wallet not found" };
   }
 
   try {
-    run("DELETE FROM smart_wallets WHERE address = ?", address);
+    await infra().db.run("DELETE FROM smart_wallets WHERE address = ?", address);
     log("smart_wallets", `Removed wallet: ${existing.name}`);
     return { success: true, removed: existing.name };
   } catch (err) {
@@ -118,8 +126,10 @@ export function removeSmartWallet({ address }: RemoveSmartWalletInput): SmartWal
 /**
  * List all tracked smart wallets.
  */
-export function listSmartWallets(): SmartWalletList {
-  const rows = query<SmartWalletRow>("SELECT * FROM smart_wallets ORDER BY added_at DESC");
+export async function listSmartWallets(): Promise<SmartWalletList> {
+  const rows = await infra().db.query<SmartWalletRow>(
+    "SELECT * FROM smart_wallets ORDER BY added_at DESC"
+  );
   const wallets = rows.map((row) => ({
     name: row.name,
     address: row.address,
@@ -136,7 +146,7 @@ export function listSmartWallets(): SmartWalletList {
 export async function checkSmartWalletsOnPool({
   pool_address,
 }: CheckSmartWalletsInput): Promise<WalletPositionCheck> {
-  const allWallets = listSmartWallets().wallets;
+  const allWallets = (await listSmartWallets()).wallets;
   // Only check LP-type wallets — holder wallets don't have positions
   const wallets = allWallets.filter((w) => !w.type || w.type === "lp");
 
@@ -196,8 +206,8 @@ export async function checkSmartWalletsOnPool({
 /**
  * Clear all smart wallets (useful for testing).
  */
-export function clearSmartWallets(): { cleared: number } {
-  const result = run("DELETE FROM smart_wallets");
+export async function clearSmartWallets(): Promise<{ cleared: number }> {
+  const result = await infra().db.run("DELETE FROM smart_wallets");
   log("smart_wallets", `Cleared ${result.changes} smart wallets`);
   return { cleared: Number(result.changes) };
 }
@@ -229,3 +239,4 @@ registerTool({
   handler: checkSmartWalletsOnPool,
   roles: ["SCREENER", "GENERAL"],
 });
+const infra = () => getInfrastructure();

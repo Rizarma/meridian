@@ -1,16 +1,22 @@
 // Domain interfaces for dependency inversion
 // Infrastructure implements these, Domain depends only on interfaces
-// NOTE: These mirror the synchronous better-sqlite3 API used by src/infrastructure/db.ts
 
 export interface DatabaseOperations {
-  query<T>(sql: string, ...params: unknown[]): T[];
-  get<T>(sql: string, ...params: unknown[]): T | undefined;
-  run(sql: string, ...params: unknown[]): { lastInsertRowid: number | bigint; changes: number };
-  transaction<T>(callback: () => T): T;
+  init(): Promise<void> | void;
+  close(): Promise<void> | void;
+  query<T>(sql: string, ...params: unknown[]): Promise<T[]> | T[];
+  get<T>(sql: string, ...params: unknown[]): Promise<T | undefined> | T | undefined;
+  run(
+    sql: string,
+    ...params: unknown[]
+  ):
+    | Promise<{ lastInsertRowid: string | number | bigint; changes: number }>
+    | { lastInsertRowid: string | number | bigint; changes: number };
+  transaction<T>(callback: (tx: DatabaseOperations) => Promise<T> | T): Promise<T> | T;
 }
 
 export interface JsonOperations {
-  stringifyJson(value: unknown): string;
+  stringifyJson<T>(value: T): string;
   parseJson<T>(value: string | null | undefined): T | null;
 }
 

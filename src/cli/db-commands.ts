@@ -60,28 +60,28 @@ export async function handleExport(sub2: string | undefined, args: string[]): Pr
   switch (type) {
     case "positions": {
       log("Exporting positions...");
-      result = exportPositionsToJson(outputPath);
+      result = await exportPositionsToJson(outputPath);
       break;
     }
     case "pools": {
       log("Exporting pools...");
-      result = exportPoolsToJson(outputPath);
+      result = await exportPoolsToJson(outputPath);
       break;
     }
     case "lessons": {
       log("Exporting lessons...");
-      result = exportLessonsToJson(outputPath);
+      result = await exportLessonsToJson(outputPath);
       break;
     }
     case "legacy": {
       log("Exporting in legacy format...");
-      result = exportToLegacyFormat(outputPath);
+      result = await exportToLegacyFormat(outputPath);
       break;
     }
     case "all":
     default: {
       log("Creating full backup...");
-      result = exportAllToJson();
+      result = await exportAllToJson();
       break;
     }
   }
@@ -122,7 +122,7 @@ export async function handleImport(sub2: string | undefined, args: string[]): Pr
   switch (type) {
     case "positions": {
       log(`Importing positions from ${filePath}...`);
-      result = importPositionsFromJson(path.resolve(filePath), {
+      result = await importPositionsFromJson(path.resolve(filePath), {
         validateOnly,
         skipInvalid,
       });
@@ -130,7 +130,7 @@ export async function handleImport(sub2: string | undefined, args: string[]): Pr
     }
     case "pools": {
       log(`Importing pools from ${filePath}...`);
-      result = importPoolsFromJson(path.resolve(filePath), {
+      result = await importPoolsFromJson(path.resolve(filePath), {
         validateOnly,
         skipInvalid,
       });
@@ -138,7 +138,7 @@ export async function handleImport(sub2: string | undefined, args: string[]): Pr
     }
     case "lessons": {
       log(`Importing lessons from ${filePath}...`);
-      result = importLessonsFromJson(path.resolve(filePath), {
+      result = await importLessonsFromJson(path.resolve(filePath), {
         validateOnly,
         skipInvalid,
       });
@@ -161,7 +161,7 @@ export async function handleImport(sub2: string | undefined, args: string[]): Pr
  */
 export async function handleBackup(): Promise<void> {
   log("Creating timestamped backup...");
-  const result = exportAllToJson();
+  const result = await exportAllToJson();
 
   if (result.success) {
     out(result);
@@ -187,7 +187,7 @@ export async function handleReset(args: string[]): Promise<void> {
   if (force) {
     // Immediate reset with force flag
     log("Resetting database (force mode)...");
-    const result = resetDatabase(true);
+    const result = await resetDatabase(true);
 
     if (result.success) {
       out(result);
@@ -219,7 +219,7 @@ export async function handleReset(args: string[]): Promise<void> {
   }
 
   log("Resetting database...");
-  const result = resetDatabase(true);
+  const result = await resetDatabase(true);
 
   if (result.success) {
     out(result);
@@ -232,7 +232,7 @@ export async function handleReset(args: string[]): Promise<void> {
  * Handle `meridian db list` command
  */
 export async function handleList(): Promise<void> {
-  const { backups } = listBackups();
+  const { backups } = await listBackups();
   out({
     count: backups.length,
     backups: backups.map((b) => ({
@@ -271,7 +271,7 @@ export async function handleValidate(sub2: string | undefined, args: string[]): 
   try {
     const content = fs.readFileSync(filePath, "utf8");
     const data = JSON.parse(content);
-    const validation = validateImportData(data, type as "positions" | "pools" | "lessons");
+    const validation = await validateImportData(data, type as "positions" | "pools" | "lessons");
 
     out({
       valid: validation.valid,
@@ -294,7 +294,7 @@ export async function handleRestore(args: string[]): Promise<void> {
 
   if (!backupName) {
     // List available backups
-    const { backups } = listBackups();
+    const { backups } = await listBackups();
     if (backups.length === 0) {
       die("No backups found. Create a backup first with: meridian db backup");
     }
@@ -329,7 +329,7 @@ export async function handleRestore(args: string[]): Promise<void> {
   log(`Restoring from backup: ${backupName}...`);
 
   // First reset the database
-  const resetResult = resetDatabase(true);
+  const resetResult = await resetDatabase(true);
   if (!resetResult.success) {
     die(`Failed to reset database: ${resetResult.message}`);
   }
@@ -346,19 +346,19 @@ export async function handleRestore(args: string[]): Promise<void> {
   const positionsPath = path.join(backupDir, "positions.json");
   if (fs.existsSync(positionsPath)) {
     log("Restoring positions...");
-    results.positions = importPositionsFromJson(positionsPath, { skipInvalid: true });
+    results.positions = await importPositionsFromJson(positionsPath, { skipInvalid: true });
   }
 
   const poolsPath = path.join(backupDir, "pools.json");
   if (fs.existsSync(poolsPath)) {
     log("Restoring pools...");
-    results.pools = importPoolsFromJson(poolsPath, { skipInvalid: true });
+    results.pools = await importPoolsFromJson(poolsPath, { skipInvalid: true });
   }
 
   const lessonsPath = path.join(backupDir, "lessons.json");
   if (fs.existsSync(lessonsPath)) {
     log("Restoring lessons...");
-    results.lessons = importLessonsFromJson(lessonsPath, { skipInvalid: true });
+    results.lessons = await importLessonsFromJson(lessonsPath, { skipInvalid: true });
   }
 
   out({

@@ -148,7 +148,7 @@ export async function runScreeningCycle(
 
       // Load active strategy
       const { getActiveStrategy } = await import("../domain/strategy-library.js");
-      const activeStrategy = getActiveStrategy();
+      const activeStrategy = await getActiveStrategy();
       const strategyBlock = activeStrategy
         ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${activeStrategy.range?.bins_above ?? config.strategy.binsAbove} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`
         : `No active strategy — use default bid_ask, bins_above: ${config.strategy.binsAbove}, SOL only.`;
@@ -278,7 +278,7 @@ export async function runScreeningCycle(
       screenReport = `Screening cycle failed: ${getErrorMessage(error)}`;
     } finally {
       setBusy(false);
-      flushDbReadDebugSummary("screening cycle");
+      await flushDbReadDebugSummary("screening cycle");
       if (!silent && telegramEnabled()) {
         if (screenReport) {
           const formattedReport = formatReportWithTimestamp(stripThink(screenReport), scheduled);

@@ -9,7 +9,7 @@
  */
 
 import { registerTool } from "../../tools/registry.js";
-import { get, query, run } from "../infrastructure/db.js";
+import { getInfrastructure } from "../di-container.js";
 import { log } from "../infrastructure/logger.js";
 import type {
   EntryCriteria,
@@ -21,6 +21,8 @@ import type {
 } from "../types/strategy.js";
 
 export const LEGACY_LP_STRATEGIES = ["bid_ask", "spot", "curve", "any", "mixed"] as const;
+
+const infra = () => getInfrastructure();
 
 export function isLegacyLpStrategy(value: string | null | undefined): value is LPStrategyType {
   return !!value && (LEGACY_LP_STRATEGIES as readonly string[]).includes(value);
@@ -256,15 +258,17 @@ function rowToStrategy(row: StrategyRow): Strategy {
   };
 }
 
-function ensureDefaultStrategies(): void {
-  const existingIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
+async function ensureDefaultStrategies(): Promise<void> {
+  const existingIds = (await infra().db.query<{ id: string }>("SELECT id FROM strategies")).map(
+    (r) => r.id
+  );
   let added = false;
 
   for (const [id, strategy] of Object.entries(DEFAULT_STRATEGIES)) {
     if (!existingIds.includes(id)) {
       const now = new Date().toISOString();
       try {
-        run(
+        await infra().db.run(
           `INSERT INTO strategies (id, name, author, lp_strategy, token_criteria_json, entry_criteria_json,
             range_criteria_json, exit_criteria_json, best_for, raw, added_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -289,9 +293,11 @@ function ensureDefaultStrategies(): void {
   }
 
   // Set active strategy if none set
-  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+  const activeRow = await infra().db.get<{ active_id: string }>(
+    "SELECT active_id FROM active_strategy LIMIT 1"
+  );
   if (!activeRow?.active_id && added) {
-    run(
+    await infra().db.run(
       "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
       "custom_ratio_spot"
     );
@@ -312,10 +318,10 @@ let _defaultsEnsured = false;
  * Called automatically by tool handlers on first use.
  * This avoids race conditions with database setup.
  */
-function ensureDefaultsLazy(): void {
+async function ensureDefaultsLazy(): Promise<void> {
   if (_defaultsEnsured) return;
   _defaultsEnsured = true;
-  ensureDefaultStrategies();
+  await ensureDefaultStrategies();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -325,7 +331,7 @@ function ensureDefaultsLazy(): void {
 /**
  * Add or update a strategy.
  */
-export function addStrategy({
+export async function addStrategy({
   id,
   name,
   author = "unknown",
@@ -336,8 +342,8 @@ export function addStrategy({
   exit = {},
   best_for = "",
   raw = "",
-}: AddStrategyParams): AddStrategyResult {
-  ensureDefaultsLazy();
+}: AddStrategyParams): Promise<AddStrategyResult> {
+  await ensureDefaultsLazy();
   if (!id || !name) return { error: "id and name are required" };
 
   // Slugify id
@@ -349,7 +355,7 @@ export function addStrategy({
   const now = new Date().toISOString();
 
   try {
-    run(
+    await infra().db.run(
       `INSERT OR REPLACE INTO strategies (id, name, author, lp_strategy, token_criteria_json,
         entry_criteria_json, range_criteria_json, exit_criteria_json, best_for, raw, added_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT added_at FROM strategies WHERE id = ?), ?), ?)`,
@@ -369,9 +375,14 @@ export function addStrategy({
     );
 
     // Auto-set as active if it's the first strategy
-    const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+    const activeRow = await infra().db.get<{ active_id: string }>(
+      "SELECT active_id FROM active_strategy LIMIT 1"
+    );
     if (!activeRow?.active_id) {
-      run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", slug);
+      await infra().db.run(
+        "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+        slug
+      );
     }
 
     const isActive = activeRow?.active_id === slug || !activeRow?.active_id;
@@ -387,10 +398,14 @@ export function addStrategy({
 /**
  * List all strategies with a summary.
  */
-export function listStrategies(): ListStrategiesResult {
-  ensureDefaultsLazy();
-  const rows = query<StrategyRow>("SELECT * FROM strategies ORDER BY added_at DESC");
-  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+export async function listStrategies(): Promise<ListStrategiesResult> {
+  await ensureDefaultsLazy();
+  const rows = await infra().db.query<StrategyRow>(
+    "SELECT * FROM strategies ORDER BY added_at DESC"
+  );
+  const activeRow = await infra().db.get<{ active_id: string }>(
+    "SELECT active_id FROM active_strategy LIMIT 1"
+  );
 
   const strategies = rows.map((s) => ({
     id: s.id,
@@ -411,30 +426,39 @@ export function listStrategies(): ListStrategiesResult {
 /**
  * Get full details of a strategy.
  */
-export function getStrategy({ id }: { id: string }): GetStrategyResult {
-  ensureDefaultsLazy();
+export async function getStrategy({ id }: { id: string }): Promise<GetStrategyResult> {
+  await ensureDefaultsLazy();
   if (!id) return { error: "id required" };
 
-  const row = get<StrategyRow>("SELECT * FROM strategies WHERE id = ?", id);
+  const row = await infra().db.get<StrategyRow>("SELECT * FROM strategies WHERE id = ?", id);
   if (!row) {
-    const allIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
+    const allIds = (await infra().db.query<{ id: string }>("SELECT id FROM strategies")).map(
+      (r) => r.id
+    );
     return { error: `Strategy "${id}" not found`, available: allIds };
   }
 
-  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+  const activeRow = await infra().db.get<{ active_id: string }>(
+    "SELECT active_id FROM active_strategy LIMIT 1"
+  );
   return { ...rowToStrategy(row), is_active: activeRow?.active_id === id };
 }
 
 /**
  * Set the active strategy.
  */
-export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResult {
-  ensureDefaultsLazy();
+export async function setActiveStrategy({ id }: { id: string }): Promise<SetActiveStrategyResult> {
+  await ensureDefaultsLazy();
   if (!id) return { error: "id required" };
 
-  const row = get<{ name: string }>("SELECT name FROM strategies WHERE id = ?", id);
+  const row = await infra().db.get<{ name: string }>(
+    "SELECT name FROM strategies WHERE id = ?",
+    id
+  );
   if (!row) {
-    const allIds = query<{ id: string }>("SELECT id FROM strategies").map((r) => r.id);
+    const allIds = (await infra().db.query<{ id: string }>("SELECT id FROM strategies")).map(
+      (r) => r.id
+    );
     return { error: `Strategy "${id}" not found`, available: allIds };
   }
 
@@ -449,7 +473,10 @@ export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResu
   }
 
   try {
-    run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", id);
+    await infra().db.run(
+      "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+      id
+    );
     log("strategy", `Active strategy set to: ${row.name}`);
     return { active: id, name: row.name };
   } catch (err) {
@@ -461,26 +488,34 @@ export function setActiveStrategy({ id }: { id: string }): SetActiveStrategyResu
 /**
  * Remove a strategy.
  */
-export function removeStrategy({ id }: { id: string }): RemoveStrategyResult {
-  ensureDefaultsLazy();
+export async function removeStrategy({ id }: { id: string }): Promise<RemoveStrategyResult> {
+  await ensureDefaultsLazy();
   if (!id) return { error: "id required" };
 
-  const row = get<{ name: string }>("SELECT name FROM strategies WHERE id = ?", id);
+  const row = await infra().db.get<{ name: string }>(
+    "SELECT name FROM strategies WHERE id = ?",
+    id
+  );
   if (!row) return { error: `Strategy "${id}" not found` };
 
   try {
-    run("DELETE FROM strategies WHERE id = ?", id);
+    await infra().db.run("DELETE FROM strategies WHERE id = ?", id);
 
     // Update active if needed
-    const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+    const activeRow = await infra().db.get<{ active_id: string }>(
+      "SELECT active_id FROM active_strategy LIMIT 1"
+    );
     let newActive: string | null = activeRow?.active_id || null;
 
     if (activeRow?.active_id === id) {
-      const remaining = query<{ id: string }>(
+      const remaining = await infra().db.query<{ id: string }>(
         "SELECT id FROM strategies ORDER BY added_at DESC LIMIT 1"
       );
       newActive = remaining[0]?.id || null;
-      run("INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)", newActive);
+      await infra().db.run(
+        "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+        newActive
+      );
     }
 
     log("strategy", `Strategy removed: ${row.name}`);
@@ -494,12 +529,17 @@ export function removeStrategy({ id }: { id: string }): RemoveStrategyResult {
 /**
  * Get the currently active strategy.
  */
-export function getActiveStrategy(): Strategy | null {
-  ensureDefaultsLazy();
-  const activeRow = get<{ active_id: string }>("SELECT active_id FROM active_strategy LIMIT 1");
+export async function getActiveStrategy(): Promise<Strategy | null> {
+  await ensureDefaultsLazy();
+  const activeRow = await infra().db.get<{ active_id: string }>(
+    "SELECT active_id FROM active_strategy LIMIT 1"
+  );
   if (!activeRow?.active_id) return null;
 
-  const row = get<StrategyRow>("SELECT * FROM strategies WHERE id = ?", activeRow.active_id);
+  const row = await infra().db.get<StrategyRow>(
+    "SELECT * FROM strategies WHERE id = ?",
+    activeRow.active_id
+  );
   if (!row) return null;
 
   return rowToStrategy(row);
@@ -512,15 +552,17 @@ export function getActiveStrategy(): Strategy | null {
  * 1. Active strategy if it matches the requested lp_strategy
  * 2. Most recently updated strategy matching the lp_strategy
  */
-export function getStrategyByLpStrategy(lpStrategy: LPStrategyType): Strategy | null {
-  ensureDefaultsLazy();
+export async function getStrategyByLpStrategy(
+  lpStrategy: LPStrategyType
+): Promise<Strategy | null> {
+  await ensureDefaultsLazy();
 
-  const active = getActiveStrategy();
+  const active = await getActiveStrategy();
   if (active?.lp_strategy === lpStrategy) {
     return active;
   }
 
-  const row = get<StrategyRow>(
+  const row = await infra().db.get<StrategyRow>(
     "SELECT * FROM strategies WHERE lp_strategy = ? ORDER BY updated_at DESC, added_at DESC LIMIT 1",
     lpStrategy
   );
@@ -531,9 +573,9 @@ export function getStrategyByLpStrategy(lpStrategy: LPStrategyType): Strategy | 
 /**
  * Clear all strategies (useful for testing).
  */
-export function clearStrategies(): { cleared: number } {
-  const result = run("DELETE FROM strategies");
-  run("DELETE FROM active_strategy");
+export async function clearStrategies(): Promise<{ cleared: number }> {
+  const result = await infra().db.run("DELETE FROM strategies");
+  await infra().db.run("DELETE FROM active_strategy");
   log("strategy", `Cleared ${result.changes} strategies`);
   return { cleared: Number(result.changes) };
 }
