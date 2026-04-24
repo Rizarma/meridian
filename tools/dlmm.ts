@@ -820,7 +820,7 @@ export async function getMyPositions({
       const positions: EnrichedPosition[] = [];
       for (const pool of pools) {
         for (const positionAddress of pool.listPositions || []) {
-            const tracked = await getTrackedPosition(positionAddress);
+          const tracked = await getTrackedPosition(positionAddress);
           const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 
           // Mark OOR state and capture the effective out_of_range_since to
@@ -1089,7 +1089,7 @@ export async function claimFees({ position_address }: ClaimParams): Promise<Clai
     };
   }
 
-    const tracked = await getTrackedPosition(position_address);
+  const tracked = await getTrackedPosition(position_address);
   if (tracked?.closed) {
     return { success: false, error: "Position already closed — fees were claimed during close" };
   }
@@ -1190,7 +1190,7 @@ export async function withdrawLiquidity({
     };
   }
 
-    const tracked = await getTrackedPosition(position_address);
+  const tracked = await getTrackedPosition(position_address);
   if (tracked?.closed) {
     return { success: false, error: "Position already closed — no liquidity to withdraw" };
   }
@@ -1473,7 +1473,7 @@ export async function closePosition({
     };
   }
 
-    const tracked = await getTrackedPosition(position_address);
+  const tracked = await getTrackedPosition(position_address);
 
   try {
     log("close", `Closing position: ${position_address}`);

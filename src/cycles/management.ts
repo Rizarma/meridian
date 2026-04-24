@@ -295,7 +295,10 @@ export async function runManagementCycle(
       const exitMap = new Map<string, ExitAction>();
       for (const p of positionData) {
         const trackedP = trackedCache.get(p.position) ?? null;
-        if (!p.pnl_pct_suspicious && (await queuePeakConfirmation(p.position, p.pnl_pct, trackedP))) {
+        if (
+          !p.pnl_pct_suspicious &&
+          (await queuePeakConfirmation(p.position, p.pnl_pct, trackedP))
+        ) {
           schedulePeakConfirmation(p.position);
         }
         const exit = await updatePnlAndCheckExits(

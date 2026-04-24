@@ -329,7 +329,7 @@ export async function handleRestore(args: string[]): Promise<void> {
   log(`Restoring from backup: ${backupName}...`);
 
   // First reset the database
-    const resetResult = await resetDatabase(true);
+  const resetResult = await resetDatabase(true);
   if (!resetResult.success) {
     die(`Failed to reset database: ${resetResult.message}`);
   }

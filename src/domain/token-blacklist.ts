@@ -46,9 +46,14 @@ export async function isBlacklisted(mint: string): Promise<boolean> {
 /**
  * Get a single blacklist entry.
  */
-export async function getBlacklistEntry(mint: string): Promise<(BlacklistEntry & { mint: string }) | null> {
+export async function getBlacklistEntry(
+  mint: string
+): Promise<(BlacklistEntry & { mint: string }) | null> {
   if (!mint) return null;
-  const row = await infra().db.get<TokenBlacklistRow>("SELECT * FROM token_blacklist WHERE mint = ?", mint);
+  const row = await infra().db.get<TokenBlacklistRow>(
+    "SELECT * FROM token_blacklist WHERE mint = ?",
+    mint
+  );
   if (!row) return null;
   return {
     mint: row.mint,
@@ -165,7 +170,9 @@ export async function listBlacklist(): Promise<{
   count: number;
   blacklist: Array<BlacklistEntry & { mint: string }>;
 }> {
-  const rows = await infra().db.query<TokenBlacklistRow>("SELECT * FROM token_blacklist ORDER BY added_at DESC");
+  const rows = await infra().db.query<TokenBlacklistRow>(
+    "SELECT * FROM token_blacklist ORDER BY added_at DESC"
+  );
 
   const entries = rows.map((row) => ({
     mint: row.mint,

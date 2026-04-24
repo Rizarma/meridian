@@ -45,9 +45,14 @@ export async function isDevBlocked(devWallet: string): Promise<boolean> {
 /**
  * Get a single blocked dev entry.
  */
-export async function getBlockedDevEntry(wallet: string): Promise<(BlockedDev & { wallet: string }) | null> {
+export async function getBlockedDevEntry(
+  wallet: string
+): Promise<(BlockedDev & { wallet: string }) | null> {
   if (!wallet) return null;
-  const row = await infra().db.get<DevBlocklistRow>("SELECT * FROM dev_blocklist WHERE wallet = ?", wallet);
+  const row = await infra().db.get<DevBlocklistRow>(
+    "SELECT * FROM dev_blocklist WHERE wallet = ?",
+    wallet
+  );
   if (!row) return null;
   return {
     wallet: row.wallet,
@@ -171,7 +176,9 @@ export async function listBlockedDevs(): Promise<{
   count: number;
   blocked_devs: Array<BlockedDev & { wallet: string }>;
 }> {
-  const rows = await infra().db.query<DevBlocklistRow>("SELECT * FROM dev_blocklist ORDER BY added_at DESC");
+  const rows = await infra().db.query<DevBlocklistRow>(
+    "SELECT * FROM dev_blocklist ORDER BY added_at DESC"
+  );
 
   const entries = rows.map((row) => ({
     wallet: row.wallet,

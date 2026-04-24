@@ -63,7 +63,10 @@ export async function addSmartWallet({
   }
 
   // Check if already exists
-  const existing = await infra().db.get<SmartWalletRow>("SELECT * FROM smart_wallets WHERE address = ?", address);
+  const existing = await infra().db.get<SmartWalletRow>(
+    "SELECT * FROM smart_wallets WHERE address = ?",
+    address
+  );
   if (existing) {
     return { success: false, error: `Already tracked as "${existing.name}"` };
   }
@@ -98,8 +101,13 @@ export async function addSmartWallet({
 /**
  * Remove a tracked smart wallet.
  */
-export async function removeSmartWallet({ address }: RemoveSmartWalletInput): Promise<SmartWalletResult> {
-  const existing = await infra().db.get<SmartWalletRow>("SELECT * FROM smart_wallets WHERE address = ?", address);
+export async function removeSmartWallet({
+  address,
+}: RemoveSmartWalletInput): Promise<SmartWalletResult> {
+  const existing = await infra().db.get<SmartWalletRow>(
+    "SELECT * FROM smart_wallets WHERE address = ?",
+    address
+  );
   if (!existing) {
     return { success: false, error: "Wallet not found" };
   }
@@ -119,7 +127,9 @@ export async function removeSmartWallet({ address }: RemoveSmartWalletInput): Pr
  * List all tracked smart wallets.
  */
 export async function listSmartWallets(): Promise<SmartWalletList> {
-  const rows = await infra().db.query<SmartWalletRow>("SELECT * FROM smart_wallets ORDER BY added_at DESC");
+  const rows = await infra().db.query<SmartWalletRow>(
+    "SELECT * FROM smart_wallets ORDER BY added_at DESC"
+  );
   const wallets = rows.map((row) => ({
     name: row.name,
     address: row.address,

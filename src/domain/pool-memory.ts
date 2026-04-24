@@ -150,7 +150,10 @@ async function getOrCreatePool(poolAddress: string, name?: string): Promise<Pool
       trimmedAddress,
       name || trimmedAddress.slice(0, 8)
     );
-    pool = (await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", trimmedAddress))!;
+    pool = (await infra().db.get<PoolRow>(
+      "SELECT * FROM pools WHERE address = ?",
+      trimmedAddress
+    ))!;
     log("pool-memory", `Created new pool record: ${trimmedAddress.slice(0, 8)}`);
   }
 
@@ -199,7 +202,10 @@ async function getPoolSnapshots(poolAddress: string): Promise<PoolSnapshot[]> {
  * Record a closed deploy into the database.
  * Called automatically from recordPerformance() in lessons.js.
  */
-export async function recordPoolDeploy(poolAddress: string, deployData: PoolMemoryInput): Promise<void> {
+export async function recordPoolDeploy(
+  poolAddress: string,
+  deployData: PoolMemoryInput
+): Promise<void> {
   if (!poolAddress) return;
 
   await infra().db.transaction(async () => {
@@ -473,10 +479,12 @@ export async function getKnownPoolAddresses(addresses: string[]): Promise<Set<st
  * Get all pool deploys across all pools, joined with pool metadata.
  * Used by hive-mind sync to upload anonymized deploy history.
  */
-export async function getAllPoolDeploys(): Promise<(PoolDeployRow & {
-  pool_name: string | null;
-  base_mint: string | null;
-})[]> {
+export async function getAllPoolDeploys(): Promise<
+  (PoolDeployRow & {
+    pool_name: string | null;
+    base_mint: string | null;
+  })[]
+> {
   return infra().db.query<PoolDeployRow & { pool_name: string | null; base_mint: string | null }>(
     `SELECT pd.*, p.name as pool_name, p.base_mint
      FROM pool_deploys pd
@@ -557,7 +565,11 @@ export async function getBaseMintsOnCooldown(baseMints: string[]): Promise<Set<s
  * Tool handler: get_pool_memory
  * Returns deploy history and summary for a pool.
  */
-export async function getPoolMemory({ pool_address }: { pool_address: string }): Promise<PoolMemoryResult> {
+export async function getPoolMemory({
+  pool_address,
+}: {
+  pool_address: string;
+}): Promise<PoolMemoryResult> {
   if (!pool_address) return { error: "pool_address required", pool_address: "", known: false };
 
   const pool = await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", pool_address);
@@ -636,11 +648,15 @@ export async function getPoolMemory({ pool_address }: { pool_address: string }):
  * @param poolAddress - The pool address to look up
  * @param preloadedPool - Optional pre-fetched pool row to skip redundant DB read
  */
-export async function recallForPool(poolAddress: string, preloadedPool?: PoolRow | null): Promise<string | null> {
+export async function recallForPool(
+  poolAddress: string,
+  preloadedPool?: PoolRow | null
+): Promise<string | null> {
   if (!poolAddress) return null;
 
   const pool =
-    preloadedPool ?? (await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress));
+    preloadedPool ??
+    (await infra().db.get<PoolRow>("SELECT * FROM pools WHERE address = ?", poolAddress));
   if (!pool) return null;
 
   const deploys = await infra().db.query<PoolDeployRow>(
