@@ -1,19 +1,32 @@
+// biome-ignore lint/correctness/noUnresolvedImports: postgres module exports Sql type correctly at runtime
 import postgres, { type Sql } from "postgres";
-import { BaseAdapter } from "./base.js";
 import { postgresDialect } from "../dialect.js";
-import type { DatabaseOperations } from "../types.js";
 import { initPostgresSchema } from "../migrations/postgres/init.js";
+import type { DatabaseOperations } from "../types.js";
+import { BaseAdapter } from "./base.js";
+
+type TransactionClient = Sql & {
+  savepoint<T>(cb: () => T | Promise<T>): Promise<T>;
+  savepoint<T>(name: string, cb: () => T | Promise<T>): Promise<T>;
+};
 
 export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
-  private sql: Sql | null = null;
+  private sql: Sql | TransactionClient | null = null;
   private connectionString: string;
+  private readonly ownsConnection: boolean;
 
-  constructor(connectionString: string) {
+  constructor(connectionString: string, sql?: Sql | TransactionClient | null) {
     super(postgresDialect);
     this.connectionString = connectionString;
+    this.sql = sql ?? null;
+    this.ownsConnection = sql == null;
   }
 
   async init(): Promise<void> {
+    if (this.sql) {
+      return;
+    }
+
     this.sql = postgres(this.connectionString, {
       ssl: "require",
       max: 10,
@@ -30,10 +43,11 @@ export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
   }
 
   async close(): Promise<void> {
-    if (this.sql) {
+    if (this.sql && this.ownsConnection && "end" in this.sql) {
       await this.sql.end();
-      this.sql = null;
     }
+
+    this.sql = null;
   }
 
   async query<T>(sql: string, ...params: unknown[]): Promise<T[]> {
@@ -66,11 +80,20 @@ export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
     };
   }
 
-  async transaction<T>(fn: () => Promise<T> | T): Promise<T> {
+  async transaction<T>(fn: (tx: DatabaseOperations) => Promise<T> | T): Promise<T> {
     if (!this.sql) throw new Error("Database not initialized");
 
-    return await this.sql.begin(async () => {
-      return await fn();
+    if ("savepoint" in this.sql) {
+      return await this.sql.savepoint(async () => {
+        const txAdapter = new PostgresAdapter(this.connectionString, this.sql as TransactionClient);
+        return await fn(txAdapter);
+      });
+    }
+
+    const rootSql = this.sql as Sql;
+    return await rootSql.begin(async () => {
+      const txAdapter = new PostgresAdapter(this.connectionString, rootSql as TransactionClient);
+      return await fn(txAdapter);
     });
   }
 }

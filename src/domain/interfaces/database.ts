@@ -9,8 +9,10 @@ export interface DatabaseOperations {
   run(
     sql: string,
     ...params: unknown[]
-  ): Promise<{ lastInsertRowid: number | bigint; changes: number }> | { lastInsertRowid: number | bigint; changes: number };
-  transaction<T>(callback: () => Promise<T> | T): Promise<T> | T;
+  ):
+    | Promise<{ lastInsertRowid: string | number | bigint; changes: number }>
+    | { lastInsertRowid: string | number | bigint; changes: number };
+  transaction<T>(callback: (tx: DatabaseOperations) => Promise<T> | T): Promise<T> | T;
 }
 
 export interface JsonOperations {

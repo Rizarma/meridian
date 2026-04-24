@@ -6,6 +6,8 @@ import { BaseAdapter } from "./base.js";
 export class SqliteAdapter extends BaseAdapter implements DatabaseOperations {
   private db: Database.Database | null = null;
   private dbPath: string;
+  private transactionDepth = 0;
+  private savepointId = 0;
 
   constructor(dbPath: string = "./meridian.db") {
     super(sqliteDialect);
@@ -36,7 +38,10 @@ export class SqliteAdapter extends BaseAdapter implements DatabaseOperations {
     return Promise.resolve(this.db.prepare(sql).get(...params) as T | undefined);
   }
 
-  async run(sql: string, ...params: unknown[]): Promise<{
+  async run(
+    sql: string,
+    ...params: unknown[]
+  ): Promise<{
     lastInsertRowid: number | bigint;
     changes: number;
   }> {
@@ -49,19 +54,59 @@ export class SqliteAdapter extends BaseAdapter implements DatabaseOperations {
     });
   }
 
-  async transaction<T>(fn: () => Promise<T> | T): Promise<T> {
+  async transaction<T>(fn: (tx: DatabaseOperations) => Promise<T> | T): Promise<T> {
     if (!this.db) throw new Error("Database not initialized");
 
-    // better-sqlite3's transaction() doesn't support async functions
-    // Use manual BEGIN/COMMIT/ROLLBACK for async support
-    this.db.exec("BEGIN");
+    const isOuterTransaction = this.transactionDepth === 0;
+    const savepointName = `sp_${++this.savepointId}`;
+
+    if (isOuterTransaction) {
+      this.db.exec("BEGIN");
+    } else {
+      this.db.exec(`SAVEPOINT ${savepointName}`);
+    }
+
+    this.transactionDepth++;
     try {
-      const result = await fn();
-      this.db.exec("COMMIT");
+      const result = await fn(this);
+
+      try {
+        if (isOuterTransaction) {
+          this.db.exec("COMMIT");
+        } else {
+          this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        }
+      } catch (commitError) {
+        try {
+          if (isOuterTransaction) {
+            this.db.exec("ROLLBACK");
+          } else {
+            this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+            this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+          }
+        } catch {
+          // Ignore rollback errors; the original commit error is more useful.
+        }
+
+        throw commitError;
+      }
+
       return result;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      try {
+        if (isOuterTransaction) {
+          this.db.exec("ROLLBACK");
+        } else {
+          this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+          this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        }
+      } catch {
+        // Ignore rollback errors; rethrow the original failure.
+      }
+
       throw error;
+    } finally {
+      this.transactionDepth--;
     }
   }
 }
