@@ -31,17 +31,40 @@ async function addColumnIfNotExists(
  * This handles schema updates for databases created before column additions.
  */
 async function runMigrations(sql: Sql): Promise<void> {
-  // Add out_of_range_since to position_state (added in schema v2)
-  await addColumnIfNotExists(sql, "position_state", "out_of_range_since", "TIMESTAMP");
+  // === positions table columns ===
+  await addColumnIfNotExists(sql, "positions", "closed", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfNotExists(sql, "positions", "closed_at", "TIMESTAMP");
+  await addColumnIfNotExists(sql, "positions", "pool_name", "TEXT");
+  await addColumnIfNotExists(sql, "positions", "amount_sol", "REAL");
+  await addColumnIfNotExists(sql, "positions", "pnl_pct", "REAL");
+  await addColumnIfNotExists(sql, "positions", "pnl_usd", "REAL");
+  await addColumnIfNotExists(sql, "positions", "fees_earned_usd", "REAL");
+  await addColumnIfNotExists(sql, "positions", "initial_value_usd", "REAL");
+  await addColumnIfNotExists(sql, "positions", "final_value_usd", "REAL");
+  await addColumnIfNotExists(sql, "positions", "minutes_held", "INTEGER");
+  await addColumnIfNotExists(sql, "positions", "close_reason", "TEXT");
+  await addColumnIfNotExists(sql, "positions", "trailing_state", "TEXT");
+  await addColumnIfNotExists(sql, "positions", "notes", "TEXT");
+  await addColumnIfNotExists(sql, "positions", "data_json", "TEXT");
+  await addColumnIfNotExists(sql, "positions", "created_at", "TIMESTAMP NOT NULL DEFAULT NOW()");
+  await addColumnIfNotExists(sql, "positions", "updated_at", "TIMESTAMP NOT NULL DEFAULT NOW()");
 
-  // Add other missing columns that may have been added after initial deployment
+  // === position_state table columns ===
+  await addColumnIfNotExists(sql, "position_state", "out_of_range_since", "TIMESTAMP");
   await addColumnIfNotExists(sql, "position_state", "last_claim_at", "TIMESTAMP");
   await addColumnIfNotExists(sql, "position_state", "total_fees_claimed_usd", "REAL DEFAULT 0");
   await addColumnIfNotExists(sql, "position_state", "rebalance_count", "INTEGER DEFAULT 0");
+  await addColumnIfNotExists(sql, "position_state", "closed", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfNotExists(sql, "position_state", "closed_at", "TIMESTAMP");
   await addColumnIfNotExists(sql, "position_state", "peak_pnl_pct", "REAL DEFAULT 0");
   await addColumnIfNotExists(sql, "position_state", "pending_peak_pnl_pct", "REAL");
   await addColumnIfNotExists(sql, "position_state", "pending_peak_started_at", "TIMESTAMP");
-  await addColumnIfNotExists(sql, "position_state", "trailing_active", "INTEGER DEFAULT 0");
+  await addColumnIfNotExists(
+    sql,
+    "position_state",
+    "trailing_active",
+    "INTEGER NOT NULL DEFAULT 0"
+  );
   await addColumnIfNotExists(sql, "position_state", "instruction", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "pending_trailing_current_pnl_pct", "REAL");
   await addColumnIfNotExists(sql, "position_state", "pending_trailing_peak_pnl_pct", "REAL");
@@ -49,6 +72,19 @@ async function runMigrations(sql: Sql): Promise<void> {
   await addColumnIfNotExists(sql, "position_state", "pending_trailing_started_at", "TIMESTAMP");
   await addColumnIfNotExists(sql, "position_state", "confirmed_trailing_exit_reason", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "confirmed_trailing_exit_until", "TIMESTAMP");
+  await addColumnIfNotExists(sql, "position_state", "pool_name", "TEXT");
+  await addColumnIfNotExists(sql, "position_state", "strategy_config", "TEXT");
+  await addColumnIfNotExists(sql, "position_state", "bin_range", "TEXT");
+  await addColumnIfNotExists(sql, "position_state", "amount_x", "REAL");
+  await addColumnIfNotExists(sql, "position_state", "active_bin_at_deploy", "INTEGER");
+  await addColumnIfNotExists(sql, "position_state", "bin_step", "INTEGER");
+  await addColumnIfNotExists(sql, "position_state", "volatility", "REAL");
+  await addColumnIfNotExists(sql, "position_state", "fee_tvl_ratio", "REAL");
+  await addColumnIfNotExists(sql, "position_state", "initial_fee_tvl_24h", "REAL");
+  await addColumnIfNotExists(sql, "position_state", "organic_score", "INTEGER");
+  await addColumnIfNotExists(sql, "position_state", "initial_value_usd", "REAL");
+  await addColumnIfNotExists(sql, "position_state", "signal_snapshot", "TEXT");
+  await addColumnIfNotExists(sql, "position_state", "notes", "TEXT");
 }
 
 export async function initPostgresSchema(connectionString: string): Promise<void> {
