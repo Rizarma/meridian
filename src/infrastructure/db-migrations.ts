@@ -7,10 +7,71 @@ import { initThresholdEvolutionTables } from "./db-threshold-evolution.js";
 import { log } from "./logger.js";
 
 /**
+ * Migration status constants.
+ * Used for the migration_log table status column.
+ */
+const MIGRATION_STATUS = {
+  STARTED: "started",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  ROLLED_BACK: "rolled_back",
+} as const;
+
+/**
+ * Result of a JSON backup operation.
+ */
+type BackupResult = {
+  success: boolean;
+  message: string;
+  backupDir?: string;
+  files?: string[];
+};
+
+/**
+ * Detect which database backend to use based on environment variables.
+ * Priority: DATABASE_BACKEND env > DATABASE_URL presence > default "sqlite"
+ */
+function detectDatabaseBackend(): "sqlite" | "postgres" {
+  if (process.env.DATABASE_BACKEND === "postgres") return "postgres";
+  if (process.env.DATABASE_BACKEND === "sqlite") return "sqlite";
+  return process.env.DATABASE_URL ? "postgres" : "sqlite";
+}
+
+/**
  * Current schema version.
  * Increment this when making schema changes.
  */
 export const SCHEMA_VERSION = 1;
+
+/**
+ * Result of reading and parsing a JSON file.
+ * Returns `{ ok: true, data }` on success or `{ ok: false, error }` on failure.
+ */
+type ReadJsonResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/**
+ * Safely read and parse a JSON file, returning a discriminated union
+ * instead of throwing on I/O or parse errors.
+ */
+function readJsonFile<T>(filePath: string): ReadJsonResult<T> {
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const data = JSON.parse(content) as T;
+    return { ok: true, data };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Failed to parse ${filePath}: ${errorMessage}` };
+  }
+}
+
+/**
+ * Common return shape for migration functions that may encounter parse failures.
+ */
+type MigrationResult = {
+  success: boolean;
+  message: string;
+  parseFailures?: string[];
+};
 
 /**
  * Initialize the database schema.
@@ -574,7 +635,7 @@ export async function needsJsonImport(): Promise<boolean> {
  * Migrate data from existing JSON files to SQLite.
  * Keeps JSON files as backups.
  */
-export async function migrateFromJson(): Promise<{ success: boolean; message: string }> {
+export async function migrateFromJson(): Promise<MigrationResult> {
   // Create pre-migration backup
   const backupResult = await createJsonBackups();
   if (!backupResult.success) {
@@ -593,6 +654,9 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
     "SELECT id FROM migration_log ORDER BY id DESC LIMIT 1"
   )[0]?.id;
 
+  // Track JSON parse failures across all files
+  const parseFailures: string[] = [];
+
   try {
     return transaction(() => {
       let migratedLessons = 0;
@@ -607,11 +671,9 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
 
       // Migrate lessons.json
       if (fs.existsSync(LESSONS_FILE)) {
-        try {
-          const lessonsData = JSON.parse(fs.readFileSync(LESSONS_FILE, "utf-8")) as {
-            lessons?: unknown[];
-            performance?: unknown[];
-          };
+        const result = readJsonFile<{ lessons?: unknown[]; performance?: unknown[] }>(LESSONS_FILE);
+        if (result.ok) {
+          const lessonsData = result.data;
 
           // Migrate lessons
           if (Array.isArray(lessonsData.lessons)) {
@@ -673,20 +735,17 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
               migratedPerformance++;
             }
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${LESSONS_FILE}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+        } else {
+          log("migration_error", result.error);
+          parseFailures.push(result.error);
         }
       }
 
       // Migrate pool-memory.json
       if (fs.existsSync(POOL_MEMORY_FILE)) {
-        try {
-          const poolData = JSON.parse(fs.readFileSync(POOL_MEMORY_FILE, "utf-8")) as Record<
-            string,
-            unknown
-          >;
+        const result = readJsonFile<Record<string, unknown>>(POOL_MEMORY_FILE);
+        if (result.ok) {
+          const poolData = result.data;
 
           for (const [poolAddress, poolInfo] of Object.entries(poolData)) {
             const p = poolInfo as Record<string, unknown>;
@@ -785,20 +844,18 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
               }
             }
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${POOL_MEMORY_FILE}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+        } else {
+          log("migration_error", result.error);
+          parseFailures.push(result.error);
         }
       }
 
       // Migrate state.json positions if exists
       const stateFile = path.join(PROJECT_ROOT, "state.json");
       if (fs.existsSync(stateFile)) {
-        try {
-          const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
-            positions?: Record<string, unknown>;
-          };
+        const result = readJsonFile<{ positions?: Record<string, unknown> }>(stateFile);
+        if (result.ok) {
+          const stateData = result.data;
 
           if (stateData.positions) {
             for (const [positionAddress, posData] of Object.entries(stateData.positions)) {
@@ -845,21 +902,21 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
               migratedPositions++;
             }
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${stateFile}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+        } else {
+          log("migration_error", result.error);
+          parseFailures.push(result.error);
         }
       }
 
       // Migrate signal-weights.json if exists
       const signalWeightsFile = path.join(PROJECT_ROOT, "signal-weights.json");
       if (fs.existsSync(signalWeightsFile)) {
-        try {
-          const signalData = JSON.parse(fs.readFileSync(signalWeightsFile, "utf-8")) as {
-            weights?: Record<string, number>;
-            history?: unknown[];
-          };
+        const result = readJsonFile<{
+          weights?: Record<string, number>;
+          history?: unknown[];
+        }>(signalWeightsFile);
+        if (result.ok) {
+          const signalData = result.data;
 
           if (signalData.weights) {
             for (const [signal, weight] of Object.entries(signalData.weights)) {
@@ -898,10 +955,9 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
               }
             }
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log("migration_error", `Failed to parse ${signalWeightsFile}: ${errorMessage}`);
-          // Continue with other files, don't fail entire migration
+        } else {
+          log("migration_error", result.error);
+          parseFailures.push(result.error);
         }
       }
 
@@ -929,18 +985,32 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
         );
       }
 
-      // Update migration log to completed
+      // Determine final status: any parse failure makes the whole migration a failure
+      const hasParseFailures = parseFailures.length > 0;
+      const migrationStatus = hasParseFailures ? "failed" : "completed";
+
+      // Update migration log
       if (migrationLogId) {
         run(
           `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
-          "completed",
+          migrationStatus,
           migrationLogId
         );
       }
 
+      const statsMessage = `${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions${orphanedMessage}`;
+
+      if (hasParseFailures) {
+        return {
+          success: false,
+          message: `Migration failed: ${statsMessage} — ${parseFailures.length} file(s) failed to parse: ${parseFailures.join("; ")}`,
+          parseFailures,
+        };
+      }
+
       return {
         success: true,
-        message: `Migration complete: ${migratedLessons} lessons, ${migratedPools} pools, ${migratedDeploys} deploys, ${migratedSnapshots} snapshots, ${migratedPerformance} performance records, ${migratedPositions} positions${orphanedMessage}`,
+        message: `Migration complete: ${statsMessage}`,
       };
     });
   } catch (error) {
@@ -957,6 +1027,7 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
     return {
       success: false,
       message: `Migration failed: ${errorMessage}`,
+      ...(parseFailures.length > 0 && { parseFailures }),
     };
   }
 }
@@ -965,7 +1036,7 @@ export async function migrateFromJson(): Promise<{ success: boolean; message: st
  * Create JSON backups of current database state.
  * Useful for creating backups after migration or periodically.
  */
-export async function createJsonBackups(): Promise<{ success: boolean; message: string }> {
+export async function createJsonBackups(): Promise<BackupResult> {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupDir = path.join(PROJECT_ROOT, "backups");
@@ -973,6 +1044,8 @@ export async function createJsonBackups(): Promise<{ success: boolean; message: 
     if (!fs.existsSync(backupDir)) {
       fs.mkdirSync(backupDir, { recursive: true });
     }
+
+    const files: string[] = [];
 
     // Backup lessons
     const lessons = query<{
@@ -995,10 +1068,9 @@ export async function createJsonBackups(): Promise<{ success: boolean; message: 
       exported_at: new Date().toISOString(),
     };
 
-    fs.writeFileSync(
-      path.join(backupDir, `lessons-backup-${timestamp}.json`),
-      JSON.stringify(lessonsBackup, null, 2)
-    );
+    const lessonsFile = `lessons-backup-${timestamp}.json`;
+    fs.writeFileSync(path.join(backupDir, lessonsFile), JSON.stringify(lessonsBackup, null, 2));
+    files.push(lessonsFile);
 
     // Backup pools with deploys
     const pools = query<{
@@ -1060,14 +1132,15 @@ export async function createJsonBackups(): Promise<{ success: boolean; message: 
       };
     }
 
-    fs.writeFileSync(
-      path.join(backupDir, `pool-memory-backup-${timestamp}.json`),
-      JSON.stringify(poolsBackup, null, 2)
-    );
+    const poolsFile = `pool-memory-backup-${timestamp}.json`;
+    fs.writeFileSync(path.join(backupDir, poolsFile), JSON.stringify(poolsBackup, null, 2));
+    files.push(poolsFile);
 
     return {
       success: true,
-      message: `Backups created in ${backupDir}: lessons-backup-${timestamp}.json, pool-memory-backup-${timestamp}.json`,
+      backupDir,
+      files,
+      message: `Backups created in ${backupDir}: ${files.join(", ")}`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1079,6 +1152,30 @@ export async function createJsonBackups(): Promise<{ success: boolean; message: 
 }
 
 /**
+ * Tables touched by JSON → SQLite migration.
+ * Used by rollbackMigration() to ensure a complete cleanup.
+ * Safe from SQL injection because all values are hardcoded literals.
+ */
+const JSON_MIGRATION_TABLES = [
+  "signal_weight_history",
+  "signal_weights",
+  "position_events",
+  "position_snapshots",
+  "pool_deploys",
+  "performance",
+  "lessons",
+  "positions",
+  "pools",
+  "position_state",
+  "position_state_events",
+  "portfolio_history",
+  "strategies",
+  "active_strategy",
+  "threshold_suggestions",
+  "threshold_history",
+] as const;
+
+/**
  * Rollback a failed or partial migration.
  * Finds the most recent failed or started migration and restores from backup.
  */
@@ -1087,8 +1184,10 @@ export async function rollbackMigration(): Promise<{ success: boolean; message: 
     // Find the most recent failed or started migration
     const migrationRow = query<{ id: number; backup_path: string; status: string }>(
       `SELECT id, backup_path, status FROM migration_log
-       WHERE status IN ('failed', 'started')
-       ORDER BY started_at DESC LIMIT 1`
+       WHERE status IN (?, ?)
+       ORDER BY started_at DESC LIMIT 1`,
+      MIGRATION_STATUS.FAILED,
+      MIGRATION_STATUS.STARTED
     )[0];
 
     if (!migrationRow) {
@@ -1100,20 +1199,17 @@ export async function rollbackMigration(): Promise<{ success: boolean; message: 
 
     // Clear any partially migrated data
     // Delete data that may have been partially inserted during the failed migration
-    run("DELETE FROM signal_weight_history");
-    run("DELETE FROM signal_weights");
-    run("DELETE FROM position_events");
-    run("DELETE FROM position_snapshots");
-    run("DELETE FROM pool_deploys");
-    run("DELETE FROM performance");
-    run("DELETE FROM lessons");
-    run("DELETE FROM positions");
-    run("DELETE FROM pools");
+    // Wrapped in a transaction so the rollback is atomic
+    transaction(() => {
+      for (const table of JSON_MIGRATION_TABLES) {
+        run(`DELETE FROM ${table}`);
+      }
+    });
 
     // Update migration log status to rolled_back
     run(
       `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
-      "rolled_back",
+      MIGRATION_STATUS.ROLLED_BACK,
       migrationRow.id
     );
 
@@ -1242,14 +1338,7 @@ export async function runMigrations(): Promise<{
   message: string;
   details: string[];
 }> {
-  const backend =
-    process.env.DATABASE_BACKEND === "postgres"
-      ? "postgres"
-      : process.env.DATABASE_BACKEND === "sqlite"
-        ? "sqlite"
-        : process.env.DATABASE_URL
-          ? "postgres"
-          : "sqlite";
+  const backend = detectDatabaseBackend();
 
   const details: string[] = [];
 
@@ -1344,7 +1433,7 @@ export async function runMigrations(): Promise<{
 /**
  * Full database setup - initialize schema and migrate if needed.
  */
-export async function setupDatabase(): Promise<{ success: boolean; message: string }> {
+export async function setupDatabase(): Promise<MigrationResult> {
   try {
     const backend =
       process.env.DATABASE_BACKEND === "postgres"
@@ -1370,6 +1459,12 @@ export async function setupDatabase(): Promise<{ success: boolean; message: stri
 
     if (await needsJsonImport()) {
       const result = await migrateFromJson();
+      if (result.parseFailures && result.parseFailures.length > 0) {
+        log(
+          "db_setup",
+          `Migration completed with parse failures: ${result.parseFailures.join("; ")}`
+        );
+      }
       return result;
     }
 
