@@ -916,6 +916,7 @@ export async function startREPL(deps: REPLDependencies): Promise<void> {
   console.log = (...args: unknown[]) => {
     logUpdate.clear(); // Clear status bar before writing
     _outputSinceLastStatus = true;
+    // CodeQL[js/clear-text-logging]: UI wrapper only - passes through to original console.log without interception
     originalLog.apply(console, args);
     drawStatusBar(deps); // Redraw after writing
   };
