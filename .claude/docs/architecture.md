@@ -2,6 +2,47 @@
 
 Autonomous DLMM liquidity provider agent for Meteora pools on Solana. Runs two cron-driven agent cycles (screener, manager) over a ReAct loop, with a shared tool registry and middleware pipeline.
 
+## Project Structure
+
+```
+src/
+  agent/         # ReAct agent loop, prompts, intent parsing
+  cycles/        # Screening and management cycles
+  domain/        # Business logic (pools, signals, exit rules)
+  infrastructure/# External services (DB, Telegram, RPC)
+  config/        # Configuration and constants
+  utils/         # Shared utilities
+  types/         # TypeScript type definitions
+tools/           # Tool handlers (auto-discovered)
+test/            # Phase-numbered integration tests
+```
+
+## Key Files
+
+- `src/index.ts` - Entry point
+- `src/agent/agent.ts` - ReAct agent loop
+- `src/cycles/screening.ts` - Pool screening logic
+- `src/cycles/management.ts` - Position management
+- `user-config.json` - User preferences (models, thresholds, strategy)
+- `.env` - Secrets (wallet key, API keys)
+
+## Data Storage
+
+All data is stored in a SQLite database (`meridian.db`) by default. Override location with `MERIDIAN_ROOT` env var.
+
+**Main tables:**
+- `positions` - Open position tracking with bin ranges, OOR status, notes
+- `position_snapshots` - Historical position state snapshots
+- `position_events` - Deploy, close, claim events
+- `pools` - Pool metadata and deploy history
+- `lessons` - Learned rules from closed positions
+- `performance` - Closed position performance records
+- `signal_weights` - Darwinian signal weighting data
+- `threshold_suggestions` - Pending threshold evolution suggestions (V2)
+- `threshold_history` - Applied threshold changes history
+
+Legacy JSON files (`state.json`, `lessons.json`, `pool-memory.json`, `signal-weights.json`) are kept as backups but no longer actively used.
+
 ## Source layout
 
 ```

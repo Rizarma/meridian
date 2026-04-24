@@ -52,24 +52,37 @@ Handled directly in the telegram bot poller (`src/infrastructure/telegram.ts`), 
 
 ## Portfolio Sync
 
-Cross-machine learning feature that fetches your historical LP positions from Meteora API.
-
-**Use case**: When you switch machines (local → VPS), your lesson history doesn't transfer. This feature fetches your on-chain LP history to bootstrap learning on fresh deployments.
+Cross-machine learning feature that fetches your historical LP positions from Meteora API. Useful when running the bot on multiple machines or bootstrapping a fresh deployment with your existing LP history.
 
 **Configuration** (`user-config.json`):
 ```json
 "portfolioSync": {
-  "enabled": false,              // Set true to enable
-  "daysBack": 90,               // How many days of history to fetch
-  "minPositionsForLesson": 3,   // Min positions on a pool before generating lessons
-  "refreshIntervalMinutes": 30  // Background refresh interval
+  "enabled": true,
+  "daysBack": 90,
+  "minPositionsForLesson": 3,
+  "refreshIntervalMinutes": 30,
+  "bootstrapThreshold": {
+    "minUniquePools": 3,
+    "requireRiskLessons": true,
+    "maxLessonAgeDays": 7
+  }
 }
 ```
 
-**When enabled**:
-- On startup (if < 5 lessons): Fetches full portfolio, generates "pool character" lessons
-- On position close: Syncs that pool's data for performance comparison
-- Generates lessons like: "RELIABLE_POOL: SOL-USDC consistently yields 8-12%"
+**What it does**:
+- Fetches your wallet's historical LP positions from Meteora (90 days back)
+- Generates lessons about pool reliability and performance
+- Enables performance comparison (your results vs pool average)
+- Bootstraps learning on fresh deployments when lesson coverage is insufficient
+- Refreshes data automatically for active pools every `refreshIntervalMinutes`
+
+**How bootstrap works**:
+The bot checks lesson coverage on startup. It fetches portfolio history only if:
+- You have fewer than 3 unique pools in lessons, OR
+- You have no lessons from losing positions (risk awareness), OR
+- Your newest lesson is older than 7 days
+
+This ensures you get historical context when you need it, not just when lesson count is low.
 
 **Default**: `enabled: false` — feature is opt-in, zero impact when disabled.
 
