@@ -11,11 +11,11 @@ import type { DeployParams, DeployResult } from "../../src/types/dlmm.js";
 import { recordActivity } from "../../src/utils/health-check.js";
 import { getWallet } from "../../src/utils/wallet.js";
 import { normalizeMint } from "../wallet.js";
-import { simulateAndSend } from "./transactions.js";
 import { getPool } from "./pool-cache.js";
 import { invalidatePositionsCache } from "./positions-cache.js";
-import { toLamports, fetchTokenDecimals } from "./token-amounts.js";
-import { resolveStrategy, calculateBinRange, isWideRange } from "./strategy.js";
+import { calculateBinRange, isWideRange, resolveStrategy } from "./strategy.js";
+import { fetchTokenDecimals, toLamports } from "./token-amounts.js";
+import { simulateAndSend } from "./transactions.js";
 
 // Default slippage in basis points (1000 bps = 10%)
 const DEFAULT_SLIPPAGE_BPS = 1000;
@@ -56,7 +56,7 @@ export async function deployPosition({
   }
 
   if (process.env.DRY_RUN === "true") {
-    const totalBins = activeBinsBelow + activeBinsAbove;
+    const _totalBins = activeBinsBelow + activeBinsAbove;
     return {
       dry_run: true,
       would_deploy: {

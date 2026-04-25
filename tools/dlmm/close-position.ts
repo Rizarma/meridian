@@ -16,10 +16,10 @@ import { fetchWithRetry } from "../../src/utils/retry.js";
 import { isObject } from "../../src/utils/validation.js";
 import { getWallet } from "../../src/utils/wallet.js";
 import { normalizeMint } from "../wallet.js";
-import { getMyPositions } from "./positions.js";
 import { deletePoolFromCache, getPool } from "./pool-cache.js";
-import { findPositionInCache, invalidatePositionsCache } from "./positions-cache.js";
 import { lookupPoolForPosition } from "./position-sdk.js";
+import { getMyPositions } from "./positions.js";
+import { findPositionInCache, invalidatePositionsCache } from "./positions-cache.js";
 import { simulateAndSend } from "./transactions.js";
 
 export async function closePosition({

@@ -2,9 +2,9 @@
 // Get active bin for a DLMM pool — pure read operation
 
 import type BN from "bn.js";
-import { getPool } from "./pool-cache.js";
-import { normalizeMint } from "../wallet.js";
 import type { ActiveBinParams, ActiveBinResult } from "../../src/types/dlmm.js";
+import { normalizeMint } from "../wallet.js";
+import { getPool } from "./pool-cache.js";
 
 /**
  * Get the active bin for a DLMM pool

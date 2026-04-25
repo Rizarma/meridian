@@ -1,59 +1,42 @@
-import { registerTool } from "./registry.js";
-
-// Phase A+B: Import from extracted modules
-import {
-  stopPoolCache,
-  clearPoolCache,
-  deletePoolFromCache,
-  invalidatePositionsCache,
-  lookupPoolForPosition,
-  simulateAndSend,
-  simulateAndSendMany,
-  deriveOpenPnlPct,
-  fetchDlmmPnlForPool,
-} from "./dlmm/index.js";
-
 // Phase D: Read-only tools (extracted to dedicated modules)
 import { getActiveBin } from "./dlmm/active-bin.js";
-import { searchPools } from "./dlmm/search-pools.js";
-import { getPositionPnl, getMyPositions, getWalletPositions } from "./dlmm/positions.js";
-
+import { addLiquidity } from "./dlmm/add-liquidity.js";
 // Phase E: Lower-risk write tools (extracted to dedicated modules)
 import { claimFees } from "./dlmm/claim-fees.js";
-import { addLiquidity } from "./dlmm/add-liquidity.js";
-import { withdrawLiquidity } from "./dlmm/withdraw-liquidity.js";
-
-// Phase F: Deploy position (extracted to dedicated module)
-import { deployPosition } from "./dlmm/deploy-position.js";
-
 // Phase G: Close position (extracted to dedicated module)
 import { closePosition } from "./dlmm/close-position.js";
+// Phase F: Deploy position (extracted to dedicated module)
+import { deployPosition } from "./dlmm/deploy-position.js";
+import { getMyPositions, getPositionPnl, getWalletPositions } from "./dlmm/positions.js";
+import { searchPools } from "./dlmm/search-pools.js";
+import { withdrawLiquidity } from "./dlmm/withdraw-liquidity.js";
+import { registerTool } from "./registry.js";
 
 // Re-export from modules for backward compatibility
 export {
-  stopPoolCache,
-  clearPoolCache,
-  deletePoolFromCache,
-  invalidatePositionsCache,
-  deriveOpenPnlPct,
-  fetchDlmmPnlForPool,
-  lookupPoolForPosition,
-  simulateAndSend,
-  simulateAndSendMany,
-  // Phase D: Read-only tools
-  getActiveBin,
-  searchPools,
-  getPositionPnl,
-  getMyPositions,
-  getWalletPositions,
+  addLiquidity,
   // Phase E: Lower-risk write tools
   claimFees,
-  addLiquidity,
-  withdrawLiquidity,
-  // Phase F: Deploy position
-  deployPosition,
+  clearPoolCache,
   // Phase G: Close position
   closePosition,
+  deletePoolFromCache,
+  // Phase F: Deploy position
+  deployPosition,
+  deriveOpenPnlPct,
+  fetchDlmmPnlForPool,
+  // Phase D: Read-only tools
+  getActiveBin,
+  getMyPositions,
+  getPositionPnl,
+  getWalletPositions,
+  invalidatePositionsCache,
+  lookupPoolForPosition,
+  searchPools,
+  simulateAndSend,
+  simulateAndSendMany,
+  stopPoolCache,
+  withdrawLiquidity,
 } from "./dlmm/index.js";
 
 // ─── Tool Registrations ────────────────────────────────────────

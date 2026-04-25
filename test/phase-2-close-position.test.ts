@@ -214,7 +214,7 @@ describe("closePosition claim failure handling", () => {
     const closeTxHashes: string[] = [];
 
     // Step 1: Claim fails
-    let claimSucceeded = false;
+    const claimSucceeded = false;
     try {
       // Simulate claim failure
       throw new Error("No claimable fees");

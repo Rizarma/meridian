@@ -46,7 +46,13 @@ describe("deploy-position dry-run contract", () => {
       if (isDryRun) {
         return {
           dry_run: true,
-          would_deploy: { pool_address: "test", strategy: "spot", amount_x: 0, amount_y: 0.5, wide_range: false },
+          would_deploy: {
+            pool_address: "test",
+            strategy: "spot",
+            amount_x: 0,
+            amount_y: 0.5,
+            wide_range: false,
+          },
           message: "DRY RUN — no transaction sent",
         };
       }
@@ -70,8 +76,8 @@ describe("deploy-position dry-run contract", () => {
     };
 
     expect(computeWideRange(20, 20)).toBe(false); // 40 bins — standard
-    expect(computeWideRange(35, 35)).toBe(true);  // 70 bins — wide
-    expect(computeWideRange(50, 50)).toBe(true);  // 100 bins — wide
+    expect(computeWideRange(35, 35)).toBe(true); // 70 bins — wide
+    expect(computeWideRange(50, 50)).toBe(true); // 100 bins — wide
   });
 });
 
@@ -117,7 +123,8 @@ describe("deploy-position failure contract", () => {
     // Documents the base-mint cooldown check (lines 131-139 in dlmm.ts)
     const result = {
       success: false,
-      error: "Token on cooldown — recently closed out-of-range too many times. Try a different token.",
+      error:
+        "Token on cooldown — recently closed out-of-range too many times. Try a different token.",
     };
 
     expect(result.success).toBe(false);
@@ -245,7 +252,7 @@ describe("deploy-position wide-range sequencing", () => {
     const firstAddIdx = executionOrder.findIndex((entry) => entry.startsWith("add:"));
 
     expect(lastCreateIdx).toBe(1); // create-tx-2 at index 1
-    expect(firstAddIdx).toBe(2);   // add-tx-1 at index 2
+    expect(firstAddIdx).toBe(2); // add-tx-1 at index 2
     expect(lastCreateIdx < firstAddIdx).toBe(true);
     expect(executionOrder.length).toBe(5); // 2 create + 3 add
   });
