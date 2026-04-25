@@ -82,3 +82,8 @@ export {
   getMyPositions,
   getWalletPositions,
 } from "./positions.js";
+
+// Phase E: Lower-Risk Write Tools
+export { claimFees } from "./claim-fees.js";
+export { addLiquidity } from "./add-liquidity.js";
+export { withdrawLiquidity } from "./withdraw-liquidity.js";
