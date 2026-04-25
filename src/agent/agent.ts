@@ -1,4 +1,3 @@
-import { jsonrepair } from "jsonrepair";
 import OpenAI from "openai";
 import type {
   ChatCompletion,
@@ -36,6 +35,7 @@ import {
   validateWithdrawLiquidityParams,
 } from "../utils/validation-args.js";
 import { INTENTS } from "./intent.js";
+import { repairToolCallJson, safeParseArgs } from "./json-repair.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
 
@@ -260,23 +260,12 @@ export async function agentLoop(
       // Repair malformed tool call JSON before pushing to history —
       // the API rejects the next request if history contains invalid JSON args
       if (msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.function?.arguments) {
-            try {
-              JSON.parse(tc.function.arguments);
-            } catch {
-              try {
-                tc.function.arguments = JSON.stringify(
-                  JSON.parse(jsonrepair(tc.function.arguments))
-                );
-                log("warn", `Repaired malformed JSON args for ${tc.function.name}`);
-              } catch {
-                tc.function.arguments = "{}";
-                log("error", `Could not repair JSON args for ${tc.function.name} — cleared to {}`);
-              }
-            }
-          }
-        }
+        repairToolCallJson(
+          msg.tool_calls as Array<{
+            id: string;
+            function: { name: string; arguments: string };
+          }>
+        );
       }
       messages.push(msg);
 
@@ -521,26 +510,4 @@ export async function agentLoop(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Safely parse tool call arguments with JSON repair fallback.
- * Extracted from the tool execution loop to avoid duplication.
- */
-function safeParseArgs(raw: string, functionName: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    try {
-      const repaired = jsonrepair(raw);
-      if (repaired.includes("__proto__") || repaired.includes("constructor")) {
-        throw new Error("Potentially malicious JSON detected");
-      }
-      log("warn", `Repaired malformed JSON args for ${functionName}`);
-      return JSON.parse(repaired) as Record<string, unknown>;
-    } catch (parseError) {
-      log("error", `Failed to parse args for ${functionName}: ${getErrorMessage(parseError)}`);
-      return {};
-    }
-  }
 }
