@@ -235,6 +235,28 @@ Use to find a lesson ID before pinning/unpinning, or to audit what the agent cur
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_lessons",
+      description: `Search saved lessons by keyword.
+Use when the user asks whether the agent has learned something about a token, pool, strategy, risk pattern, or past behavior.`,
+      parameters: {
+        type: "object",
+        properties: {
+          keyword: {
+            type: "string",
+            description: "Keyword or phrase to search for in saved lessons",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of lessons to return. Default 20.",
+          },
+        },
+        required: ["keyword"],
+      },
+    },
+  },
 
   {
     type: "function",

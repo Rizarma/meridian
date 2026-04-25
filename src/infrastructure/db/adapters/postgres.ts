@@ -5,9 +5,14 @@ import { initPostgresSchema } from "../migrations/postgres/init.js";
 import type { DatabaseOperations } from "../types.js";
 import { BaseAdapter } from "./base.js";
 
+/**
+ * Represents a connection within an active transaction.
+ * Extends Sql with savepoint support (for nested transactions).
+ */
 type TransactionClient = Sql & {
-  savepoint<T>(cb: () => T | Promise<T>): Promise<T>;
-  savepoint<T>(name: string, cb: () => T | Promise<T>): Promise<T>;
+  begin<T>(cb: (tx: TransactionClient) => T | Promise<T>): Promise<T>;
+  savepoint<T>(cb: (tx: TransactionClient) => T | Promise<T>): Promise<T>;
+  savepoint<T>(name: string, cb: (tx: TransactionClient) => T | Promise<T>): Promise<T>;
 };
 
 export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
@@ -84,15 +89,16 @@ export class PostgresAdapter extends BaseAdapter implements DatabaseOperations {
     if (!this.sql) throw new Error("Database not initialized");
 
     if ("savepoint" in this.sql) {
-      return await this.sql.savepoint(async () => {
-        const txAdapter = new PostgresAdapter(this.connectionString, this.sql as TransactionClient);
+      const parentTx = this.sql as TransactionClient;
+      return await parentTx.savepoint(async (savepointSql: TransactionClient) => {
+        const txAdapter = new PostgresAdapter(this.connectionString, savepointSql);
         return await fn(txAdapter);
       });
     }
 
-    const rootSql = this.sql as Sql;
-    return await rootSql.begin(async () => {
-      const txAdapter = new PostgresAdapter(this.connectionString, rootSql as TransactionClient);
+    const rootSql = this.sql as TransactionClient;
+    return await rootSql.begin<T>(async (txSql: TransactionClient) => {
+      const txAdapter = new PostgresAdapter(this.connectionString, txSql);
       return await fn(txAdapter);
     });
   }

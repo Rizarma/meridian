@@ -29,7 +29,7 @@
     "tech-debt:ci": "leasot src/**/*.ts test/**/*.ts tools/**/*.ts --reporter markdown --skip-unsupported",
     "duplicates": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters console",
     "duplicates:ci": "jscpd --min-lines 5 --min-tokens 25 src/ test/ tools/ --reporters json",
-    "arch-check": "depcruise src --config .dependency-cruiser.js",
+    "arch-check": "depcruise src --config .dependency-cruiser.cjs",
     "prepare": "pnpm run build && husky",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/patch-anchor.js",

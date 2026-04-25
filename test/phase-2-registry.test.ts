@@ -12,6 +12,7 @@
  */
 
 import type { ToolName } from "../src/types/executor.js";
+import { tools as toolDefinitions } from "../tools/definitions/index.js";
 import {
   clearRegistry,
   getAllToolNames,
@@ -167,9 +168,30 @@ describe("Registry Integration - Real Tool Loading", () => {
     // STRICT COUNT CHECK: Must match total expected tools
     // tools/: 3 + 8 + 2 + 3 + 2 + 1 = 19
     // root: 4 + 5 + 2 + 3 + 3 + 6 + 1 + 1 = 25
-    // Total: 44 tools
+    // Total: 44 tools + 1 (search_lessons) = 45 tools
     // ═══════════════════════════════════════════════════════════════════════
-    expect(allNames.length).toBe(44);
+    expect(allNames.length).toBe(45);
+  });
+});
+
+describe("Registry/Definition Parity", () => {
+  test("all registered tools have OpenAI definitions", () => {
+    const registered = getAllToolNames();
+    const defined = new Set(toolDefinitions.map((tool) => tool.function.name));
+
+    const missingDefinitions = registered.filter((name) => !defined.has(name)).sort();
+
+    expect(missingDefinitions.join(", ")).toBe("");
+  });
+
+  test("all OpenAI definitions have registered handlers", () => {
+    const registered = new Set<string>(getAllToolNames());
+    const undefinedHandlers = toolDefinitions
+      .map((tool) => tool.function.name)
+      .filter((name) => !registered.has(name))
+      .sort();
+
+    expect(undefinedHandlers.join(", ")).toBe("");
   });
 });
 

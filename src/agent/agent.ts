@@ -432,7 +432,7 @@ export async function agentLoop(
             }
 
             await onToolStart?.({ name: functionName, args: functionArgs, step });
-            const result = await executeTool(functionName, functionArgs);
+            const result = await executeTool(functionName, functionArgs, agentType);
             await onToolFinish?.({
               name: functionName,
               args: functionArgs,

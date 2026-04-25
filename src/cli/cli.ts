@@ -562,16 +562,20 @@ switch (subcommand as CLISubcommand) {
 
     const { executeTool } = await import("../../tools/executor.js");
     out(
-      await executeTool("deploy_position", {
-        pool_address: typedFlags.pool,
-        amount_y: typedFlags.amount ? parseFloat(typedFlags.amount) : undefined,
-        amount_x: amountX,
-        strategy: typedFlags.strategy,
-        single_sided_x: argv.includes("--single-sided-x"),
-        bins_below: typedFlags["bins-below"] ? parseInt(typedFlags["bins-below"], 10) : undefined,
-        bins_above: typedFlags["bins-above"] ? parseInt(typedFlags["bins-above"], 10) : undefined,
-        allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
-      })
+      await executeTool(
+        "deploy_position",
+        {
+          pool_address: typedFlags.pool,
+          amount_y: typedFlags.amount ? parseFloat(typedFlags.amount) : undefined,
+          amount_x: amountX,
+          strategy: typedFlags.strategy,
+          single_sided_x: argv.includes("--single-sided-x"),
+          bins_below: typedFlags["bins-below"] ? parseInt(typedFlags["bins-below"], 10) : undefined,
+          bins_above: typedFlags["bins-above"] ? parseInt(typedFlags["bins-above"], 10) : undefined,
+          allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
+        },
+        "SCREENER"
+      )
     );
     break;
   }
@@ -580,7 +584,7 @@ switch (subcommand as CLISubcommand) {
   case "claim": {
     if (!typedFlags.position) die("Usage: meridian claim --position <addr>");
     const { executeTool } = await import("../../tools/executor.js");
-    out(await executeTool("claim_fees", { position_address: typedFlags.position }));
+    out(await executeTool("claim_fees", { position_address: typedFlags.position }, "MANAGER"));
     break;
   }
 
@@ -589,10 +593,14 @@ switch (subcommand as CLISubcommand) {
     if (!typedFlags.position) die("Usage: meridian close --position <addr>");
     const { executeTool } = await import("../../tools/executor.js");
     out(
-      await executeTool("close_position", {
-        position_address: typedFlags.position,
-        skip_swap: typedFlags["skip-swap"] ?? false,
-      })
+      await executeTool(
+        "close_position",
+        {
+          position_address: typedFlags.position,
+          skip_swap: typedFlags["skip-swap"] ?? false,
+        },
+        "MANAGER"
+      )
     );
     break;
   }
@@ -603,11 +611,15 @@ switch (subcommand as CLISubcommand) {
       die("Usage: meridian swap --from <mint> --to <mint> --amount <n>");
     const { executeTool } = await import("../../tools/executor.js");
     out(
-      await executeTool("swap_token", {
-        input_mint: typedFlags.from,
-        output_mint: typedFlags.to,
-        amount: parseFloat(typedFlags.amount),
-      })
+      await executeTool(
+        "swap_token",
+        {
+          input_mint: typedFlags.from,
+          output_mint: typedFlags.to,
+          amount: parseFloat(typedFlags.amount),
+        },
+        "MANAGER"
+      )
     );
     break;
   }
@@ -647,7 +659,11 @@ switch (subcommand as CLISubcommand) {
       }
       const { executeTool } = await import("../../tools/executor.js");
       out(
-        await executeTool("update_config", { changes: { [key]: value }, reason: "CLI config set" })
+        await executeTool(
+          "update_config",
+          { changes: { [key]: value }, reason: "CLI config set" },
+          "GENERAL"
+        )
       );
     } else {
       die(`Unknown config subcommand: ${sub2}. Use: get, set`);
@@ -804,12 +820,16 @@ switch (subcommand as CLISubcommand) {
       );
     const { executeTool } = await import("../../tools/executor.js");
     out(
-      await executeTool("withdraw_liquidity", {
-        position_address: typedFlags.position,
-        pool_address: typedFlags.pool,
-        bps: typedFlags.bps ? parseInt(typedFlags.bps, 10) : 10000,
-        claim_fees: !argv.includes("--no-claim"),
-      })
+      await executeTool(
+        "withdraw_liquidity",
+        {
+          position_address: typedFlags.position,
+          pool_address: typedFlags.pool,
+          bps: typedFlags.bps ? parseInt(typedFlags.bps, 10) : 10000,
+          claim_fees: !argv.includes("--no-claim"),
+        },
+        "MANAGER"
+      )
     );
     break;
   }
@@ -822,14 +842,18 @@ switch (subcommand as CLISubcommand) {
       );
     const { executeTool } = await import("../../tools/executor.js");
     out(
-      await executeTool("add_liquidity", {
-        position_address: typedFlags.position,
-        pool_address: typedFlags.pool,
-        amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
-        amount_y: typedFlags["amount-y"] ? parseFloat(typedFlags["amount-y"]) : 0,
-        strategy: typedFlags.strategy || "spot",
-        single_sided_x: argv.includes("--single-sided-x"),
-      })
+      await executeTool(
+        "add_liquidity",
+        {
+          position_address: typedFlags.position,
+          pool_address: typedFlags.pool,
+          amount_x: typedFlags["amount-x"] ? parseFloat(typedFlags["amount-x"]) : 0,
+          amount_y: typedFlags["amount-y"] ? parseFloat(typedFlags["amount-y"]) : 0,
+          strategy: typedFlags.strategy || "spot",
+          single_sided_x: argv.includes("--single-sided-x"),
+        },
+        "MANAGER"
+      )
     );
     break;
   }

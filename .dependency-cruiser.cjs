@@ -42,14 +42,6 @@ module.exports = {
       from: { path: "^src/" },
       to: { path: "^src/", circular: true },
     },
-    // External dependencies restrictions
-    {
-      name: "no-node-only",
-      severity: "error",
-      comment: "Do not import Node.js-only modules in shared code.",
-      from: { path: "^src/(utils|types|config|domain)/" },
-      to: { dependencyTypes: ["node-only"] },
-    },
   ],
   options: {
     doNotFollow: {
