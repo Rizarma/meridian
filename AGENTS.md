@@ -35,6 +35,7 @@ pnpm check
 | `pnpm format:all` | Format all files with Biome |
 | `pnpm lint:check` | Lint changed files |
 | `pnpm test:phase0:all` | Run phase-0 safety tests |
+| `meridian db migrate` | Run database migrations (SQLite or Postgres) |
 
 ## Project Structure
 
@@ -103,6 +104,36 @@ This ensures you get historical context when you need it, not just when lesson c
 
 **Default**: Disabled (`enabled: false`)
 
+### Darwinian Signal Weighting Configuration
+
+Controls how the system learns from closed positions to adjust screening signal importance.
+
+```json
+{
+  "darwin": {
+    "windowDays": 30,              // Rolling window for performance data
+    "minSamples": 10,               // Minimum positions before recalculation
+    "weightFloor": 0.5,             // Minimum weight (prevents total suppression)
+    "weightCeiling": 2.0,           // Maximum weight (prevents over-reliance)
+
+    // NEW: Confidence-aware proportional update (default: true)
+    "useProportional": true,
+    "learningRate": 0.25,           // Speed of weight adjustment (0.1-0.5)
+    "deadband": 0.01,               // Ignore lifts smaller than this (noise filter)
+    "minConfidence": 0.5,           // Minimum confidence required to update
+    "maxMultiplierPerCycle": 3.0,   // Safety cap on single-update change
+
+    // LEGACY: Used when useProportional=false
+    "boostFactor": 1.5,             // Quartile boost multiplier
+    "decayFactor": 0.95             // Quartile decay multiplier
+  }
+}
+```
+
+**Proportional vs Quartile:**
+- **Proportional (recommended)**: Weight changes scale with predictive lift magnitude and sample confidence. Stronger signals = faster learning. Safer with low data.
+- **Quartile (legacy)**: Uniform 5% boost/decay based on ranking. Simpler but wastes learning opportunity and ignores confidence.
+
 ## Data Storage
 
 All data is stored in a SQLite database (`meridian.db`) in the project root by default. Override location with `MERIDIAN_ROOT` env var.
@@ -115,8 +146,10 @@ All data is stored in a SQLite database (`meridian.db`) in the project root by d
 - `lessons` - Learned rules from closed positions
 - `performance` - Closed position performance records
 - `signal_weights` - Darwinian signal weighting data
+- `signal_weight_history` - Historical weight changes with confidence scores
 - `threshold_suggestions` - Pending threshold evolution suggestions (V2)
 - `threshold_history` - Applied threshold changes history
+- `portfolio_history` - Cross-machine portfolio sync data from Meteora API
 
 Legacy JSON files (`state.json`, `lessons.json`, `pool-memory.json`, `signal-weights.json`) are kept as backups but no longer actively used.
 

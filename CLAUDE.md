@@ -37,6 +37,55 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 - [Features](.claude/docs/features.md) — lessons, trailing TP, SOL mode, telegram commands, hive mind, portfolio sync
 - [Known Issues](.claude/docs/known-issues.md) — intentional quirks and tech debt
 
+## Darwinian Signal Weighting Algorithm
+
+### Confidence-Aware Proportional Update (v2)
+
+When `darwin.useProportional: true` (default):
+
+```
+newWeight = oldWeight × exp(learningRate × lift × confidence)
+
+where:
+  lift = predictive strength (winMean - lossMean for numeric signals)
+  confidence = sampleCount / (sampleCount + minSamples)  // 0.5 at minSamples
+```
+
+**Key properties:**
+- Updates scale with both predictive strength AND statistical confidence
+- Low-sample signals get dampened updates (reduces noise)
+- Configurable deadband ignores tiny lifts
+- Safety caps prevent extreme single-cycle changes
+- All 10 signals can update simultaneously (not just top/bottom quartile)
+
+### Legacy Quartile Update (v1)
+
+When `darwin.useProportional: false`:
+
+```
+if signal in top quartile:   weight *= boostFactor  // default 1.5
+if signal in bottom quartile: weight *= decayFactor // default 0.95
+otherwise:                    no change
+```
+
+**Limitations:**
+- Treats weak and strong signals equally within quartiles
+- Ignores sample size / confidence
+- No updates for middle 50% of signals
+- Arbitrary boundaries at quartile edges
+
+### Migration Path
+
+Existing users automatically get proportional updates with sensible defaults. To revert to legacy behavior if issues arise:
+
+```json
+{
+  "darwin": {
+    "useProportional": false
+  }
+}
+```
+
 ## Claude Code resources
 
 - [`.claude/agents/`](.claude/agents/) — Screener and Manager agent definitions for Claude Code

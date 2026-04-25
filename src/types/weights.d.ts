@@ -23,6 +23,7 @@ export interface WeightChange {
   to: number;
   lift: number;
   action: "boosted" | "decayed";
+  confidence?: number; // 0-1 confidence score (optional for backward compat)
 }
 
 export interface WeightConfig {
@@ -32,6 +33,12 @@ export interface WeightConfig {
   decayFactor?: number;
   weightFloor?: number;
   weightCeiling?: number;
+  // Confidence-aware update (Phase 1.1)
+  learningRate?: number;
+  deadband?: number;
+  minConfidence?: number;
+  useProportional?: boolean;
+  maxMultiplierPerCycle?: number;
 }
 
 export interface LiftResult {
@@ -55,6 +62,12 @@ export interface RecalculateConfig {
     decayFactor?: number;
     weightFloor?: number;
     weightCeiling?: number;
+    // Confidence-aware update (Phase 1.1)
+    learningRate?: number;
+    deadband?: number;
+    minConfidence?: number;
+    useProportional?: boolean;
+    maxMultiplierPerCycle?: number;
   };
 }
 

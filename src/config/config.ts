@@ -223,10 +223,17 @@ export const config: Config = {
   darwin: {
     windowDays: u.darwin?.windowDays ?? 30,
     minSamples: u.darwin?.minSamples ?? 10,
+    // Legacy (keep for fallback when useProportional=false)
     boostFactor: u.darwin?.boostFactor ?? 1.5,
     decayFactor: u.darwin?.decayFactor ?? 0.95,
     weightFloor: u.darwin?.weightFloor ?? 0.5,
     weightCeiling: u.darwin?.weightCeiling ?? 2.0,
+    // Confidence-aware update (Phase 1.1)
+    learningRate: u.darwin?.learningRate ?? 0.25,
+    deadband: u.darwin?.deadband ?? 0.01,
+    minConfidence: u.darwin?.minConfidence ?? 0.5,
+    useProportional: u.darwin?.useProportional ?? true,
+    maxMultiplierPerCycle: u.darwin?.maxMultiplierPerCycle ?? 3.0,
   },
 
   // ─── Feature Flags ─────────────────────

@@ -73,6 +73,7 @@ interface SignalWeightHistoryRow {
   weight_to: number;
   lift: number | null;
   action: string | null;
+  confidence: number | null;
   window_size: number | null;
   win_count: number | null;
   loss_count: number | null;
@@ -123,7 +124,7 @@ export async function loadWeights(): Promise<SignalWeights> {
     for (const row of historyRows) {
       // Get all changes for this recalc event
       const changeRows = await infra().db.query<SignalWeightHistoryRow>(
-        `SELECT signal, weight_from, weight_to, lift, action
+        `SELECT signal, weight_from, weight_to, lift, action, confidence
          FROM signal_weight_history
          WHERE changed_at = ? AND action IS NOT NULL`,
         row.changed_at
@@ -135,6 +136,7 @@ export async function loadWeights(): Promise<SignalWeights> {
         to: c.weight_to,
         lift: c.lift ?? 0,
         action: (c.action as "boosted" | "decayed") || "boosted",
+        confidence: c.confidence ?? undefined,
       }));
 
       history.push({
@@ -188,6 +190,80 @@ export async function saveWeights(data: SignalWeights): Promise<void> {
   }
 }
 
+// ─── Confidence-Aware Helpers ────────────────────────────────────
+
+/**
+ * Calculate confidence based on sample count using smooth sigmoid.
+ * At sampleCount = minSamples, confidence = 0.5
+ * Approaches 1.0 as sample count grows.
+ */
+function calculateConfidence(sampleCount: number, minSamples: number): number {
+  if (sampleCount <= 0) return 0;
+  return sampleCount / (sampleCount + minSamples);
+}
+
+/**
+ * Count positions that have a specific signal in their snapshot.
+ */
+function countSignalSamples(
+  signal: string,
+  wins: PerformanceRecord[],
+  losses: PerformanceRecord[]
+): number {
+  const hasSignal = (p: PerformanceRecord) =>
+    p.signal_snapshot != null && p.signal_snapshot[signal] != null;
+
+  return wins.filter(hasSignal).length + losses.filter(hasSignal).length;
+}
+
+/**
+ * Calculate updated weight with confidence-aware proportional update.
+ * Returns null if update should be skipped (low confidence, deadband, etc).
+ */
+function calculateWeightUpdate(params: {
+  prev: number;
+  lift: number;
+  confidence: number;
+  learningRate: number;
+  deadband: number;
+  minConfidence: number;
+  maxMultiplierPerCycle: number;
+  weightFloor: number;
+  weightCeiling: number;
+}): number | null {
+  const {
+    prev,
+    lift,
+    confidence,
+    learningRate,
+    deadband,
+    minConfidence,
+    maxMultiplierPerCycle,
+    weightFloor,
+    weightCeiling,
+  } = params;
+
+  // Skip if confidence too low
+  if (confidence < minConfidence) return null;
+
+  // Skip if lift in deadband (likely noise)
+  if (Math.abs(lift) < deadband) return null;
+
+  // Calculate raw multiplicative update
+  const rawMultiplier = Math.exp(learningRate * lift * confidence);
+
+  // Apply safety cap to prevent extreme single-cycle changes
+  const multiplier = Math.max(
+    1 / maxMultiplierPerCycle,
+    Math.min(maxMultiplierPerCycle, rawMultiplier)
+  );
+
+  const next = prev * multiplier;
+  const clamped = Math.max(weightFloor, Math.min(weightCeiling, next));
+
+  return Math.round(clamped * 1000) / 1000;
+}
+
 // ─── Core Algorithm ──────────────────────────────────────────────
 
 interface RecalculateResult {
@@ -212,12 +288,10 @@ export async function recalculateWeights(
   cfg: RecalculateConfig = {}
 ): Promise<RecalculateResult> {
   const darwin = cfg.darwin || {};
-  const windowDays = darwin.windowDays ?? 60;
+  const windowDays = darwin.windowDays ?? 30;
   const minSamples = darwin.minSamples ?? 10;
-  const boostFactor = darwin.boostFactor ?? 1.05;
-  const decayFactor = darwin.decayFactor ?? 0.95;
-  const weightFloor = darwin.weightFloor ?? 0.3;
-  const weightCeiling = darwin.weightCeiling ?? 2.5;
+  const weightFloor = darwin.weightFloor ?? 0.5;
+  const weightCeiling = darwin.weightCeiling ?? 2.0;
 
   const data = await loadWeights();
   const weights: Record<string, number> = data.weights || { ...DEFAULT_WEIGHTS };
@@ -271,37 +345,82 @@ export async function recalculateWeights(
     return { changes: [], weights, persisted: false };
   }
 
-  // Split into quartiles
-  const q1End = Math.ceil(ranked.length * 0.25);
-  const q3Start = Math.floor(ranked.length * 0.75);
-  const topQuartile = new Set(ranked.slice(0, q1End).map(([name]) => name));
-  const bottomQuartile = new Set(ranked.slice(q3Start).map(([name]) => name));
-
-  // Apply boosts and decays
+  // Algorithm selection based on useProportional flag
   const changes: WeightChange[] = [];
-  for (const [signal, lift] of ranked) {
-    const prev = weights[signal];
-    let next = prev;
 
-    if (topQuartile.has(signal)) {
-      next = Math.min(prev * boostFactor, weightCeiling);
-    } else if (bottomQuartile.has(signal)) {
-      next = Math.max(prev * decayFactor, weightFloor);
-    }
+  if (darwin.useProportional !== false) {
+    // === CONFIDENCE-AWARE PROPORTIONAL UPDATE ===
+    for (const [signal, lift] of ranked) {
+      const prev = weights[signal];
 
-    next = Math.round(next * 1000) / 1000;
+      // Count samples for this specific signal
+      const sampleCount = countSignalSamples(signal, wins, losses);
+      const confidence = calculateConfidence(sampleCount, minSamples);
 
-    if (next !== prev) {
-      const dir: "boosted" | "decayed" = next > prev ? "boosted" : "decayed";
-      changes.push({
-        signal,
-        from: prev,
-        to: next,
-        lift: Math.round(lift * 1000) / 1000,
-        action: dir,
+      const next = calculateWeightUpdate({
+        prev,
+        lift,
+        confidence,
+        learningRate: darwin.learningRate ?? 0.25,
+        deadband: darwin.deadband ?? 0.01,
+        minConfidence: darwin.minConfidence ?? 0.5,
+        maxMultiplierPerCycle: darwin.maxMultiplierPerCycle ?? 3.0,
+        weightFloor,
+        weightCeiling,
       });
-      weights[signal] = next;
-      log("signal_weights", `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)})`);
+
+      if (next !== null && next !== prev) {
+        const dir: "boosted" | "decayed" = next > prev ? "boosted" : "decayed";
+        changes.push({
+          signal,
+          from: prev,
+          to: next,
+          lift: Math.round(lift * 1000) / 1000,
+          action: dir,
+          confidence: Math.round(confidence * 1000) / 1000,
+        });
+        weights[signal] = next;
+
+        log(
+          "signal_weights",
+          `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)}, conf=${confidence.toFixed(2)}, samples=${sampleCount})`
+        );
+      }
+    }
+  } else {
+    // === LEGACY QUARTILE FALLBACK ===
+    const q1End = Math.ceil(ranked.length * 0.25);
+    const q3Start = Math.floor(ranked.length * 0.75);
+    const topQuartile = new Set(ranked.slice(0, q1End).map(([name]) => name));
+    const bottomQuartile = new Set(ranked.slice(q3Start).map(([name]) => name));
+
+    for (const [signal, lift] of ranked) {
+      const prev = weights[signal];
+      let next = prev;
+
+      if (topQuartile.has(signal)) {
+        next = Math.min(prev * (darwin.boostFactor ?? 1.5), weightCeiling);
+      } else if (bottomQuartile.has(signal)) {
+        next = Math.max(prev * (darwin.decayFactor ?? 0.95), weightFloor);
+      }
+
+      next = Math.round(next * 1000) / 1000;
+
+      if (next !== prev) {
+        const dir: "boosted" | "decayed" = next > prev ? "boosted" : "decayed";
+        changes.push({
+          signal,
+          from: prev,
+          to: next,
+          lift: Math.round(lift * 1000) / 1000,
+          action: dir,
+        });
+        weights[signal] = next;
+        log(
+          "signal_weights",
+          `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)}) [legacy]`
+        );
+      }
     }
   }
 
@@ -326,13 +445,14 @@ export async function recalculateWeights(
         for (const change of changes) {
           await infra().db.run(
             `INSERT INTO signal_weight_history
-             (signal, weight_from, weight_to, lift, action, window_size, win_count, loss_count, changed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (signal, weight_from, weight_to, lift, action, confidence, window_size, win_count, loss_count, changed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             change.signal,
             change.from,
             change.to,
             change.lift,
             change.action,
+            change.confidence ?? null,
             recent.length,
             wins.length,
             losses.length,
@@ -493,6 +613,17 @@ export async function getWeightsSummary(): Promise<string> {
   const data = await loadWeights();
   const w = data.weights || {};
 
+  // Get latest confidence per signal from history
+  const latestConfidence: Record<string, number> = {};
+  if (data.history.length > 0) {
+    const latest = data.history[data.history.length - 1];
+    for (const change of latest.changes) {
+      if (change.confidence !== undefined) {
+        latestConfidence[change.signal] = change.confidence;
+      }
+    }
+  }
+
   const lines: string[] = ["Signal Weights (Darwinian — learned from past positions):"];
   const sorted = SIGNAL_NAMES.filter((s) => w[s] != null).sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
 
@@ -500,11 +631,19 @@ export async function getWeightsSummary(): Promise<string> {
     const val = w[signal] ?? 1.0;
     const label = interpretWeight(val);
     const bar = weightBar(val);
-    lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}`);
+    const conf = latestConfidence[signal];
+    const confStr = conf !== undefined ? `conf=${conf.toFixed(2)}` : "conf=N/A";
+
+    lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}  [${confStr}]`);
   }
 
   if (data.last_recalc) {
     lines.push(`\nLast recalculated: ${data.last_recalc} (${data.recalc_count || 0} total)`);
+
+    // Show which algorithm was used
+    const { config } = await import("../config/config.js");
+    const algo = config.darwin?.useProportional !== false ? "proportional" : "legacy-quartile";
+    lines.push(`Algorithm: ${algo}`);
   } else {
     lines.push("\nWeights have not been recalculated yet (using defaults).");
   }

@@ -77,7 +77,13 @@
     "boostFactor": 1.5,
     "decayFactor": 0.95,
     "weightFloor": 0.5,
-    "weightCeiling": 2.0
+    "weightCeiling": 2.0,
+    "_comment": "NEW: Confidence-aware proportional update options",
+    "useProportional": true,
+    "learningRate": 0.25,
+    "deadband": 0.01,
+    "minConfidence": 0.5,
+    "maxMultiplierPerCycle": 3.0
   },
   "portfolioSync": {
     "_comment": "Cross-machine learning via Meteora API. Fetches your historical LP data to generate lessons across deployments.",

@@ -1245,3 +1245,7 @@ export async function listBackups(): Promise<{
 
   return { backups };
 }
+
+// ─── Re-exports from db-migrations ───────────────────────────────
+
+export { runMigrations } from "./db-migrations.js";

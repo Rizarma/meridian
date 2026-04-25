@@ -86,6 +86,12 @@ export interface DarwinConfig {
   decayFactor?: number;
   weightFloor?: number;
   weightCeiling?: number;
+  // Confidence-aware update (Phase 1.1)
+  learningRate?: number; // default: 0.25 — controls update speed
+  deadband?: number; // default: 0.01 — ignore tiny lifts
+  minConfidence?: number; // default: 0.5 — minimum confidence to update
+  useProportional?: boolean; // default: true — enable new algorithm
+  maxMultiplierPerCycle?: number; // default: 3.0 — safety cap on single-update change
 }
 
 export interface FeaturesConfig {

@@ -516,10 +516,19 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `features.darwinEvolution` | `false` | Enable signal-weight evolution |
 | `darwin.windowDays` | `30` | Lookback window for performance data (days) |
 | `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
-| `darwin.boostFactor` | `1.5` | Multiplier applied to winning signals |
-| `darwin.decayFactor` | `0.95` | Multiplier applied to losing signals |
-| `darwin.weightFloor` | `0.5` | Minimum allowed weight |
-| `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
+| `darwin.weightFloor` | `0.5` | Minimum allowed weight (prevents signals from being completely ignored) |
+| `darwin.weightCeiling` | `2.0` | Maximum allowed weight (prevents over-reliance on any single signal) |
+| `darwin.useProportional` | `true` | Use confidence-aware proportional updates (recommended) instead of legacy quartile ranking |
+| `darwin.learningRate` | `0.25` | How fast weights adjust to new evidence (0.1 = slow/cautious, 0.5 = fast/aggressive) |
+| `darwin.deadband` | `0.01` | Ignore signal changes smaller than this (noise filter — prevents tiny fluctuations from triggering updates) |
+| `darwin.minConfidence` | `0.5` | Minimum statistical confidence required before updating a weight (0.5 means we need at least half the minimum samples) |
+| `darwin.maxMultiplierPerCycle` | `3.0` | Safety cap — prevents any single update from changing a weight by more than 3× (protects against extreme outliers) |
+| `darwin.boostFactor` | `1.5` | **(Legacy)** Multiplier applied to top-quartile signals when `useProportional: false` |
+| `darwin.decayFactor` | `0.95` | **(Legacy)** Multiplier applied to bottom-quartile signals when `useProportional: false` |
+
+**How it works:** The system tracks which screening signals (volume, organic score, fee/TVL ratio, etc.) actually predict profitable positions. After each closed position, it calculates how predictive each signal was and adjusts its weight. The new **proportional mode** (default) scales updates by both the signal's predictive strength AND how much data we have — so strong signals with lots of evidence get big updates, while weak or uncertain signals get small or no updates. This is much smarter than the old quartile system which treated all top-performing signals equally.
+
+**Migration tip:** Existing configs work without changes. Set `useProportional: false` only if you need to revert to the old behavior.
 
 ### Portfolio sync
 

@@ -85,6 +85,9 @@ async function runMigrations(sql: Sql): Promise<void> {
   await addColumnIfNotExists(sql, "position_state", "initial_value_usd", "REAL");
   await addColumnIfNotExists(sql, "position_state", "signal_snapshot", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "notes", "TEXT");
+
+  // === signal_weight_history table columns ===
+  await addColumnIfNotExists(sql, "signal_weight_history", "confidence", "REAL");
 }
 
 /**
