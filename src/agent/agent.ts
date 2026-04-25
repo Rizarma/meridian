@@ -6,7 +6,6 @@ import type {
 } from "openai/resources/chat/completions";
 import { tools } from "../../tools/definitions/index.js";
 import { getMyPositions } from "../../tools/dlmm.js";
-import { executeTool } from "../../tools/executor.js";
 import { getWalletBalances } from "../../tools/wallet.js";
 import { config } from "../config/config.js";
 import { FALLBACK_MODELS, MAX_REACT_STEPS, RETRY, TIME, TIMEOUT } from "../config/constants.js";
@@ -22,22 +21,15 @@ import type {
   ProviderMode,
   ToolChoice,
   ToolDefinition,
-  ToolResult,
 } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { recordActivity } from "../utils/health-check.js";
 import { rateLimiters, withRateLimit } from "../utils/rate-limiter.js";
-import {
-  validateAddLiquidityParams,
-  validateClosePositionArgs,
-  validateDeployPositionArgs,
-  validateSwapTokenArgs,
-  validateWithdrawLiquidityParams,
-} from "../utils/validation-args.js";
 import { INTENTS } from "./intent.js";
-import { repairToolCallJson, safeParseArgs } from "./json-repair.js";
-import { createBlockedResult, preCheckOncePerSession } from "./once-per-session.js";
+import { repairToolCallJson } from "./json-repair.js";
+import { preCheckOncePerSession } from "./once-per-session.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { executeToolsParallel } from "./tool-execution.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
 
 // Interface for chat completion request parameters
@@ -314,152 +306,13 @@ export async function agentLoop(
         firedOnce
       );
 
-      // Execute unblocked calls in parallel; blocked calls resolve immediately
-      const toolResults: ToolResult[] = await Promise.all(
-        preCheckedCalls.map(async (entry) => {
-          const { toolCall, functionName } = entry;
-
-          // Handle blocked once-per-session duplicates
-          if (entry.blocked) {
-            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
-            await onToolFinish?.({
-              name: functionName,
-              args: functionArgs,
-              result: {
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-              },
-              success: false,
-              step,
-            });
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: createBlockedResult(functionName),
-            };
-          }
-
-          try {
-            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
-
-            // Validate tool arguments before execution for write operations
-            const writeToolsRequiringValidation = [
-              "swap_token",
-              "deploy_position",
-              "close_position",
-              "add_liquidity",
-              "withdraw_liquidity",
-            ];
-
-            if (writeToolsRequiringValidation.includes(functionName)) {
-              let validation: { success: true; data: unknown } | { success: false; error: string };
-              switch (functionName) {
-                case "swap_token":
-                  validation = validateSwapTokenArgs(functionArgs);
-                  break;
-                case "deploy_position":
-                  validation = validateDeployPositionArgs(functionArgs);
-                  break;
-                case "close_position":
-                  validation = validateClosePositionArgs(functionArgs);
-                  break;
-                case "add_liquidity":
-                  validation = validateAddLiquidityParams(functionArgs);
-                  break;
-                case "withdraw_liquidity":
-                  validation = validateWithdrawLiquidityParams(functionArgs);
-                  break;
-                default:
-                  validation = { success: true, data: functionArgs };
-              }
-
-              if (!validation.success) {
-                log("agent", `Validation failed for ${functionName}: ${validation.error}`);
-                const errorResult = {
-                  error: `Invalid arguments: ${validation.error}`,
-                  success: false,
-                  blocked: true,
-                };
-                await onToolFinish?.({
-                  name: functionName,
-                  args: functionArgs,
-                  result: errorResult,
-                  success: false,
-                  step,
-                });
-                return {
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: JSON.stringify(errorResult),
-                };
-              }
-            }
-
-            await onToolStart?.({ name: functionName, args: functionArgs, step });
-            const result = await executeTool(functionName, functionArgs, agentType);
-            await onToolFinish?.({
-              name: functionName,
-              args: functionArgs,
-              result,
-              success: result?.success !== false && !result?.error && !result?.blocked,
-              step,
-            });
-
-            // Note: firedOnce was already set during pre-reservation for once-per-session
-            // tools. This prevents race conditions where multiple identical tool calls in
-            // the same LLM response could all pass the guard before any marks as fired.
-
-            // Special formatting for wallet balance to ensure clean Telegram output
-            if (functionName === "get_wallet_balance") {
-              const { formatWalletBalanceForTelegram } = await import(
-                "../infrastructure/telegram-formatters.js"
-              );
-              const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
-              // Unwrap the result - executeTool wraps results as { success: true, data: {...} }
-              const walletData = result.success && result.data ? result.data : result;
-              const formatted = formatWalletBalanceForTelegram(
-                walletData as unknown as import("../types/wallet.js").WalletBalances
-              );
-              // Send formatted message directly (don't escape markdown)
-              await sendMessageMarkdown(formatted);
-              // Return flag indicating output was already sent to user
-              return {
-                role: "tool" as const,
-                tool_call_id: toolCall.id,
-                content: JSON.stringify({
-                  success: true,
-                  formatted: true,
-                  output_already_sent: true, // Signal to REPL that we've handled output
-                  hint: "Wallet balance displayed above. Acknowledge briefly without repeating data.",
-                }),
-              };
-            }
-
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(result),
-            };
-          } catch (error) {
-            const errorMessage = getErrorMessage(error);
-            log("error", `Tool ${toolCall.function.name} failed: ${errorMessage}`);
-
-            // Send formatted error to Telegram so LLM doesn't generate its own markdown
-            const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
-            await sendMessageMarkdown(
-              `❌ *Error in ${toolCall.function.name}*\n\n${errorMessage}\n\n_Using cached state..._`
-            );
-
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify({
-                error: errorMessage,
-                success: false,
-              }),
-            };
-          }
-        })
+      // Execute all tool calls in parallel (blocked calls resolve immediately)
+      const toolResults = await executeToolsParallel(
+        preCheckedCalls,
+        agentType,
+        step,
+        onToolStart,
+        onToolFinish
       );
 
       messages.push(...toolResults);
