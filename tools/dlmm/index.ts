@@ -73,3 +73,12 @@ export {
   type TransactionResult,
   type SimulationResult,
 } from "./transactions.js";
+
+// Phase D: Read-Only Tools
+export { getActiveBin } from "./active-bin.js";
+export { searchPools } from "./search-pools.js";
+export {
+  getPositionPnl,
+  getMyPositions,
+  getWalletPositions,
+} from "./positions.js";
