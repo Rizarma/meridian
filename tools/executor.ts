@@ -47,7 +47,7 @@ function validateToolResult(result: unknown): ToolExecutionResult {
 export async function executeTool(
   name: string,
   args: unknown,
-  role: AgentType = "GENERAL"
+  role: AgentType
 ): Promise<ToolExecutionResult> {
   // Strip model artifacts like "<|channel|>commentary" appended to tool names
   const cleanName = name.replace(/<.*$/, "").trim();
