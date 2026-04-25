@@ -7,17 +7,28 @@ const LOG_DIR = "./logs";
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 
 // Patterns to redact from logs (PII/secrets)
+// SECURITY: These patterns must be kept in sync with test/regression/sanitize-message.test.ts
 const SENSITIVE_PATTERNS = [
-  { pattern: /[1-9A-HJ-NP-Za-km-z]{32,44}/g, replacement: "[REDACTED_KEY]" }, // Solana private keys (base58)
-  { pattern: /sk-[a-zA-Z0-9]{20,}/g, replacement: "[REDACTED_API_KEY]" }, // API keys (OpenAI format)
-  { pattern: /[a-f0-9]{32,64}/gi, replacement: "[REDACTED_HASH]" }, // Hex secrets
-  { pattern: /\b\d{10,}\b/g, replacement: "[REDACTED_NUMBER]" }, // Long numbers (potentially IDs)
+  // Solana keypair arrays: [12, 34, 56, ...] - 64+ byte arrays
+  { pattern: /\[\s*(?:\d{1,3}\s*,\s*){63,}\d{1,3}\s*\]/g, replacement: "[REDACTED_KEYPAIR]" },
+  // Solana private keys (base58) - 32-44 chars
+  { pattern: /[1-9A-HJ-NP-Za-km-z]{32,44}/g, replacement: "[REDACTED_KEY]" },
+  // API keys (OpenAI/OpenRouter format: sk-...)
+  { pattern: /sk-[a-zA-Z0-9_-]{20,}/g, replacement: "[REDACTED_API_KEY]" },
+  // Generic API tokens (32+ alphanumeric with dashes/underscores)
+  { pattern: /\b[a-zA-Z0-9_-]{32,}\b/g, replacement: "[REDACTED_TOKEN]" },
+  // Hex secrets (32-64 chars)
+  { pattern: /\b[a-f0-9]{32,64}\b/gi, replacement: "[REDACTED_HASH]" },
+  // Long numbers (10+ digits, potentially IDs)
+  { pattern: /\b\d{10,}\b/g, replacement: "[REDACTED_NUMBER]" },
 ];
 
 /**
  * Sanitize log message by redacting sensitive patterns.
+ * Exported for testing - DO NOT use outside of logging infrastructure.
+ * @internal
  */
-function sanitizeMessage(message: string): string {
+export function sanitizeMessage(message: string): string {
   let sanitized = message;
   for (const { pattern, replacement } of SENSITIVE_PATTERNS) {
     sanitized = sanitized.replace(pattern, replacement);
