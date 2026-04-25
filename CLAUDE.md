@@ -56,7 +56,7 @@ where:
 - Low-sample signals get dampened updates (reduces noise)
 - Configurable deadband ignores tiny lifts
 - Safety caps prevent extreme single-cycle changes
-- All 10 signals can update simultaneously (not just top/bottom quartile)
+- All 9 signals can update simultaneously (not just top/bottom quartile)
 
 ### Legacy Quartile Update (v1)
 

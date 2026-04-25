@@ -515,14 +515,16 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 |---|---|---|
 | `features.darwinEvolution` | `false` | Enable signal-weight evolution |
 | `darwin.windowDays` | `30` | Lookback window for performance data (days) |
-| `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwin.minSamples` | `20` | Minimum positions before recalculation |
+| `darwin.minWins` | `5` | Minimum wins for meaningful class balance (prevents learning from lopsided samples) |
+| `darwin.minLosses` | `5` | Minimum losses for meaningful class balance (prevents learning from lopsided samples) |
 | `darwin.weightFloor` | `0.5` | Minimum allowed weight (prevents signals from being completely ignored) |
 | `darwin.weightCeiling` | `2.0` | Maximum allowed weight (prevents over-reliance on any single signal) |
 | `darwin.useProportional` | `true` | Use confidence-aware proportional updates (recommended) instead of legacy quartile ranking |
-| `darwin.learningRate` | `0.25` | How fast weights adjust to new evidence (0.1 = slow/cautious, 0.5 = fast/aggressive) |
-| `darwin.deadband` | `0.01` | Ignore signal changes smaller than this (noise filter — prevents tiny fluctuations from triggering updates) |
+| `darwin.learningRate` | `0.20` | How fast weights adjust to new evidence (0.1 = slow/cautious, 0.5 = fast/aggressive) |
+| `darwin.deadband` | `0.03` | Ignore signal changes smaller than this (noise filter — prevents tiny fluctuations from triggering updates) |
 | `darwin.minConfidence` | `0.5` | Minimum statistical confidence required before updating a weight (0.5 means we need at least half the minimum samples) |
-| `darwin.maxMultiplierPerCycle` | `3.0` | Safety cap — prevents any single update from changing a weight by more than 3× (protects against extreme outliers) |
+| `darwin.maxMultiplierPerCycle` | `2.0` | Safety cap — prevents any single update from changing a weight by more than 2× (protects against extreme outliers) |
 | `darwin.boostFactor` | `1.5` | **(Legacy)** Multiplier applied to top-quartile signals when `useProportional: false` |
 | `darwin.decayFactor` | `0.95` | **(Legacy)** Multiplier applied to bottom-quartile signals when `useProportional: false` |
 
