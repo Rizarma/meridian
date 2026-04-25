@@ -29,6 +29,8 @@ export interface WeightChange {
 export interface WeightConfig {
   windowDays?: number;
   minSamples?: number;
+  minWins?: number; // NEW: minimum wins for meaningful class comparison
+  minLosses?: number; // NEW: minimum losses for meaningful class comparison
   boostFactor?: number;
   decayFactor?: number;
   weightFloor?: number;
