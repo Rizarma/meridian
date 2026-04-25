@@ -35,6 +35,7 @@ pnpm check
 | `pnpm format:all` | Format all files with Biome |
 | `pnpm lint:check` | Lint changed files |
 | `pnpm test:phase0:all` | Run phase-0 safety tests |
+| `meridian db migrate` | Run database migrations (SQLite or Postgres) |
 
 ## Project Structure
 
@@ -145,8 +146,10 @@ All data is stored in a SQLite database (`meridian.db`) in the project root by d
 - `lessons` - Learned rules from closed positions
 - `performance` - Closed position performance records
 - `signal_weights` - Darwinian signal weighting data
+- `signal_weight_history` - Historical weight changes with confidence scores
 - `threshold_suggestions` - Pending threshold evolution suggestions (V2)
 - `threshold_history` - Applied threshold changes history
+- `portfolio_history` - Cross-machine portfolio sync data from Meteora API
 
 Legacy JSON files (`state.json`, `lessons.json`, `pool-memory.json`, `signal-weights.json`) are kept as backups but no longer actively used.
 
