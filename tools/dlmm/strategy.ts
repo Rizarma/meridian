@@ -1,13 +1,13 @@
 // tools/dlmm/strategy.ts
 // Strategy mapping and validation for DLMM operations
 
-import { loadDlmmSdk, getStrategyType } from "./sdk-loader.js";
 import { config } from "../../src/config/config.js";
 import {
   getActiveStrategy,
   getStrategyByLpStrategy,
   isLegacyLpStrategy,
 } from "../../src/domain/strategy-library.js";
+import { getStrategyType, loadDlmmSdk } from "./sdk-loader.js";
 
 /** Valid strategy names */
 export type StrategyName = "spot" | "curve" | "bid_ask";
@@ -37,9 +37,7 @@ export interface ResolvedStrategy {
  */
 export function validateStrategyName(strategy: string): StrategyName | null {
   const validStrategies: StrategyName[] = ["spot", "curve", "bid_ask"];
-  return validStrategies.includes(strategy as StrategyName) 
-    ? (strategy as StrategyName) 
-    : null;
+  return validStrategies.includes(strategy as StrategyName) ? (strategy as StrategyName) : null;
 }
 
 /**
@@ -71,21 +69,18 @@ export function mapStrategyToSdkType(strategyName: string): string {
  * @param requestedStrategy - Strategy name from parameters
  * @returns Resolved strategy with config and bin ranges
  */
-export async function resolveStrategy(
-  requestedStrategy?: string
-): Promise<ResolvedStrategy> {
+export async function resolveStrategy(requestedStrategy?: string): Promise<ResolvedStrategy> {
   // Ensure SDK is loaded (needed for strategy type mapping)
   await loadDlmmSdk();
 
   const activeStrategy = requestedStrategy || config.strategy.strategy;
-  
+
   // Get strategy definition from database
   const activeStrategyDefinition = await getActiveStrategy();
-  
+
   // Handle legacy strategy names
   const resolvedStrategy =
-    isLegacyLpStrategy(activeStrategy) && 
-    activeStrategyDefinition?.lp_strategy !== activeStrategy
+    isLegacyLpStrategy(activeStrategy) && activeStrategyDefinition?.lp_strategy !== activeStrategy
       ? await getStrategyByLpStrategy(activeStrategy)
       : activeStrategyDefinition;
 

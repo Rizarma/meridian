@@ -22,20 +22,14 @@ import { getErrorMessage } from "../../src/utils/errors.js";
 import { fetchWithRetry } from "../../src/utils/retry.js";
 import { getWallet } from "../../src/utils/wallet.js";
 import { normalizeMint } from "../wallet.js";
-
+import { deriveOpenPnlPct, fetchDlmmPnlForPool, getPositionPnlFromApi } from "./pnl-api.js";
+import { getAllPositionsForWallet } from "./position-sdk.js";
 import {
   getCachedPositions,
   getPositionsInflight,
   setPositionsCache,
   setPositionsInflight,
-  findPositionInCache,
 } from "./positions-cache.js";
-import {
-  deriveOpenPnlPct,
-  fetchDlmmPnlForPool,
-  getPositionPnlFromApi,
-} from "./pnl-api.js";
-import { getAllPositionsForWallet } from "./position-sdk.js";
 
 // ─── Get Position PnL (Meteora API) ─────────────────────────────
 /**
@@ -228,7 +222,10 @@ export async function getMyPositions({
       await setPositionsCache(result);
       return result;
     } catch (error: unknown) {
-      log("positions_error", `Portfolio fetch failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+      log(
+        "positions_error",
+        `Portfolio fetch failed: ${error instanceof Error ? error.stack || error.message : String(error)}`
+      );
       return {
         wallet: walletAddress,
         total_positions: 0,
@@ -294,7 +291,11 @@ export async function getWalletPositions({
       };
     });
 
-    return { wallet: wallet_address, total_positions: enrichedPositions.length, positions: enrichedPositions };
+    return {
+      wallet: wallet_address,
+      total_positions: enrichedPositions.length,
+      positions: enrichedPositions,
+    };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     log("wallet_positions_error", message);

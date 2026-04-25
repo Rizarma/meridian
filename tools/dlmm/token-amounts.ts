@@ -1,8 +1,8 @@
 // tools/dlmm/token-amounts.ts
 // Token amount conversion utilities for DLMM operations
 
-import BN from "bn.js";
 import { PublicKey } from "@solana/web3.js";
+import BN from "bn.js";
 import { getSharedConnection } from "../../src/infrastructure/connection.js";
 
 /**
@@ -33,15 +33,13 @@ export function fromLamports(lamports: BN, decimals = 9): number {
  */
 export async function fetchTokenDecimals(mintAddress: string | PublicKey): Promise<number> {
   try {
-    const mint = typeof mintAddress === "string" 
-      ? new PublicKey(mintAddress) 
-      : mintAddress;
-    
+    const mint = typeof mintAddress === "string" ? new PublicKey(mintAddress) : mintAddress;
+
     const mintInfo = await getSharedConnection().getParsedAccountInfo(mint);
     const parsedData = mintInfo.value?.data as
       | { parsed?: { info?: { decimals?: number } } }
       | undefined;
-    
+
     return parsedData?.parsed?.info?.decimals ?? 9;
   } catch {
     return 9; // Default to 9 decimals on failure

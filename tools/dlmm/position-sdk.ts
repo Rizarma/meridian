@@ -2,11 +2,11 @@
 // Position lookup helpers using SDK
 
 import { PublicKey } from "@solana/web3.js";
-import { loadDlmmSdk } from "./sdk-loader.js";
 import { getSharedConnection } from "../../src/infrastructure/connection.js";
 import { getTrackedPosition } from "../../src/infrastructure/state.js";
-import { getPoolFromCache } from "./positions-cache.js";
 import { isObject } from "../../src/utils/validation.js";
+import { getPoolFromCache } from "./positions-cache.js";
+import { loadDlmmSdk } from "./sdk-loader.js";
 
 /**
  * Lookup pool address for a position
@@ -14,7 +14,7 @@ import { isObject } from "../../src/utils/validation.js";
  * 1. State registry (fastest)
  * 2. In-memory positions cache
  * 3. SDK scan (last resort)
- * 
+ *
  * @param positionAddress - Position address
  * @param walletAddress - Wallet address for SDK scan
  * @returns Pool address
@@ -44,26 +44,25 @@ export async function lookupPoolForPosition(
  * @returns Pool address
  * @throws Error if position not found
  */
-async function lookupPoolViaSdk(
-  positionAddress: string,
-  walletAddress: string
-): Promise<string> {
+async function lookupPoolViaSdk(positionAddress: string, walletAddress: string): Promise<string> {
   const { DLMM } = await loadDlmmSdk();
-  
+
   // SDK returns all positions grouped by pool
-  const allPositions = await (DLMM as { 
-    getAllLbPairPositionsByUser: (conn: unknown, user: PublicKey) => Promise<Record<string, unknown>> 
-  }).getAllLbPairPositionsByUser(
-    getSharedConnection(),
-    new PublicKey(walletAddress)
-  );
+  const allPositions = await (
+    DLMM as {
+      getAllLbPairPositionsByUser: (
+        conn: unknown,
+        user: PublicKey
+      ) => Promise<Record<string, unknown>>;
+    }
+  ).getAllLbPairPositionsByUser(getSharedConnection(), new PublicKey(walletAddress));
 
   for (const [lbPairKey, positionData] of Object.entries(allPositions)) {
     // Validate positionData shape before accessing
     const positions = isObject(positionData)
       ? (positionData as { lbPairPositionsData?: Array<{ publicKey: PublicKey }> })
       : undefined;
-    
+
     for (const pos of positions?.lbPairPositionsData || []) {
       if (pos.publicKey.toString() === positionAddress) {
         return lbPairKey;
@@ -83,21 +82,23 @@ export async function getAllPositionsForWallet(
   walletAddress: string
 ): Promise<Array<{ position: string; pool: string }>> {
   const { DLMM } = await loadDlmmSdk();
-  
-  const allPositions = await (DLMM as { 
-    getAllLbPairPositionsByUser: (conn: unknown, user: PublicKey) => Promise<Record<string, unknown>> 
-  }).getAllLbPairPositionsByUser(
-    getSharedConnection(),
-    new PublicKey(walletAddress)
-  );
+
+  const allPositions = await (
+    DLMM as {
+      getAllLbPairPositionsByUser: (
+        conn: unknown,
+        user: PublicKey
+      ) => Promise<Record<string, unknown>>;
+    }
+  ).getAllLbPairPositionsByUser(getSharedConnection(), new PublicKey(walletAddress));
 
   const results: Array<{ position: string; pool: string }> = [];
-  
+
   for (const [poolAddress, positionData] of Object.entries(allPositions)) {
     const positions = isObject(positionData)
       ? (positionData as { lbPairPositionsData?: Array<{ publicKey: PublicKey }> })
       : undefined;
-    
+
     for (const pos of positions?.lbPairPositionsData || []) {
       results.push({
         position: pos.publicKey.toString(),

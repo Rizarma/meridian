@@ -4,7 +4,12 @@
 // CRITICAL SAFETY INVARIANT: No transaction is ever sent unless simulation
 // succeeded first. This is the single enforcement point for that invariant.
 
-import { type Connection, type Keypair, sendAndConfirmTransaction, type Transaction } from "@solana/web3.js";
+import {
+  type Connection,
+  type Keypair,
+  sendAndConfirmTransaction,
+  type Transaction,
+} from "@solana/web3.js";
 import { log } from "../../src/infrastructure/logger.js";
 
 // ─── Types ─────────────────────────────────────────────────────

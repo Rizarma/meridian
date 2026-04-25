@@ -2,7 +2,7 @@
 // Positions cache with async mutex lock for thread safety
 
 import { Mutex } from "async-mutex";
-import type { PositionsResult, EnrichedPosition } from "../../src/types/dlmm.js";
+import type { EnrichedPosition, PositionsResult } from "../../src/types/dlmm.js";
 
 // Cache configuration
 const POSITIONS_CACHE_TTL = 5 * 60_000; // 5 minutes
@@ -77,9 +77,7 @@ export function setPositionsInflight(promise: Promise<PositionsResult> | null): 
  * @param positionAddress - Position address to find
  * @returns Enriched position or undefined
  */
-export function findPositionInCache(
-  positionAddress: string
-): EnrichedPosition | undefined {
+export function findPositionInCache(positionAddress: string): EnrichedPosition | undefined {
   return _positionsCache?.positions.find((p) => p.position === positionAddress);
 }
 

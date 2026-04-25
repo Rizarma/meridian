@@ -1,9 +1,9 @@
 // tools/dlmm/search-pools.ts
 // Search DLMM pools by query — pure read operation
 
+import type { SearchPoolsParams, SearchPoolsResult } from "../../src/types/dlmm.js";
 import { fetchWithRetry } from "../../src/utils/retry.js";
 import { isArray, isObject } from "../../src/utils/validation.js";
-import type { SearchPoolsParams, SearchPoolsResult } from "../../src/types/dlmm.js";
 
 /** Raw shape from Meteora pool search API */
 interface RawPoolSearchResult {

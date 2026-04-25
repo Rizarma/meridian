@@ -2,7 +2,7 @@
 // Lazy SDK loader for @meteora-ag/dlmm
 // Dynamic import defers loading until an actual on-chain call is needed
 
-import { type PublicKey, type Transaction } from "@solana/web3.js";
+import type { PublicKey, Transaction } from "@solana/web3.js";
 
 /** Meteora DLMM SDK pool interface */
 export interface DLMMPool {
@@ -25,7 +25,10 @@ export interface DLMMPool {
   addLiquidityByStrategy: (params: unknown) => Promise<Transaction>;
   removeLiquidity: (params: unknown) => Promise<Transaction | Transaction[]>;
   claimSwapFee: (params: { owner: PublicKey; position: unknown }) => Promise<Transaction[]>;
-  closePosition: (params: { owner: PublicKey; position: { publicKey: PublicKey } }) => Promise<Transaction>;
+  closePosition: (params: {
+    owner: PublicKey;
+    position: { publicKey: PublicKey };
+  }) => Promise<Transaction>;
   fromPricePerLamport: (price: number) => number;
 }
 
@@ -51,11 +54,14 @@ let _strategyType: StrategyTypeMap | null = null;
  * Lazy load the Meteora DLMM SDK
  * Uses dynamic import to defer loading until needed (never triggered in dry-run)
  */
-export async function loadDlmmSdk(): Promise<{ DLMM: unknown; StrategyType: StrategyTypeMap | null }> {
+export async function loadDlmmSdk(): Promise<{
+  DLMM: unknown;
+  StrategyType: StrategyTypeMap | null;
+}> {
   if (!_dlmmModule) {
     const mod = await import("@meteora-ag/dlmm");
     _dlmmModule = mod as unknown as DLMMModule;
-    _strategyType = ((mod as unknown) as { StrategyType: StrategyTypeMap }).StrategyType;
+    _strategyType = (mod as unknown as { StrategyType: StrategyTypeMap }).StrategyType;
   }
   return { DLMM: _dlmmModule.default, StrategyType: _strategyType };
 }
