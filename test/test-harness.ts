@@ -239,6 +239,7 @@ function printResults(): void {
   let failedTests = 0;
 
   for (const suite of suites) {
+    if (!suite) continue;
     console.log(`\n📦 ${suite.name}`);
     console.log("-".repeat(40));
 
@@ -281,7 +282,7 @@ export function runTests(): void {
 
   // Exit with error code if any tests failed
   const failedTests = suites.reduce(
-    (count, suite) => count + suite.tests.filter((t) => !t.passed).length,
+    (count, suite) => count + (suite?.tests.filter((t) => !t.passed).length ?? 0),
     0
   );
 
@@ -305,7 +306,7 @@ export async function runTestsAsync(): Promise<void> {
 
   // Exit with error code if any tests failed
   const failedTests = suites.reduce(
-    (count, suite) => count + suite.tests.filter((t) => !t.passed).length,
+    (count, suite) => count + (suite?.tests.filter((t) => !t.passed).length ?? 0),
     0
   );
 
