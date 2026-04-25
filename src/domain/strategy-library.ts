@@ -292,17 +292,22 @@ async function ensureDefaultStrategies(): Promise<void> {
     }
   }
 
-  // Set active strategy if none set
+  // Set active strategy if none set (independent of whether we added new strategies)
   const activeRow = await infra().db.get<{ active_id: string }>(
     "SELECT active_id FROM active_strategy LIMIT 1"
   );
-  if (!activeRow?.active_id && added) {
+  if (!activeRow?.active_id) {
+    // Use upsert for cross-database compatibility (Postgres: ON CONFLICT, SQLite: INSERT OR REPLACE)
     await infra().db.run(
-      "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+      `INSERT INTO active_strategy (id, active_id) VALUES (1, ?)
+       ON CONFLICT (id) DO UPDATE SET active_id = ?`,
+      "custom_ratio_spot",
       "custom_ratio_spot"
     );
-    log("strategy", "Preloaded default strategies and set active");
-  } else if (added) {
+    log("strategy", "Set active strategy to: custom_ratio_spot");
+  }
+
+  if (added) {
     log("strategy", "Preloaded default strategies");
   }
 }
@@ -414,7 +419,8 @@ export async function listStrategies(): Promise<ListStrategiesResult> {
     lp_strategy: s.lp_strategy as LPStrategyType,
     best_for: s.best_for,
     active: activeRow?.active_id === s.id,
-    added_at: s.added_at?.slice(0, 10),
+    added_at:
+      typeof s.added_at === "string" ? s.added_at.slice(0, 10) : String(s.added_at).slice(0, 10),
     warning: NON_FUNCTIONAL_STRATEGIES.has(s.id)
       ? "Strategy exists as documentation only. Core functions not implemented. See plan/strategy-audit/"
       : undefined,
@@ -473,8 +479,11 @@ export async function setActiveStrategy({ id }: { id: string }): Promise<SetActi
   }
 
   try {
+    // Use upsert for cross-database compatibility (Postgres: ON CONFLICT, SQLite: INSERT OR REPLACE)
     await infra().db.run(
-      "INSERT OR REPLACE INTO active_strategy (id, active_id) VALUES (1, ?)",
+      `INSERT INTO active_strategy (id, active_id) VALUES (1, ?)
+       ON CONFLICT (id) DO UPDATE SET active_id = ?`,
+      id,
       id
     );
     log("strategy", `Active strategy set to: ${row.name}`);

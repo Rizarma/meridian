@@ -75,6 +75,7 @@ async function runMigrations(sql: Sql): Promise<void> {
   await addColumnIfNotExists(sql, "position_state", "pool_name", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "strategy_config", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "bin_range", "TEXT");
+  await addColumnIfNotExists(sql, "position_state", "amount_sol", "REAL");
   await addColumnIfNotExists(sql, "position_state", "amount_x", "REAL");
   await addColumnIfNotExists(sql, "position_state", "active_bin_at_deploy", "INTEGER");
   await addColumnIfNotExists(sql, "position_state", "bin_step", "INTEGER");
@@ -85,9 +86,36 @@ async function runMigrations(sql: Sql): Promise<void> {
   await addColumnIfNotExists(sql, "position_state", "initial_value_usd", "REAL");
   await addColumnIfNotExists(sql, "position_state", "signal_snapshot", "TEXT");
   await addColumnIfNotExists(sql, "position_state", "notes", "TEXT");
+  await addColumnIfNotExists(
+    sql,
+    "position_state",
+    "last_updated",
+    "TIMESTAMP NOT NULL DEFAULT NOW()"
+  );
+
+  // === strategies table columns ===
+  await addColumnIfNotExists(sql, "strategies", "token_criteria_json", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "entry_criteria_json", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "range_criteria_json", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "exit_criteria_json", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "best_for", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "raw", "TEXT");
+  await addColumnIfNotExists(sql, "strategies", "updated_at", "TIMESTAMP NOT NULL DEFAULT NOW()");
+  await addColumnIfNotExists(sql, "strategies", "added_at", "TIMESTAMP NOT NULL DEFAULT NOW()");
 
   // === signal_weight_history table columns ===
   await addColumnIfNotExists(sql, "signal_weight_history", "confidence", "REAL");
+
+  // === position_state_events table columns ===
+  await addColumnIfNotExists(
+    sql,
+    "position_state_events",
+    "action",
+    "TEXT NOT NULL DEFAULT 'unknown'"
+  );
+  await addColumnIfNotExists(sql, "position_state_events", "position", "TEXT NOT NULL DEFAULT ''");
+  await addColumnIfNotExists(sql, "position_state_events", "pool_name", "TEXT");
+  await addColumnIfNotExists(sql, "position_state_events", "reason", "TEXT");
 }
 
 /**
