@@ -1,132 +1,31 @@
-import { jsonrepair } from "jsonrepair";
-import OpenAI from "openai";
-import type {
-  ChatCompletion,
-  ChatCompletionMessage,
-  ChatCompletionMessageParam,
-} from "openai/resources/chat/completions";
-import { tools } from "../../tools/definitions/index.js";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { getMyPositions } from "../../tools/dlmm.js";
-import { executeTool } from "../../tools/executor.js";
 import { getWalletBalances } from "../../tools/wallet.js";
 import { config } from "../config/config.js";
-import { FALLBACK_MODELS, MAX_REACT_STEPS, RETRY, TIME, TIMEOUT } from "../config/constants.js";
+import { MAX_REACT_STEPS, RETRY, TIME, TIMEOUT } from "../config/constants.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "../domain/lessons.js";
 import { formatSharedLessonsForPrompt } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import { getStateSummary } from "../infrastructure/state.js";
-import type {
-  AgentOptions,
-  AgentResult,
-  AgentType,
-  OpenAIError,
-  ProviderMode,
-  ToolChoice,
-  ToolDefinition,
-  ToolResult,
-} from "../types/index.js";
+import type { AgentOptions, AgentResult, AgentType, ProviderMode } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { recordActivity } from "../utils/health-check.js";
-import { rateLimiters, withRateLimit } from "../utils/rate-limiter.js";
+import { repairToolCallJson } from "./json-repair.js";
 import {
-  validateAddLiquidityParams,
-  validateClosePositionArgs,
-  validateDeployPositionArgs,
-  validateSwapTokenArgs,
-  validateWithdrawLiquidityParams,
-} from "../utils/validation-args.js";
-import { INTENTS } from "./intent.js";
+  buildMessages,
+  callLlm,
+  DEFAULT_MODEL,
+  getToolChoice,
+  getToolsForRole,
+  shouldRequireRealToolUse,
+} from "./llm-client.js";
+import { preCheckOncePerSession } from "./once-per-session.js";
 import { buildSystemPrompt } from "./prompt.js";
-import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
-
-// Interface for chat completion request parameters
-interface ChatCompletionRequest {
-  model: string;
-  messages: ChatCompletionMessageParam[];
-  tools?: ToolDefinition[];
-  tool_choice?: "auto" | "required" | "none" | { type: "function"; function: { name: string } };
-  temperature?: number;
-  max_tokens?: number;
-}
+import { executeToolsParallel } from "./tool-execution.js";
 
 // Intent routing unified in src/agent/intent.ts (INTENTS array)
 // Use detectIntent(), getToolsForIntent(), getRoleForIntent() from that module
 // Tool sets imported from src/agent/tool-sets.ts (side-effect-free module)
-
-function getToolsForRole(agentType: AgentType, goal: string): ToolDefinition[] {
-  if (agentType === "MANAGER") return tools.filter((t) => MANAGER_TOOLS.has(t.function.name));
-  if (agentType === "SCREENER") return tools.filter((t) => SCREENER_TOOLS.has(t.function.name));
-
-  // GENERAL: match intent from goal, combine matched tool sets
-  const matched = new Set<string>();
-  for (const intent of INTENTS) {
-    if (intent.pattern.test(goal)) {
-      for (const tool of intent.requiredTools) matched.add(tool);
-    }
-  }
-
-  // Fall back to all tools if no intent matched
-  if (matched.size === 0)
-    return tools.filter((t) => !GENERAL_INTENT_ONLY_TOOLS.has(t.function.name));
-  return tools.filter((t) => matched.has(t.function.name));
-}
-
-const client = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
-  timeout: TIMEOUT.RPC_TIMEOUT_MS,
-});
-
-const DEFAULT_MODEL = config.llm.generalModel;
-
-const TOOL_REQUIRED_INTENTS: RegExp =
-  /\b(deploy|open position|open|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|self.?update|pull latest|git pull|update yourself|config|setting|threshold|set |change|update |balance|wallet|position|portfolio|pnl|yield|range|screen|candidate|find pool|search|research|token|smart wallet|whale|watch.?list|tracked wallet|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|lesson|learned|teach|pin|unpin)\b/i;
-
-function shouldRequireRealToolUse(
-  goal: string,
-  agentType: AgentType,
-  requireTool: boolean
-): boolean {
-  if (requireTool) return true;
-  if (agentType === "MANAGER") return false;
-  return TOOL_REQUIRED_INTENTS.test(goal);
-}
-
-function buildMessages(
-  systemPrompt: string,
-  sessionHistory: ChatCompletionMessageParam[],
-  goal: string,
-  providerMode: ProviderMode
-): ChatCompletionMessageParam[] {
-  if (providerMode === "user_embedded") {
-    return [
-      ...sessionHistory,
-      {
-        role: "user",
-        content: `[SYSTEM INSTRUCTIONS]\n${systemPrompt}\n\n[USER REQUEST]\n${goal}`,
-      },
-    ];
-  }
-
-  return [
-    { role: "system", content: systemPrompt },
-    ...sessionHistory,
-    { role: "user", content: goal },
-  ];
-}
-
-function isSystemRoleError(error: unknown): boolean {
-  const err = error as OpenAIError;
-  const message = String(err?.message || err?.error?.message || error || "");
-  return /invalid message role:\s*system/i.test(message);
-}
-
-function isToolChoiceError(error: unknown): boolean {
-  const err = error as OpenAIError;
-  const message = String(err?.message || err?.error?.message || error || "");
-  // Catch any tool_choice related errors (provider doesn't support the parameter)
-  return /tool_choice/i.test(message) || /no endpoints found.*tool/i.test(message);
-}
 
 /**
  * Core ReAct agent loop.
@@ -168,11 +67,6 @@ export async function agentLoop(
 
   // Track write tools fired this session — prevent the model from calling the same
   // destructive tool twice (e.g. deploy twice, swap twice after auto-swap)
-  const ONCE_PER_SESSION: Set<string> = new Set([
-    "deploy_position",
-    "swap_token",
-    "close_position",
-  ]);
   const firedOnce = new Set<string>();
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, requireTool);
   let sawToolCall = false;
@@ -183,100 +77,40 @@ export async function agentLoop(
 
     try {
       const activeModel = model || DEFAULT_MODEL;
+      const toolChoice = getToolChoice(step, goal, mustUseRealTool);
 
-      // Retry up to 3 times on transient provider errors (502, 503, 529)
-      const FALLBACK_MODEL = FALLBACK_MODELS[0] ?? "stepfun/step-3.5-flash:free";
-      let response: ChatCompletion | undefined;
-      let usedModel = activeModel;
-      // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
-      const ACTION_INTENTS: RegExp =
-        /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
-      let toolChoice: ToolChoice | null =
-        step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool) ? "required" : "auto";
+      // Call LLM with retries, fallback, and provider compatibility handling
+      const llmResult = await callLlm({
+        model: activeModel,
+        messages,
+        tools: getToolsForRole(agentType, goal),
+        toolChoice,
+        temperature: config.llm.temperature,
+        maxTokens: maxOutputTokens ?? config.llm.maxTokens,
+        providerMode,
+        systemPrompt,
+        sessionHistory,
+        goal,
+      });
 
-      for (let attempt = 0; attempt < RETRY.MAX_RPC_RETRIES; attempt++) {
-        try {
-          const requestParams: ChatCompletionRequest = {
-            model: usedModel,
-            messages,
-            tools: getToolsForRole(agentType, goal),
-            temperature: config.llm.temperature,
-            max_tokens: maxOutputTokens ?? config.llm.maxTokens,
-          };
-          // Only include tool_choice if provider supports it
-          if (toolChoice !== null) {
-            requestParams.tool_choice = toolChoice;
-          }
-          // biome-ignore lint/performance/noAwaitInLoops: intentional retry loop
-          response = await withRateLimit(rateLimiters.openrouter, () =>
-            client.chat.completions.create(requestParams)
-          );
-        } catch (error) {
-          if (providerMode === "system" && isSystemRoleError(error)) {
-            providerMode = "user_embedded";
-            messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
-            log(
-              "agent",
-              "Provider rejected system role — retrying with embedded system instructions"
-            );
-            attempt -= 1;
-            continue;
-          }
-          if (toolChoice !== null && isToolChoiceError(error)) {
-            toolChoice = null; // Disable tool_choice entirely for this provider
-            log("agent", "Provider rejected tool_choice — retrying without tool_choice parameter");
-            attempt -= 1;
-            continue;
-          }
-          throw error;
-        }
-        if (response.choices?.length) break;
-        const errCode = (response as unknown as { error?: { code?: number } }).error?.code;
-        if (errCode === 502 || errCode === 503 || errCode === 529) {
-          const wait = (attempt + 1) * RETRY.BASE_RETRY_WAIT_MS;
-          if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
-            usedModel = FALLBACK_MODEL;
-            log("agent", `Switching to fallback model ${FALLBACK_MODEL}`);
-          } else {
-            log(
-              "agent",
-              `Provider error ${errCode}, retrying in ${wait / TIME.SECOND}s (attempt ${attempt + 1}/${RETRY.MAX_RPC_RETRIES})`
-            );
-            await new Promise((r) => setTimeout(r, wait));
-          }
-        } else {
-          break;
-        }
+      // Update state from LLM call result
+      const { response, providerMode: newProviderMode } = llmResult;
+      if (newProviderMode !== providerMode) {
+        providerMode = newProviderMode;
+        messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
       }
 
-      if (!response?.choices?.length) {
-        log("error", `Bad API response: ${JSON.stringify(response).slice(0, 200)}`);
-        throw new Error(
-          `API returned no choices: ${(response as unknown as { error?: { message?: string } }).error?.message || JSON.stringify(response)}`
-        );
-      }
-      const msg: ChatCompletionMessage = response.choices[0].message;
+      const msg = response.choices[0].message;
 
       // Repair malformed tool call JSON before pushing to history —
       // the API rejects the next request if history contains invalid JSON args
       if (msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.function?.arguments) {
-            try {
-              JSON.parse(tc.function.arguments);
-            } catch {
-              try {
-                tc.function.arguments = JSON.stringify(
-                  JSON.parse(jsonrepair(tc.function.arguments))
-                );
-                log("warn", `Repaired malformed JSON args for ${tc.function.name}`);
-              } catch {
-                tc.function.arguments = "{}";
-                log("error", `Could not repair JSON args for ${tc.function.name} — cleared to {}`);
-              }
-            }
-          }
-        }
+        repairToolCallJson(
+          msg.tool_calls as Array<{
+            id: string;
+            function: { name: string; arguments: string };
+          }>
+        );
       }
       messages.push(msg);
 
@@ -321,181 +155,21 @@ export async function agentLoop(
 
       // Pre-reserve once-per-session tools BEFORE parallel execution to prevent
       // race conditions where multiple destructive calls pass the guard simultaneously
-      const reservedOncePerSession = new Set<string>();
-      const preCheckedCalls = msg.tool_calls.map((toolCall) => {
-        const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
+      const preCheckedCalls = preCheckOncePerSession(
+        msg.tool_calls as Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>,
+        firedOnce
+      );
 
-        // Not a once-per-session tool — always allowed
-        if (!ONCE_PER_SESSION.has(functionName)) {
-          return { toolCall, functionName, blocked: false as const };
-        }
-
-        // Already fired in a previous step, or already reserved by a sibling call
-        if (firedOnce.has(functionName) || reservedOncePerSession.has(functionName)) {
-          return {
-            toolCall,
-            functionName,
-            blocked: true as const,
-            reason: `${functionName} is allowed only once per session`,
-          };
-        }
-
-        // Reserve this tool — mark BEFORE async execution starts
-        reservedOncePerSession.add(functionName);
-        firedOnce.add(functionName);
-        return { toolCall, functionName, blocked: false as const };
-      });
-
-      // Execute unblocked calls in parallel; blocked calls resolve immediately
-      const toolResults: ToolResult[] = await Promise.all(
-        preCheckedCalls.map(async (entry) => {
-          const { toolCall, functionName } = entry;
-
-          // Handle blocked once-per-session duplicates
-          if (entry.blocked) {
-            log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
-            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
-            await onToolFinish?.({
-              name: functionName,
-              args: functionArgs,
-              result: {
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-              },
-              success: false,
-              step,
-            });
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify({
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-              }),
-            };
-          }
-
-          try {
-            const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
-
-            // Validate tool arguments before execution for write operations
-            const writeToolsRequiringValidation = [
-              "swap_token",
-              "deploy_position",
-              "close_position",
-              "add_liquidity",
-              "withdraw_liquidity",
-            ];
-
-            if (writeToolsRequiringValidation.includes(functionName)) {
-              let validation: { success: true; data: unknown } | { success: false; error: string };
-              switch (functionName) {
-                case "swap_token":
-                  validation = validateSwapTokenArgs(functionArgs);
-                  break;
-                case "deploy_position":
-                  validation = validateDeployPositionArgs(functionArgs);
-                  break;
-                case "close_position":
-                  validation = validateClosePositionArgs(functionArgs);
-                  break;
-                case "add_liquidity":
-                  validation = validateAddLiquidityParams(functionArgs);
-                  break;
-                case "withdraw_liquidity":
-                  validation = validateWithdrawLiquidityParams(functionArgs);
-                  break;
-                default:
-                  validation = { success: true, data: functionArgs };
-              }
-
-              if (!validation.success) {
-                log("agent", `Validation failed for ${functionName}: ${validation.error}`);
-                const errorResult = {
-                  error: `Invalid arguments: ${validation.error}`,
-                  success: false,
-                  blocked: true,
-                };
-                await onToolFinish?.({
-                  name: functionName,
-                  args: functionArgs,
-                  result: errorResult,
-                  success: false,
-                  step,
-                });
-                return {
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: JSON.stringify(errorResult),
-                };
-              }
-            }
-
-            await onToolStart?.({ name: functionName, args: functionArgs, step });
-            const result = await executeTool(functionName, functionArgs, agentType);
-            await onToolFinish?.({
-              name: functionName,
-              args: functionArgs,
-              result,
-              success: result?.success !== false && !result?.error && !result?.blocked,
-              step,
-            });
-
-            // Note: firedOnce was already set during pre-reservation for once-per-session
-            // tools. This prevents race conditions where multiple identical tool calls in
-            // the same LLM response could all pass the guard before any marks as fired.
-
-            // Special formatting for wallet balance to ensure clean Telegram output
-            if (functionName === "get_wallet_balance") {
-              const { formatWalletBalanceForTelegram } = await import(
-                "../infrastructure/telegram-formatters.js"
-              );
-              const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
-              // Unwrap the result - executeTool wraps results as { success: true, data: {...} }
-              const walletData = result.success && result.data ? result.data : result;
-              const formatted = formatWalletBalanceForTelegram(
-                walletData as unknown as import("../types/wallet.js").WalletBalances
-              );
-              // Send formatted message directly (don't escape markdown)
-              await sendMessageMarkdown(formatted);
-              // Return flag indicating output was already sent to user
-              return {
-                role: "tool" as const,
-                tool_call_id: toolCall.id,
-                content: JSON.stringify({
-                  success: true,
-                  formatted: true,
-                  output_already_sent: true, // Signal to REPL that we've handled output
-                  hint: "Wallet balance displayed above. Acknowledge briefly without repeating data.",
-                }),
-              };
-            }
-
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(result),
-            };
-          } catch (error) {
-            const errorMessage = getErrorMessage(error);
-            log("error", `Tool ${toolCall.function.name} failed: ${errorMessage}`);
-
-            // Send formatted error to Telegram so LLM doesn't generate its own markdown
-            const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
-            await sendMessageMarkdown(
-              `❌ *Error in ${toolCall.function.name}*\n\n${errorMessage}\n\n_Using cached state..._`
-            );
-
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify({
-                error: errorMessage,
-                success: false,
-              }),
-            };
-          }
-        })
+      // Execute all tool calls in parallel (blocked calls resolve immediately)
+      const toolResults = await executeToolsParallel(
+        preCheckedCalls,
+        agentType,
+        step,
+        onToolStart,
+        onToolFinish
       );
 
       messages.push(...toolResults);
@@ -521,26 +195,4 @@ export async function agentLoop(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Safely parse tool call arguments with JSON repair fallback.
- * Extracted from the tool execution loop to avoid duplication.
- */
-function safeParseArgs(raw: string, functionName: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    try {
-      const repaired = jsonrepair(raw);
-      if (repaired.includes("__proto__") || repaired.includes("constructor")) {
-        throw new Error("Potentially malicious JSON detected");
-      }
-      log("warn", `Repaired malformed JSON args for ${functionName}`);
-      return JSON.parse(repaired) as Record<string, unknown>;
-    } catch (parseError) {
-      log("error", `Failed to parse args for ${functionName}: ${getErrorMessage(parseError)}`);
-      return {};
-    }
-  }
 }
