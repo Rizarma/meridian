@@ -2,7 +2,7 @@
 // Lazy SDK loader for @meteora-ag/dlmm
 // Dynamic import defers loading until an actual on-chain call is needed
 
-import type { PublicKey } from "@solana/web3.js";
+import { type PublicKey, type Transaction } from "@solana/web3.js";
 
 /** Meteora DLMM SDK pool interface */
 export interface DLMMPool {

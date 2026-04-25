@@ -63,3 +63,13 @@ export {
   getAllPositionsForWallet,
   positionExists,
 } from "./position-sdk.js";
+
+// Phase C: Transaction Safety Primitives
+export {
+  simulateAndSend,
+  simulateAndSendMany,
+  simulateTransaction,
+  getTransactionAuditLog,
+  type TransactionResult,
+  type SimulationResult,
+} from "./transactions.js";
