@@ -90,3 +90,6 @@ export { withdrawLiquidity } from "./withdraw-liquidity.js";
 
 // Phase F: Deploy Position
 export { deployPosition } from "./deploy-position.js";
+
+// Phase G: Close Position
+export { closePosition } from "./close-position.js";
