@@ -53,16 +53,16 @@ describe("closePosition tracked position success", () => {
     expect(result._recordClose).toBe(true);
     expect(result._recordPerformance).toBe(true);
     expect(result._perf_data !== undefined).toBe(true);
-    expect(result._perf_data!.position).toBe("DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x");
-    expect(result._perf_data!.strategy).toBe("spot");
-    expect(result._perf_data!.fees_earned_usd).toBe(2.5);
-    expect(result._perf_data!.final_value_usd).toBe(115.5);
-    expect(result._perf_data!.initial_value_usd).toBe(100);
-    expect(result._perf_data!.minutes_in_range).toBe(180);
-    expect(result._perf_data!.minutes_held).toBe(200);
-    expect(result._perf_data!.close_reason).toBe("stop_loss");
-    expect(result._perf_data!.base_mint).toBe("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263");
-    expect(result._perf_data!.deployed_at).toBe("2024-01-15T10:00:00Z");
+    expect(result._perf_data?.position).toBe("DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x");
+    expect(result._perf_data?.strategy).toBe("spot");
+    expect(result._perf_data?.fees_earned_usd).toBe(2.5);
+    expect(result._perf_data?.final_value_usd).toBe(115.5);
+    expect(result._perf_data?.initial_value_usd).toBe(100);
+    expect(result._perf_data?.minutes_in_range).toBe(180);
+    expect(result._perf_data?.minutes_held).toBe(200);
+    expect(result._perf_data?.close_reason).toBe("stop_loss");
+    expect(result._perf_data?.base_mint).toBe("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263");
+    expect(result._perf_data?.deployed_at).toBe("2024-01-15T10:00:00Z");
   });
 
   test("_perf_data uses PositionPerformance fields: bin_range, bin_step, volatility, fee_tvl_ratio, organic_score", () => {
@@ -151,9 +151,9 @@ describe("closePosition untracked position success", () => {
     expect(Array.isArray(result.claim_txs)).toBe(true);
     expect(Array.isArray(result.close_txs)).toBe(true);
     expect(Array.isArray(result.txs)).toBe(true);
-    expect(result.txs!.length).toBe(3);
+    expect(result.txs?.length).toBe(3);
     // txs = claim_txs + close_txs
-    expect(result.txs!.length).toBe(result.claim_txs!.length + result.close_txs!.length);
+    expect(result.txs?.length).toBe(result.claim_txs?.length + result.close_txs?.length);
   });
 });
 
@@ -179,14 +179,14 @@ describe("closePosition verification failure", () => {
     expect(Array.isArray(result.claim_txs)).toBe(true);
     expect(Array.isArray(result.close_txs)).toBe(true);
     expect(Array.isArray(result.txs)).toBe(true);
-    expect(result.claim_txs!.length).toBeGreaterThan(0);
-    expect(result.close_txs!.length).toBeGreaterThan(0);
+    expect(result.claim_txs?.length).toBeGreaterThan(0);
+    expect(result.close_txs?.length).toBeGreaterThan(0);
   });
 
   test("Verification retries up to 4 attempts with 3-second delays", () => {
     // Documents the retry loop at lines 190-206 in dlmm.ts
     const maxAttempts = 4;
-    const delaysBetweenAttempts = 3; // seconds
+    const _delaysBetweenAttempts = 3; // seconds
     let attemptsMade = 0;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -220,7 +220,7 @@ describe("closePosition claim failure handling", () => {
       throw new Error("No claimable fees");
     } catch (e: unknown) {
       // Non-fatal: log warning only (line 128)
-      const message = e instanceof Error ? e.message : String(e);
+      const _message = e instanceof Error ? e.message : String(e);
       // claimTxHashes remains empty — no hashes pushed
     }
 
@@ -298,11 +298,11 @@ describe("closePosition closed PnL API success", () => {
 
     expect(posEntry !== undefined).toBe(true);
 
-    const pnlUsd = Number(posEntry!.pnlUsd ?? 0);
-    const pnlPct = Number(posEntry!.pnlPctChange ?? 0);
-    const finalValueUsd = Number(posEntry!.allTimeWithdrawals?.total?.usd ?? 0);
-    const initialUsd = Number(posEntry!.allTimeDeposits?.total?.usd ?? 0);
-    const feesUsd = Number(posEntry!.allTimeFees?.total?.usd ?? 0);
+    const pnlUsd = Number(posEntry?.pnlUsd ?? 0);
+    const pnlPct = Number(posEntry?.pnlPctChange ?? 0);
+    const finalValueUsd = Number(posEntry?.allTimeWithdrawals?.total?.usd ?? 0);
+    const initialUsd = Number(posEntry?.allTimeDeposits?.total?.usd ?? 0);
+    const feesUsd = Number(posEntry?.allTimeFees?.total?.usd ?? 0);
 
     expect(pnlUsd).toBe(15.5);
     expect(pnlPct).toBe(7.2);
@@ -383,7 +383,7 @@ describe("closePosition closed PnL API miss fallback", () => {
       total_value_usd: 94.0,
     };
 
-    const trackedInitialUsd = 0; // unknown
+    const _trackedInitialUsd = 0; // unknown
     const pnlUsd = cachedPos.pnl_true_usd ?? cachedPos.pnl_usd ?? 0;
     const feesUsd =
       (cachedPos.collected_fees_true_usd || 0) + (cachedPos.unclaimed_fees_true_usd || 0);

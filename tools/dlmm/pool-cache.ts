@@ -2,10 +2,10 @@
 // Pool cache with LRU and automatic expiration
 
 import { PublicKey } from "@solana/web3.js";
-import { LRUCache } from "./lru-cache.js";
-import { loadDlmmSdk } from "./sdk-loader.js";
 import { getSharedConnection } from "../../src/infrastructure/connection.js";
+import { LRUCache } from "./lru-cache.js";
 import type { DLMMPool } from "./sdk-loader.js";
+import { loadDlmmSdk } from "./sdk-loader.js";
 
 // Pool cache configuration
 const POOL_CACHE_SIZE = 100;
@@ -57,7 +57,7 @@ export function deletePoolFromCache(poolAddress: string): void {
  */
 export async function getPool(poolAddress: string): Promise<DLMMPool> {
   const key = poolAddress.toString();
-  
+
   const cached = poolCache.get(key);
   if (cached) {
     return cached;
@@ -65,13 +65,12 @@ export async function getPool(poolAddress: string): Promise<DLMMPool> {
 
   startPoolCacheInterval();
   const { DLMM } = await loadDlmmSdk();
-  
+
   // Create pool instance via SDK
-  const pool = await (DLMM as { create: (conn: unknown, pubkey: PublicKey) => Promise<DLMMPool> }).create(
-    getSharedConnection(),
-    new PublicKey(poolAddress)
-  );
-  
+  const pool = await (
+    DLMM as { create: (conn: unknown, pubkey: PublicKey) => Promise<DLMMPool> }
+  ).create(getSharedConnection(), new PublicKey(poolAddress));
+
   poolCache.set(key, pool);
   return pool;
 }

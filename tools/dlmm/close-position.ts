@@ -8,9 +8,6 @@ import { getSharedConnection } from "../../src/infrastructure/connection.js";
 import { log } from "../../src/infrastructure/logger.js";
 import { getTrackedPosition } from "../../src/infrastructure/state.js";
 import type { CloseParams, CloseResult } from "../../src/types/dlmm.js";
-// PositionPerformance documents the shape of _perf_data in the close result
-// (cast omitted to satisfy Record<string, unknown> in CloseResult)
-import type { PositionPerformance } from "../../src/types/lessons.js";
 import { recordActivity } from "../../src/utils/health-check.js";
 import { fetchWithRetry } from "../../src/utils/retry.js";
 import { isObject } from "../../src/utils/validation.js";

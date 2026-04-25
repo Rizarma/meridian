@@ -1,11 +1,10 @@
 // tools/dlmm/pnl-api.ts
 // PnL API fetching functions for Meteora DLMM
 
-import { fetchWithRetry } from "../../src/utils/retry.js";
 import { log } from "../../src/infrastructure/logger.js";
+import type { PositionPnL, RawPnLData } from "../../src/types/dlmm.js";
+import { fetchWithRetry } from "../../src/utils/retry.js";
 import { isArray, isObject } from "../../src/utils/validation.js";
-import type { RawPnLData, PositionPnL } from "../../src/types/dlmm.js";
-import { config } from "../../src/config/config.js";
 
 /**
  * Safely parse a number from unknown value
@@ -61,12 +60,15 @@ export async function fetchDlmmPnlForPool(
   walletAddress: string
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
-  
+
   try {
     const res = await fetchWithRetry(url);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      log("pnl_api", `HTTP ${res.status} for pool ${poolAddress.slice(0, 8)}: ${body.slice(0, 120)}`);
+      log(
+        "pnl_api",
+        `HTTP ${res.status} for pool ${poolAddress.slice(0, 8)}: ${body.slice(0, 120)}`
+      );
       return {};
     }
 
@@ -78,14 +80,17 @@ export async function fetchDlmmPnlForPool(
 
     const data = rawData as { positions?: RawPnLData[]; data?: RawPnLData[] };
     const rawPositions = data.positions || data.data || [];
-    
+
     if (!isArray(rawPositions)) {
       log("pnl_api", `Invalid positions array for pool ${poolAddress.slice(0, 8)}`);
       return {};
     }
 
     if (rawPositions.length === 0) {
-      log("pnl_api", `No positions returned for pool ${poolAddress.slice(0, 8)} — keys: ${Object.keys(data).join(", ")}`);
+      log(
+        "pnl_api",
+        `No positions returned for pool ${poolAddress.slice(0, 8)} — keys: ${Object.keys(data).join(", ")}`
+      );
     }
 
     const byAddress: Record<string, RawPnLData> = {};
@@ -116,7 +121,7 @@ export async function getPositionPnlFromApi(
   try {
     const byAddress = await fetchDlmmPnlForPool(poolAddress, walletAddress);
     const p = byAddress[positionAddress];
-    
+
     if (!p) {
       return { error: "Position not found in PnL API" };
     }
@@ -125,7 +130,7 @@ export async function getPositionPnlFromApi(
       Number(p.unrealizedPnl?.unclaimedFeeTokenX?.usd || 0) +
       Number(p.unrealizedPnl?.unclaimedFeeTokenY?.usd || 0);
     const currentValueUsd = Number(p.unrealizedPnl?.balances || 0);
-    
+
     return {
       pnl_usd: Math.round((p.pnlUsd ?? 0) * 100) / 100,
       pnl_pct: Math.round((p.pnlPctChange ?? 0) * 100) / 100,
@@ -157,11 +162,14 @@ export async function fetchClosedPnlForPool(
   walletAddress: string
 ): Promise<Record<string, RawPnLData>> {
   const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=closed&pageSize=50&page=1`;
-  
+
   try {
     const res = await fetchWithRetry(url);
     if (!res.ok) {
-      log("pnl_api", `Closed PnL fetch failed for pool ${poolAddress.slice(0, 8)}: HTTP ${res.status}`);
+      log(
+        "pnl_api",
+        `Closed PnL fetch failed for pool ${poolAddress.slice(0, 8)}: HTTP ${res.status}`
+      );
       return {};
     }
 
@@ -173,7 +181,7 @@ export async function fetchClosedPnlForPool(
 
     const data = rawData as { positions?: RawPnLData[] };
     const positions = data.positions || [];
-    
+
     const byAddress: Record<string, RawPnLData> = {};
     for (const p of positions) {
       const addr = p.positionAddress || p.address || p.position;
