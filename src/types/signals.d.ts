@@ -10,7 +10,7 @@ export interface SignalSnapshot {
   holder_count?: number;
   smart_wallets_present?: boolean;
   narrative_quality?: string;
-  study_win_rate?: number;
+
   hive_consensus?: number;
   volatility?: number;
 }

@@ -112,16 +112,18 @@ Controls how the system learns from closed positions to adjust screening signal 
 {
   "darwin": {
     "windowDays": 30,              // Rolling window for performance data
-    "minSamples": 10,               // Minimum positions before recalculation
+    "minSamples": 20,               // Minimum positions before recalculation
+    "minWins": 5,                   // Minimum wins for meaningful class balance
+    "minLosses": 5,                 // Minimum losses for meaningful class balance
     "weightFloor": 0.5,             // Minimum weight (prevents total suppression)
     "weightCeiling": 2.0,           // Maximum weight (prevents over-reliance)
 
-    // NEW: Confidence-aware proportional update (default: true)
+    // Confidence-aware proportional update (default: true)
     "useProportional": true,
-    "learningRate": 0.25,           // Speed of weight adjustment (0.1-0.5)
-    "deadband": 0.01,               // Ignore lifts smaller than this (noise filter)
+    "learningRate": 0.20,           // Speed of weight adjustment (0.1-0.5)
+    "deadband": 0.03,               // Ignore lifts smaller than this (noise filter)
     "minConfidence": 0.5,           // Minimum confidence required to update
-    "maxMultiplierPerCycle": 3.0,   // Safety cap on single-update change
+    "maxMultiplierPerCycle": 2.0,   // Safety cap on single-update change
 
     // LEGACY: Used when useProportional=false
     "boostFactor": 1.5,             // Quartile boost multiplier
@@ -130,9 +132,26 @@ Controls how the system learns from closed positions to adjust screening signal 
 }
 ```
 
+**Active Signals (9 total):**
+- `organic_score` - Wallet clustering quality score
+- `fee_tvl_ratio` - Fee generation efficiency
+- `volume` - Trading volume (log-normalized)
+- `mcap` - Market cap (log-normalized, sweet spot $100K-$10M)
+- `holder_count` - Number of token holders
+- `smart_wallets_present` - Boolean: smart money in pool
+- `narrative_quality` - Categorical: narrative strength
+- `hive_consensus` - Collective intelligence win rate
+- `volatility` - Price volatility (moderate is good)
+
 **Proportional vs Quartile:**
 - **Proportional (recommended)**: Weight changes scale with predictive lift magnitude and sample confidence. Stronger signals = faster learning. Safer with low data.
 - **Quartile (legacy)**: Uniform 5% boost/decay based on ranking. Simpler but wastes learning opportunity and ignores confidence.
+
+**Health Monitoring:**
+The system logs warnings when signals get stuck at weight boundaries:
+- Warning at 3 consecutive recalcs at floor/ceiling
+- Critical alert when 3+ signals simultaneously stuck at extremes
+- Check logs for `signal_weights_health` and `signal_weights_health_alert`
 
 ## Data Storage
 

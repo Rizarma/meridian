@@ -72,18 +72,21 @@
     "okx": false
   },
   "darwin": {
-    "windowDays": 60,
-    "minSamples": 10,
-    "boostFactor": 1.5,
-    "decayFactor": 0.95,
+    "windowDays": 30,
+    "minSamples": 20,
+    "minWins": 5,
+    "minLosses": 5,
     "weightFloor": 0.5,
     "weightCeiling": 2.0,
-    "_comment": "NEW: Confidence-aware proportional update options",
+    "_comment": "Confidence-aware proportional update (recommended)",
     "useProportional": true,
-    "learningRate": 0.25,
-    "deadband": 0.01,
+    "learningRate": 0.20,
+    "deadband": 0.03,
     "minConfidence": 0.5,
-    "maxMultiplierPerCycle": 3.0
+    "maxMultiplierPerCycle": 2.0,
+    "_comment_legacy": "Legacy quartile options (useProportional: false)",
+    "boostFactor": 1.5,
+    "decayFactor": 0.95
   },
   "portfolioSync": {
     "_comment": "Cross-machine learning via Meteora API. Fetches your historical LP data to generate lessons across deployments.",

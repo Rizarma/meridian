@@ -33,7 +33,7 @@ const SIGNAL_NAMES: string[] = [
   "holder_count",
   "smart_wallets_present",
   "narrative_quality",
-  "study_win_rate",
+  // "study_win_rate", // INACTIVE: not used in scoring.ts — reactivate only when data source/normalization is defined
   "hive_consensus",
   "volatility",
 ];
@@ -48,7 +48,7 @@ const HIGHER_IS_BETTER: Set<string> = new Set([
   "fee_tvl_ratio",
   "volume",
   "holder_count",
-  "study_win_rate",
+  // "study_win_rate", // INACTIVE: see SIGNAL_NAMES comment
   "hive_consensus",
 ]);
 
@@ -79,6 +79,28 @@ interface SignalWeightHistoryRow {
   loss_count: number | null;
   changed_at: string;
 }
+
+// ─── Weight Health Monitoring ────────────────────────────────────
+
+interface SignalWeightHealth {
+  signal: string;
+  currentWeight: number;
+  consecutiveRecalcsAtFloor: number;
+  consecutiveRecalcsAtCeiling: number;
+  recalcsSinceLastChange: number;
+  lastLift?: number;
+  lastConfidence?: number;
+  updatedAt: string;
+}
+
+// In-memory cache for health metrics (persisted via logs/alerts, not DB)
+const healthCache: Map<string, SignalWeightHealth> = new Map();
+
+const HEALTH_THRESHOLDS = {
+  floorWarning: 3, // Alert after 3 consecutive recalcs at floor
+  ceilingWarning: 3, // Alert after 3 consecutive recalcs at ceiling
+  stuckAlert: 5, // Critical alert after 5 consecutive recalcs
+};
 
 // ─── Persistence ─────────────────────────────────────────────────
 
@@ -323,10 +345,15 @@ export async function recalculateWeights(
   const wins = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
   const losses = recent.filter((p) => (p.pnl_usd ?? 0) <= 0);
 
-  if (wins.length === 0 || losses.length === 0) {
+  // NEW: Configurable minimums for meaningful statistical comparison
+  const minWins = darwin.minWins ?? 5;
+  const minLosses = darwin.minLosses ?? 5;
+
+  if (wins.length < minWins || losses.length < minLosses) {
     log(
       "signal_weights",
-      `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`
+      `Skipping Darwinian weight recalculation: insufficient class balance ` +
+        `(${wins.length} wins / ${losses.length} losses, need ${minWins}/${minLosses})`
     );
     return { changes: [], weights, persisted: false };
   }
@@ -423,6 +450,9 @@ export async function recalculateWeights(
       }
     }
   }
+
+  // ─── Update Weight Health Metrics ───────────────────────────────
+  updateWeightHealth(weights, changes, ranked, weightFloor, weightCeiling);
 
   // Persist to database
   const now = new Date().toISOString();
@@ -605,6 +635,100 @@ function extractNumeric(signal: string, entries: PerformanceRecord[]): number[] 
 function mean(arr: number[]): number {
   if (arr.length === 0) return 0;
   return arr.reduce((s, v) => s + v, 0) / arr.length;
+}
+
+/**
+ * Update weight health metrics and emit alerts for stuck signals.
+ * Tracks consecutive recalcs at floor/ceiling and alerts when thresholds are breached.
+ */
+function updateWeightHealth(
+  weights: Record<string, number>,
+  changes: WeightChange[],
+  ranked: [string, number][],
+  weightFloor: number,
+  weightCeiling: number
+): void {
+  const now = new Date().toISOString();
+  const changedSignals = new Set(changes.map((c) => c.signal));
+  const signalsAtFloor: string[] = [];
+  const signalsAtCeiling: string[] = [];
+  const stuckSignals: string[] = [];
+
+  for (const signal of SIGNAL_NAMES) {
+    const currentWeight = weights[signal] ?? 1.0;
+    const prevHealth = healthCache.get(signal);
+
+    // Find lift for this signal from ranked array
+    const rankedEntry = ranked.find(([s]) => s === signal);
+    const lastLift = rankedEntry?.[1];
+
+    // Determine if at boundary
+    const atFloor = currentWeight <= weightFloor;
+    const atCeiling = currentWeight >= weightCeiling;
+    const changed = changedSignals.has(signal);
+
+    // Update counters
+    const consecutiveFloor =
+      atFloor && !changed ? (prevHealth?.consecutiveRecalcsAtFloor ?? 0) + 1 : 0;
+    const consecutiveCeiling =
+      atCeiling && !changed ? (prevHealth?.consecutiveRecalcsAtCeiling ?? 0) + 1 : 0;
+    const recalcsSinceChange = changed ? 0 : (prevHealth?.recalcsSinceLastChange ?? 0) + 1;
+
+    const health: SignalWeightHealth = {
+      signal,
+      currentWeight,
+      consecutiveRecalcsAtFloor: consecutiveFloor,
+      consecutiveRecalcsAtCeiling: consecutiveCeiling,
+      recalcsSinceLastChange: recalcsSinceChange,
+      lastLift,
+      updatedAt: now,
+    };
+
+    healthCache.set(signal, health);
+
+    // Collect signals at boundaries for reporting
+    if (atFloor) signalsAtFloor.push(signal);
+    if (atCeiling) signalsAtCeiling.push(signal);
+
+    // Check alert thresholds
+    const stuckCount = Math.max(consecutiveFloor, consecutiveCeiling);
+    if (stuckCount >= HEALTH_THRESHOLDS.stuckAlert) {
+      stuckSignals.push(`${signal}(${stuckCount} recalcs)`);
+    } else if (consecutiveFloor >= HEALTH_THRESHOLDS.floorWarning) {
+      log(
+        "signal_weights_health",
+        `Signal ${signal} at floor (${currentWeight}) for ${consecutiveFloor} consecutive recalcs — may be unfairly suppressed`
+      );
+    } else if (consecutiveCeiling >= HEALTH_THRESHOLDS.ceilingWarning) {
+      log(
+        "signal_weights_health",
+        `Signal ${signal} at ceiling (${currentWeight}) for ${consecutiveCeiling} consecutive recalcs — possible over-reliance`
+      );
+    }
+  }
+
+  // Summary logging
+  if (signalsAtFloor.length > 0 || signalsAtCeiling.length > 0) {
+    log(
+      "signal_weights_health",
+      `Weight health: ${signalsAtFloor.length} at floor [${signalsAtFloor.join(", ")}], ` +
+        `${signalsAtCeiling.length} at ceiling [${signalsAtCeiling.join(", ")}]`
+    );
+  }
+
+  // Critical alert for multiple stuck signals
+  if (stuckSignals.length >= 3) {
+    log(
+      "signal_weights_health_alert",
+      `CRITICAL: ${stuckSignals.length} signals stuck at extremes: ${stuckSignals.join("; ")}. ` +
+        `Consider manual review of Darwinian config or market regime change.`
+    );
+  } else if (stuckSignals.length > 0) {
+    log(
+      "signal_weights_health_alert",
+      `ALERT: Signal(s) stuck at extremes: ${stuckSignals.join("; ")}`
+    );
+  }
 }
 
 // ─── Summary for LLM Prompt Injection ────────────────────────────

@@ -111,16 +111,20 @@ Runtime mutations go through the `update_config` tool, which:
 |-----|---------|-------------|
 | `features.darwinEvolution` | `false` | Enable signal-weight evolution |
 | `darwin.windowDays` | `30` | Lookback window for performance data (days) |
-| `darwin.minSamples` | `10` | Minimum samples before a signal influences scoring |
+| `darwin.minSamples` | `20` | Minimum positions before recalculation |
+| `darwin.minWins` | `5` | Minimum wins for meaningful class balance |
+| `darwin.minLosses` | `5` | Minimum losses for meaningful class balance |
 | `darwin.weightFloor` | `0.5` | Minimum allowed weight |
 | `darwin.weightCeiling` | `2.0` | Maximum allowed weight |
 | `darwin.useProportional` | `true` | Use confidence-aware proportional updates (v2) |
-| `darwin.learningRate` | `0.25` | Speed of weight adjustment (0.1-0.5) |
-| `darwin.deadband` | `0.01` | Ignore lifts smaller than this (noise filter) |
+| `darwin.learningRate` | `0.20` | Speed of weight adjustment (0.1-0.5) |
+| `darwin.deadband` | `0.03` | Ignore lifts smaller than this (noise filter) |
 | `darwin.minConfidence` | `0.5` | Minimum confidence required to update |
-| `darwin.maxMultiplierPerCycle` | `3.0` | Safety cap on single-update change |
+| `darwin.maxMultiplierPerCycle` | `2.0` | Safety cap on single-update change |
 | `darwin.boostFactor` | `1.5` | **Legacy only:** Quartile boost multiplier (useProportional=false) |
 | `darwin.decayFactor` | `0.95` | **Legacy only:** Quartile decay multiplier (useProportional=false) |
+
+**Note:** The system monitors weight health and logs warnings when signals get stuck at floor/ceiling boundaries. Check logs for `signal_weights_health` messages.
 
 ## LLM
 
