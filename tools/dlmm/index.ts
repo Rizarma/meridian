@@ -87,3 +87,6 @@ export {
 export { claimFees } from "./claim-fees.js";
 export { addLiquidity } from "./add-liquidity.js";
 export { withdrawLiquidity } from "./withdraw-liquidity.js";
+
+// Phase F: Deploy Position
+export { deployPosition } from "./deploy-position.js";
