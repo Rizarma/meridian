@@ -1,0 +1,24 @@
+# GitLeaks Configuration
+# Excludes test files from secret scanning since they contain fake/test data
+
+title = "GitLeaks Config"
+
+[extend]
+# Use default config as base
+useDefault = true
+
+[allowlist]
+paths = [
+    '''test\/''',
+    '''test\/.*\.test\.ts$''',
+    '''\.test\.ts$''',
+]
+
+# Also ignore by regex for common test patterns
+regexes = [
+    '''5KT6iWj9MF''',  # Fake Solana key used in tests
+    '''sk-abc123def456''',  # Fake API key used in tests
+    '''sk-test_123-abc''',  # Fake test key
+    '''a1b2c3d4-e5f6-g7h8''',  # Fake Helius key
+    '''a1b2c3d4e5f6a7b8c9d0e1f2''',  # Fake hex
+]
