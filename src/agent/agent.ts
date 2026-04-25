@@ -36,6 +36,7 @@ import {
 } from "../utils/validation-args.js";
 import { INTENTS } from "./intent.js";
 import { repairToolCallJson, safeParseArgs } from "./json-repair.js";
+import { createBlockedResult, preCheckOncePerSession } from "./once-per-session.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { GENERAL_INTENT_ONLY_TOOLS, MANAGER_TOOLS, SCREENER_TOOLS } from "./tool-sets.js";
 
@@ -168,11 +169,6 @@ export async function agentLoop(
 
   // Track write tools fired this session — prevent the model from calling the same
   // destructive tool twice (e.g. deploy twice, swap twice after auto-swap)
-  const ONCE_PER_SESSION: Set<string> = new Set([
-    "deploy_position",
-    "swap_token",
-    "close_position",
-  ]);
   const firedOnce = new Set<string>();
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, requireTool);
   let sawToolCall = false;
@@ -310,30 +306,13 @@ export async function agentLoop(
 
       // Pre-reserve once-per-session tools BEFORE parallel execution to prevent
       // race conditions where multiple destructive calls pass the guard simultaneously
-      const reservedOncePerSession = new Set<string>();
-      const preCheckedCalls = msg.tool_calls.map((toolCall) => {
-        const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
-
-        // Not a once-per-session tool — always allowed
-        if (!ONCE_PER_SESSION.has(functionName)) {
-          return { toolCall, functionName, blocked: false as const };
-        }
-
-        // Already fired in a previous step, or already reserved by a sibling call
-        if (firedOnce.has(functionName) || reservedOncePerSession.has(functionName)) {
-          return {
-            toolCall,
-            functionName,
-            blocked: true as const,
-            reason: `${functionName} is allowed only once per session`,
-          };
-        }
-
-        // Reserve this tool — mark BEFORE async execution starts
-        reservedOncePerSession.add(functionName);
-        firedOnce.add(functionName);
-        return { toolCall, functionName, blocked: false as const };
-      });
+      const preCheckedCalls = preCheckOncePerSession(
+        msg.tool_calls as Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>,
+        firedOnce
+      );
 
       // Execute unblocked calls in parallel; blocked calls resolve immediately
       const toolResults: ToolResult[] = await Promise.all(
@@ -342,7 +321,6 @@ export async function agentLoop(
 
           // Handle blocked once-per-session duplicates
           if (entry.blocked) {
-            log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
             const functionArgs = safeParseArgs(toolCall.function.arguments, functionName);
             await onToolFinish?.({
               name: functionName,
@@ -357,10 +335,7 @@ export async function agentLoop(
             return {
               role: "tool",
               tool_call_id: toolCall.id,
-              content: JSON.stringify({
-                blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
-              }),
+              content: createBlockedResult(functionName),
             };
           }
 
