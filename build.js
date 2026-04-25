@@ -21,8 +21,8 @@ function shouldCopy(itemPath) {
     if (exclude.includes(part)) return false;
   }
 
-  // Only copy JSON files (config files)
-  if (fs.statSync(itemPath).isFile() && !basename.endsWith(".json")) {
+  // Only copy JSON and SQL files (config files and migrations)
+  if (fs.statSync(itemPath).isFile() && !basename.endsWith(".json") && !basename.endsWith(".sql")) {
     return false;
   }
 
