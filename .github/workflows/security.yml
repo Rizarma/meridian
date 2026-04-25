@@ -307,7 +307,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check module boundaries
-        run: pnpm arch-check || true
+        run: pnpm arch-check
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Job 9: Security Summary
