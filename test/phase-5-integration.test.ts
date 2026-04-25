@@ -357,7 +357,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
       holder_count: 1000,
       smart_wallets_present: false,
       narrative_quality: "medium",
-      study_win_rate: 0.6,
+
       hive_consensus: 0.5,
       volatility: 5,
     },
@@ -438,7 +438,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 1500,
           smart_wallets_present: true,
           narrative_quality: "high",
-          study_win_rate: 0.7,
+
           hive_consensus: 0.6,
           volatility: 3,
         },
@@ -453,7 +453,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 1800,
           smart_wallets_present: true,
           narrative_quality: "high",
-          study_win_rate: 0.75,
+
           hive_consensus: 0.65,
           volatility: 2.5,
         },
@@ -468,7 +468,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 1450,
           smart_wallets_present: true,
           narrative_quality: "high",
-          study_win_rate: 0.68,
+
           hive_consensus: 0.58,
           volatility: 3.5,
         },
@@ -483,7 +483,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 2000,
           smart_wallets_present: true,
           narrative_quality: "high",
-          study_win_rate: 0.8,
+
           hive_consensus: 0.7,
           volatility: 2,
         },
@@ -498,7 +498,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 1600,
           smart_wallets_present: true,
           narrative_quality: "high",
-          study_win_rate: 0.72,
+
           hive_consensus: 0.62,
           volatility: 2.8,
         },
@@ -513,7 +513,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 300,
           smart_wallets_present: false,
           narrative_quality: "low",
-          study_win_rate: 0.3,
+
           hive_consensus: 0.2,
           volatility: 15,
         },
@@ -528,7 +528,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 250,
           smart_wallets_present: false,
           narrative_quality: "low",
-          study_win_rate: 0.25,
+
           hive_consensus: 0.15,
           volatility: 18,
         },
@@ -543,7 +543,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 350,
           smart_wallets_present: false,
           narrative_quality: "low",
-          study_win_rate: 0.35,
+
           hive_consensus: 0.25,
           volatility: 12,
         },
@@ -558,7 +558,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 200,
           smart_wallets_present: false,
           narrative_quality: "low",
-          study_win_rate: 0.2,
+
           hive_consensus: 0.1,
           volatility: 20,
         },
@@ -573,7 +573,7 @@ describeAsync("Threshold Evolution → Signal Weights Data Flow", async () => {
           holder_count: 320,
           smart_wallets_present: false,
           narrative_quality: "low",
-          study_win_rate: 0.32,
+
           hive_consensus: 0.22,
           volatility: 14,
         },
