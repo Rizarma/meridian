@@ -729,7 +729,7 @@ function migrateLessonsAndPerformanceFromJson(parseFailures: string[]): LessonsM
         l.created_at ?? new Date().toISOString(),
         l.pinned ?? 0,
         l.role ?? "rule",
-        stringifyJson(l),
+        stringifyJson(l)
       );
       stats.lessons++;
     }
@@ -766,7 +766,7 @@ function migrateLessonsAndPerformanceFromJson(parseFailures: string[]): LessonsM
         p.organic_score ?? null,
         stringifyJson(p.bin_range ?? null),
         p.recorded_at ?? new Date().toISOString(),
-        stringifyJson(p),
+        stringifyJson(p)
       );
       stats.performance++;
     }
@@ -783,7 +783,7 @@ function migrateLessonsAndPerformanceFromJson(parseFailures: string[]): LessonsM
  */
 function migratePoolsFromJson(
   parseFailures: string[],
-  orphanedSnapshots: OrphanedSnapshot[],
+  orphanedSnapshots: OrphanedSnapshot[]
 ): PoolMigrationStats {
   const stats: PoolMigrationStats = { pools: 0, deploys: 0, snapshots: 0 };
 
@@ -818,7 +818,7 @@ function migratePoolsFromJson(
       p.cooldown_reason ?? null,
       p.base_mint_cooldown_until ?? null,
       p.base_mint_cooldown_reason ?? null,
-      stringifyJson(p),
+      stringifyJson(p)
     );
     stats.pools++;
 
@@ -840,7 +840,7 @@ function migratePoolsFromJson(
           d.close_reason ?? null,
           d.strategy ?? null,
           d.volatility_at_deploy ?? null,
-          stringifyJson(d),
+          stringifyJson(d)
         );
         stats.deploys++;
       }
@@ -853,7 +853,7 @@ function migratePoolsFromJson(
         const positionAddr = s.position as string | undefined;
         if (!positionAddr) {
           console.warn(
-            `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`,
+            `[migrateFromJson] Skipping snapshot without position reference in pool ${poolAddress}`
           );
           orphanedSnapshots.push({ ...s, _poolAddress: poolAddress });
           continue;
@@ -871,7 +871,7 @@ function migratePoolsFromJson(
           s.unclaimed_fees_usd ?? null,
           s.minutes_out_of_range ?? null,
           s.age_minutes ?? null,
-          stringifyJson(s),
+          stringifyJson(s)
         );
         stats.snapshots++;
       }
@@ -887,7 +887,7 @@ function migratePoolsFromJson(
           poolAddress,
           "pool_note",
           n.added_at ?? new Date().toISOString(),
-          stringifyJson(n),
+          stringifyJson(n)
         );
       }
     }
@@ -956,7 +956,7 @@ function migratePositionsFromJson(parseFailures: string[]): number {
         pos.close_reason ?? null,
         stringifyJson(trailingState),
         stringifyJson(pos.notes ?? []),
-        stringifyJson(pos),
+        stringifyJson(pos)
       );
       migratedPositions++;
     }
@@ -995,7 +995,7 @@ function migrateSignalWeightsFromJson(parseFailures: string[]): WeightMigrationS
          VALUES (?, ?, ?)`,
         signal,
         weight,
-        new Date().toISOString(),
+        new Date().toISOString()
       );
       stats.weights++;
     }
@@ -1020,7 +1020,7 @@ function migrateSignalWeightsFromJson(parseFailures: string[]): WeightMigrationS
             h.window_size ?? null,
             h.win_count ?? null,
             h.loss_count ?? null,
-            h.timestamp ?? new Date().toISOString(),
+            h.timestamp ?? new Date().toISOString()
           );
           stats.history++;
         }
@@ -1050,12 +1050,12 @@ function saveOrphanedSnapshots(orphanedSnapshots: OrphanedSnapshot[]): string {
         note: "These snapshots were skipped during migration because they lack a position reference. Manual recovery may be needed.",
       },
       null,
-      2,
-    ),
+      2
+    )
   );
   const message = `, ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile}`;
   console.warn(
-    `[migrateFromJson] ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile} for manual recovery`,
+    `[migrateFromJson] ${orphanedSnapshots.length} orphaned snapshots saved to ${backupFile} for manual recovery`
   );
   return message;
 }
@@ -1108,7 +1108,7 @@ export async function migrateFromJson(): Promise<MigrationResult> {
         run(
           `UPDATE migration_log SET status = ?, completed_at = datetime('now') WHERE id = ?`,
           migrationStatus,
-          migrationLogId,
+          migrationLogId
         );
       }
 
@@ -1138,7 +1138,7 @@ export async function migrateFromJson(): Promise<MigrationResult> {
         `UPDATE migration_log SET status = ?, completed_at = datetime('now'), error_message = ? WHERE id = ?`,
         "failed",
         errorMessage,
-        migrationLogId,
+        migrationLogId
       );
     }
     return {
