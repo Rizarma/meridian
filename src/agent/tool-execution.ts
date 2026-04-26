@@ -6,9 +6,11 @@
  * - Lifecycle callbacks (onToolStart, onToolFinish)
  * - Special result formatting (wallet balance)
  * - Error handling with Telegram notifications
+ * - Timeout protection against infinite hangs
  */
 
 import { executeTool } from "../../tools/executor.js";
+import { TIMEOUT } from "../config/constants.js";
 import { log } from "../infrastructure/logger.js";
 import type { AgentType, ToolResult } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
@@ -21,6 +23,21 @@ import {
 } from "../utils/validation-args.js";
 import { safeParseArgs } from "./json-repair.js";
 import type { OncePerSessionCheck } from "./once-per-session.js";
+
+/**
+ * Execute a promise with a timeout.
+ * Rejects if the promise doesn't resolve within the specified time.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, context: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${context} timed out after ${ms / 1000}s`));
+      }, ms);
+    }),
+  ]);
+}
 
 /** Tools requiring argument validation before execution */
 const WRITE_TOOLS_REQUIRING_VALIDATION = [
@@ -165,7 +182,12 @@ async function executeSingleTool(
     }
 
     await onToolStart?.({ name: functionName, args: functionArgs, step });
-    const result = await executeTool(functionName, functionArgs, agentType);
+    // Wrap tool execution with timeout to prevent infinite hangs
+    const result = await withTimeout(
+      executeTool(functionName, functionArgs, agentType),
+      TIMEOUT.TOOL_EXECUTION_MS,
+      `Tool ${functionName}`
+    );
     await onToolFinish?.({
       name: functionName,
       args: functionArgs,

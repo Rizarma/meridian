@@ -7,6 +7,7 @@ import { getLessonsForPrompt, getPerformanceSummary } from "../domain/lessons.js
 import { formatSharedLessonsForPrompt } from "../infrastructure/hive-mind.js";
 import { log } from "../infrastructure/logger.js";
 import { getStateSummary } from "../infrastructure/state.js";
+import { stopAllTypingIndicators } from "../infrastructure/telegram.js";
 import type { AgentOptions, AgentResult, AgentType, ProviderMode } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
 import { recordActivity } from "../utils/health-check.js";
@@ -164,13 +165,17 @@ export async function agentLoop(
       );
 
       // Execute all tool calls in parallel (blocked calls resolve immediately)
-      const toolResults = await executeToolsParallel(
-        preCheckedCalls,
-        agentType,
-        step,
-        onToolStart,
-        onToolFinish
-      );
+      // Wrap with step-level timeout as final safety net
+      const stepTimeoutMs = TIMEOUT.TOOL_EXECUTION_MS + 30 * TIME.SECOND; // Tool timeout + buffer
+      const toolResults = await Promise.race([
+        executeToolsParallel(preCheckedCalls, agentType, step, onToolStart, onToolFinish),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            stopAllTypingIndicators(); // Force cleanup typing indicators on timeout
+            reject(new Error(`Step ${step + 1} timed out after ${stepTimeoutMs / 1000}s`));
+          }, stepTimeoutMs);
+        }),
+      ]);
 
       messages.push(...toolResults);
     } catch (error) {

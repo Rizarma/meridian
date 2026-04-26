@@ -384,6 +384,8 @@ export function stopAllTypingIndicators(): void {
   _activeTypingIndicators.clear();
 }
 
+const TYPING_INDICATOR_MAX_MS = 5 * 60 * 1000; // 5 minutes max typing indicator
+
 function createTypingIndicator(): TypingIndicator {
   if (!bot || !chatId) {
     return { stop() {} };
@@ -393,9 +395,19 @@ function createTypingIndicator(): TypingIndicator {
   const chatIdStr = chatId;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const startTime = Date.now();
 
   async function tick(): Promise<void> {
     if (stopped) return;
+    // Auto-stop after max duration to prevent infinite typing
+    if (Date.now() - startTime > TYPING_INDICATOR_MAX_MS) {
+      log(
+        "telegram_warn",
+        `Typing indicator auto-stopped after ${TYPING_INDICATOR_MAX_MS / 1000}s`
+      );
+      indicator.stop();
+      return;
+    }
     await botInstance.api.sendChatAction(chatIdStr, "typing");
     if (stopped) return;
     timer = setTimeout((): void => {

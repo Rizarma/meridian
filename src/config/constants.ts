@@ -51,6 +51,8 @@ export const TIMEOUT = {
   LOG_FLUSH_MS: 100,
   /** Startup warning display delay (milliseconds) */
   STARTUP_WARN_MS: 2000,
+  /** Tool execution timeout (milliseconds) - prevents infinite hangs */
+  TOOL_EXECUTION_MS: 3 * TIME.MINUTE,
 } as const;
 
 // ═══════════════════════════════════════════
