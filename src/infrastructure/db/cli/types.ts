@@ -194,7 +194,7 @@ export interface PositionStateEventExport {
   id: number;
   ts: string;
   action: string;
-  position: string;
+  position: string | null;
   pool_name: string | null;
   reason: string | null;
 }
@@ -212,14 +212,10 @@ export interface StrategyExport {
   lp_strategy: string;
   token_criteria_json: string | null;
   entry_criteria_json: string | null;
-  range_criteria_json?: string | null;
+  range_criteria_json: string | null;
   exit_criteria_json: string | null;
-  position_params_json?: string | null;
-  risk_params_json?: string | null;
-  description?: string | null;
-  best_for?: string | null;
-  raw?: string | null;
-  created_at?: string;
+  best_for: string | null;
+  raw: string | null;
   updated_at: string;
   added_at: string;
 }
@@ -323,23 +319,17 @@ export interface PortfolioHistoryExport {
   token_breakdown_json?: string | null;
   last_closed_at?: number | null;
   total_positions_count?: number | null;
-  total_positions?: number | null;
   days_back?: number | null;
-  fetched_at?: string | null;
+  fetched_at: string;
   first_seen_at?: string | null;
-  last_seen_at?: string | null;
   fee_efficiency_annualized?: number | null;
   capital_rotation_ratio?: number | null;
   data_freshness_hours?: number | null;
   our_positions_count?: number | null;
   our_total_pnl_pct?: number | null;
   outperformance_delta?: number | null;
-  avg_pnl_pct?: number | null;
   is_active_pool?: number | null;
   lesson_generated?: number | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  data_json?: string | null;
 }
 
 export interface PoolDeployExport {
