@@ -37,9 +37,37 @@ export async function importToPostgres(data: ExportData, databaseUrl: string): P
       await importPoolDeploys(tx, data.poolDeploys);
     });
 
+    // Reset SERIAL sequences to match imported data (prevents duplicate PK errors)
+    console.log("Resetting sequences...");
+    await resetSequences(db);
+
     console.log("Import complete!");
   } finally {
     await db.close();
+  }
+}
+
+/**
+ * Reset SERIAL sequences to match the current max(id) values after import.
+ * This prevents duplicate key errors when sequence values drift behind imported data.
+ */
+async function resetSequences(db: DatabaseOperations): Promise<void> {
+  const tables = [
+    "position_snapshots",
+    "position_events",
+    "pool_deploys",
+    "performance",
+    "signal_weight_history",
+    "position_state_events",
+    "threshold_suggestions",
+    "threshold_history",
+    "portfolio_history",
+  ];
+
+  for (const table of tables) {
+    await db.run(
+      `SELECT setval('${table}_id_seq', COALESCE((SELECT MAX(id) FROM ${table}), 1), true)`
+    );
   }
 }
 
