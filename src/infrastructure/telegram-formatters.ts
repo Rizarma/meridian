@@ -1,6 +1,5 @@
 // src/infrastructure/telegram-formatters.ts
 import type { WalletBalances } from "../types/wallet.js";
-import { escapeMarkdownV2 } from "./telegram.js";
 
 const DUST_THRESHOLD_USD = 0.1;
 const GAS_RESERVE_SOL = 0.2;
@@ -17,8 +16,7 @@ export function formatWalletBalanceForTelegram(
 ): string {
   // Handle error case
   if (data.error) {
-    const safeError = escapeMarkdownV2(data.error);
-    return `❌ *Wallet Balance Error*\n\n${safeError}\n\n_Using cached state data..._`;
+    return `❌ *Wallet Balance Error*\n\n${data.error}\n\n_Using cached state data..._`;
   }
 
   const { showDust = false, showFullAddress = false } = options;
@@ -76,9 +74,8 @@ export function formatWalletBalanceForTelegram(
       const t = significant[i];
       const prefix = i === last ? "└─" : "├─";
       const value = t.usd ? `·  $${t.usd.toFixed(2)}` : "·  —";
-      const safeSymbol = escapeMarkdownV2(t.symbol);
       lines.push(
-        `${prefix} ${safeSymbol.padEnd(6)} ${(t.balance ?? 0).toFixed(2).padStart(8)}  ${value}`
+        `${prefix} ${t.symbol.padEnd(6)} ${(t.balance ?? 0).toFixed(2).padStart(8)}  ${value}`
       );
     }
     lines.push("");
@@ -96,9 +93,8 @@ export function formatWalletBalanceForTelegram(
     for (let i = 0; i < dust.length; i++) {
       const t = dust[i];
       const prefix = i === last ? "└─" : "├─";
-      const safeSymbol = escapeMarkdownV2(t.symbol);
       lines.push(
-        `${prefix} ${safeSymbol}: ${(t.balance ?? 0).toFixed(2)} ($${(t.usd || 0).toFixed(2)})`
+        `${prefix} ${t.symbol}: ${(t.balance ?? 0).toFixed(2)} ($${(t.usd || 0).toFixed(2)})`
       );
     }
     lines.push("");

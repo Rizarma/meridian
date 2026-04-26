@@ -10,7 +10,6 @@
 
 import { executeTool } from "../../tools/executor.js";
 import { log } from "../infrastructure/logger.js";
-import { escapeMarkdownV2 } from "../infrastructure/telegram.js";
 import type { AgentType, ToolResult } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
 import {
@@ -77,7 +76,7 @@ async function formatWalletBalanceResult(result: unknown, toolCallId: string): P
   const { formatWalletBalanceForTelegram } = await import(
     "../infrastructure/telegram-formatters.js"
   );
-  const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
+  const { sendMessage } = await import("../infrastructure/telegram.js");
 
   // Unwrap the result - executeTool wraps results as { success: true, data: {...} }
   const walletData =
@@ -93,8 +92,8 @@ async function formatWalletBalanceResult(result: unknown, toolCallId: string): P
     walletData as import("../types/wallet.js").WalletBalances
   );
 
-  // Send formatted message directly (don't escape markdown)
-  await sendMessageMarkdown(formatted);
+  // Send formatted message (sendMessage auto-escapes)
+  await sendMessage(formatted);
 
   // Return flag indicating output was already sent to user
   return {
@@ -190,11 +189,9 @@ async function executeSingleTool(
     log("error", `Tool ${toolCall.function.name} failed: ${errorMessage}`);
 
     // Send formatted error to Telegram so LLM doesn't generate its own markdown
-    const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
-    const safeToolName = escapeMarkdownV2(toolCall.function.name);
-    const safeError = escapeMarkdownV2(errorMessage);
-    await sendMessageMarkdown(
-      `❌ *Error in ${safeToolName}*\n\n${safeError}\n\n_Using cached state..._`
+    const { sendMessage } = await import("../infrastructure/telegram.js");
+    await sendMessage(
+      `❌ Error in ${toolCall.function.name}\n\n${errorMessage}\n\nUsing cached state...`
     );
 
     return {

@@ -52,4 +52,22 @@ function copyDir(src, dst) {
 
 console.log("Copying assets to dist/...");
 copyDir(rootDir, distDir);
+
+// Validate that required assets were copied
+const requiredFiles = ["src/infrastructure/db/migrations/postgres/schema.sql"];
+
+let missing = false;
+for (const file of requiredFiles) {
+  const distPath = path.join(distDir, file);
+  if (!fs.existsSync(distPath)) {
+    console.error(`\nERROR: Required asset missing from dist/: ${file}`);
+    missing = true;
+  }
+}
+
+if (missing) {
+  console.error("\nBuild failed: one or more required assets were not copied to dist/.");
+  process.exit(1);
+}
+
 console.log("Build complete!");
