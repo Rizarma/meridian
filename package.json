@@ -9,7 +9,8 @@
   },
   "scripts": {
     "setup": "pnpm run build && node dist/src/cli/setup.js",
-    "build": "tsc && node build.js",
+    "build": "tsc && node build.js && pnpm run copy-assets",
+    "copy-assets": "node -e \"const fs=require('fs'),path=require('path'); const src='src/infrastructure/db/migrations/postgres/schema.sql'; const dst='dist/src/infrastructure/db/migrations/postgres/schema.sql'; if(fs.existsSync(src)){fs.mkdirSync(path.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);console.log('Copied schema.sql to dist')}\"",
     "start": "pnpm run build && node dist/src/index.js",
     "dev": "pnpm run build && cross-env DRY_RUN=true node dist/src/index.js",
     "test:phase0:exit": "pnpm run build && node dist/test/phase-0-exit-rules.test.js",
@@ -39,7 +40,12 @@
     "format:all": "biome format --write .",
     "lint:changed": "node dist/scripts/biome-lint-changed.js",
     "lint:check": "node dist/scripts/biome-lint-changed.js check",
-    "check": "pnpm format:check && pnpm typecheck"
+    "check": "pnpm format:check && pnpm typecheck",
+    "db:migrate": "node dist/src/cli/cli.js db migrate",
+    "db:export": "node dist/src/cli/cli.js db export",
+    "db:import": "node dist/src/cli/cli.js db import",
+    "db:backup": "node dist/src/cli/cli.js db backup",
+    "db:reset": "node dist/src/cli/cli.js db reset"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",

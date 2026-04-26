@@ -351,7 +351,7 @@ async function importPositionStateEvents(
     db,
     "position_state_events",
     rows,
-    ["id", "position", "event_type", "ts", "data_json"],
+    ["id", "ts", "action", "position", "pool_name", "reason"],
     "ON CONFLICT DO NOTHING"
   );
 }

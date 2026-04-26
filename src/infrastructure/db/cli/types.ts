@@ -181,10 +181,11 @@ export interface PositionStateExport {
 
 export interface PositionStateEventExport {
   id: number;
-  position: string;
-  event_type: string;
   ts: string;
-  data_json: string | null;
+  action: string;
+  position: string;
+  pool_name: string | null;
+  reason: string | null;
 }
 
 export interface StateMetadataExport {
