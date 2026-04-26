@@ -4,6 +4,7 @@
 
 import { PublicKey, type Transaction } from "@solana/web3.js";
 import BN from "bn.js";
+import { TIMEOUT } from "../../src/config/constants.js";
 import { getSharedConnection } from "../../src/infrastructure/connection.js";
 import { log } from "../../src/infrastructure/logger.js";
 import { getTrackedPosition } from "../../src/infrastructure/state.js";
@@ -18,6 +19,21 @@ import { lookupPoolForPosition } from "./position-sdk.js";
 import { getMyPositions } from "./positions.js";
 import { findPositionInCache, invalidatePositionsCache } from "./positions-cache.js";
 import { simulateAndSend } from "./transactions.js";
+
+/**
+ * Wrap a promise with a timeout.
+ * Prevents indefinite hangs during RPC operations.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, context: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${context} timed out after ${ms / 1000}s`));
+      }, ms);
+    }),
+  ]);
+}
 
 export async function closePosition({
   position_address,
@@ -57,14 +73,28 @@ export async function closePosition({
         );
       } else {
         log("close", `Step 1: Claiming fees for ${position_address}`);
-        const positionData = await pool.getPosition(positionPubKey);
-        const claimTxs: Transaction[] = await pool.claimSwapFee({
-          owner: wallet.publicKey,
-          position: positionData,
-        });
+        // Wrap claim operations with timeout to prevent indefinite hangs
+        const claimTimeoutMs = TIMEOUT.RPC_TIMEOUT_MS;
+        const positionData = await withTimeout(
+          pool.getPosition(positionPubKey),
+          claimTimeoutMs,
+          "getPosition for claim"
+        );
+        const claimTxs: Transaction[] = await withTimeout(
+          pool.claimSwapFee({
+            owner: wallet.publicKey,
+            position: positionData,
+          }),
+          claimTimeoutMs,
+          "claimSwapFee"
+        );
         if (claimTxs && claimTxs.length > 0) {
           for (const tx of claimTxs) {
-            const claimHash = await simulateAndSend(getSharedConnection(), tx, [wallet], "close");
+            const claimHash = await withTimeout(
+              simulateAndSend(getSharedConnection(), tx, [wallet], "close"),
+              claimTimeoutMs,
+              "simulateAndSend claim"
+            );
             claimTxHashes.push(claimHash);
           }
           log("close", `Step 1 OK (claim only): ${claimTxHashes.join(", ")}`);
@@ -98,29 +128,46 @@ export async function closePosition({
       log("close_warn", `Could not check liquidity state: ${message}`);
     }
 
+    const closeTimeoutMs = TIMEOUT.RPC_TIMEOUT_MS;
     if (hasLiquidity) {
       log("close", `Step 2: Removing liquidity and closing account`);
-      const closeTx: Transaction | Transaction[] = await pool.removeLiquidity({
-        user: wallet.publicKey,
-        position: positionPubKey,
-        fromBinId: closeFromBinId,
-        toBinId: closeToBinId,
-        bps: new BN(10000),
-        shouldClaimAndClose: true,
-      });
+      const closeTx: Transaction | Transaction[] = await withTimeout(
+        pool.removeLiquidity({
+          user: wallet.publicKey,
+          position: positionPubKey,
+          fromBinId: closeFromBinId,
+          toBinId: closeToBinId,
+          bps: new BN(10000),
+          shouldClaimAndClose: true,
+        }),
+        closeTimeoutMs,
+        "removeLiquidity"
+      );
 
       for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
-        const txHash = await simulateAndSend(getSharedConnection(), tx, [wallet], "close");
+        const txHash = await withTimeout(
+          simulateAndSend(getSharedConnection(), tx, [wallet], "close"),
+          closeTimeoutMs,
+          "simulateAndSend close"
+        );
         closeTxHashes.push(txHash);
       }
     } else {
       log("close", `Step 2: Position is empty, forcing close account`);
-      const closeTx: Transaction = await pool.closePosition({
-        owner: wallet.publicKey,
-        position: { publicKey: positionPubKey },
-      });
+      const closeTx: Transaction = await withTimeout(
+        pool.closePosition({
+          owner: wallet.publicKey,
+          position: { publicKey: positionPubKey },
+        }),
+        closeTimeoutMs,
+        "closePosition"
+      );
       // Simulate and send via safety primitive
-      const txHash = await simulateAndSend(getSharedConnection(), closeTx, [wallet], "close");
+      const txHash = await withTimeout(
+        simulateAndSend(getSharedConnection(), closeTx, [wallet], "close"),
+        closeTimeoutMs,
+        "simulateAndSend close"
+      );
       closeTxHashes.push(txHash);
     }
     const txHashes = [...claimTxHashes, ...closeTxHashes];
