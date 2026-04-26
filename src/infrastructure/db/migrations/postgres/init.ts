@@ -113,7 +113,9 @@ async function runMigrations(sql: Sql): Promise<void> {
     "action",
     "TEXT NOT NULL DEFAULT 'unknown'"
   );
-  await addColumnIfNotExists(sql, "position_state_events", "position", "TEXT NOT NULL DEFAULT ''");
+  await addColumnIfNotExists(sql, "position_state_events", "position", "TEXT");
+  // Ensure existing columns are nullable (migration from NOT NULL)
+  await sql.unsafe(`ALTER TABLE position_state_events ALTER COLUMN position DROP NOT NULL`);
   await addColumnIfNotExists(sql, "position_state_events", "pool_name", "TEXT");
   await addColumnIfNotExists(sql, "position_state_events", "reason", "TEXT");
 }
