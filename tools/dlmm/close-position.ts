@@ -129,11 +129,11 @@ export async function closePosition({
     recordActivity();
     // Wait for RPC to reflect withdrawn balances before returning — prevents
     // agent from seeing zero balance when attempting post-close swap
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 8000));
     await invalidatePositionsCache();
 
     let closedConfirmed = false;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const refreshed = await getMyPositions({ force: true, silent: true });
         const stillOpen = refreshed?.positions?.some((p) => p.position === position_address);
@@ -143,12 +143,12 @@ export async function closePosition({
         }
         log(
           "close_warn",
-          `Position ${position_address} still appears open after close txs (attempt ${attempt + 1}/4)`
+          `Position ${position_address} still appears open after close txs (attempt ${attempt + 1}/5)`
         );
       } catch (e: any) {
-        log("close_warn", `Close verification failed (attempt ${attempt + 1}/4): ${e.message}`);
+        log("close_warn", `Close verification failed (attempt ${attempt + 1}/5): ${e.message}`);
       }
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000));
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 5000));
     }
 
     if (!closedConfirmed) {

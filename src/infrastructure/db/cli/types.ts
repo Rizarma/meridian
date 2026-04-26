@@ -156,35 +156,47 @@ export interface PositionStateExport {
   pool: string;
   pool_name: string | null;
   strategy: string;
+  strategy_config: string | null;
   bin_range: string | null;
   amount_sol: number | null;
   amount_x: number | null;
-  active_bin: number | null;
+  active_bin_at_deploy: number | null;
   bin_step: number | null;
   volatility: number | null;
   fee_tvl_ratio: number | null;
+  initial_fee_tvl_24h: number | null;
   organic_score: number | null;
   initial_value_usd: number | null;
-  deployed_at: string;
-  first_oor_at: string | null;
-  last_claim_at: string | null;
-  last_rebalance_at: string | null;
-  rebalance_count: number | null;
-  claim_count: number | null;
-  notes: string | null;
-  instructions: string | null;
   signal_snapshot: string | null;
-  strategy_config: string | null;
-  created_at: string;
-  updated_at: string;
+  deployed_at: string;
+  out_of_range_since: string | null;
+  last_claim_at: string | null;
+  rebalance_count: number | null;
+  total_fees_claimed_usd: number | null;
+  closed: number | null;
+  closed_at: string | null;
+  notes: string | null;
+  peak_pnl_pct: number | null;
+  pending_peak_pnl_pct: number | null;
+  pending_peak_started_at: string | null;
+  trailing_active: number | null;
+  instruction: string | null;
+  pending_trailing_current_pnl_pct: number | null;
+  pending_trailing_peak_pnl_pct: number | null;
+  pending_trailing_drop_pct: number | null;
+  pending_trailing_started_at: string | null;
+  confirmed_trailing_exit_reason: string | null;
+  confirmed_trailing_exit_until: string | null;
+  last_updated: string;
 }
 
 export interface PositionStateEventExport {
   id: number;
-  position: string;
-  event_type: string;
   ts: string;
-  data_json: string | null;
+  action: string;
+  position: string | null;
+  pool_name: string | null;
+  reason: string | null;
 }
 
 export interface StateMetadataExport {
@@ -200,14 +212,10 @@ export interface StrategyExport {
   lp_strategy: string;
   token_criteria_json: string | null;
   entry_criteria_json: string | null;
-  range_criteria_json?: string | null;
+  range_criteria_json: string | null;
   exit_criteria_json: string | null;
-  position_params_json?: string | null;
-  risk_params_json?: string | null;
-  description?: string | null;
-  best_for?: string | null;
-  raw?: string | null;
-  created_at?: string;
+  best_for: string | null;
+  raw: string | null;
   updated_at: string;
   added_at: string;
 }
@@ -311,23 +319,17 @@ export interface PortfolioHistoryExport {
   token_breakdown_json?: string | null;
   last_closed_at?: number | null;
   total_positions_count?: number | null;
-  total_positions?: number | null;
   days_back?: number | null;
-  fetched_at?: string | null;
+  fetched_at: string;
   first_seen_at?: string | null;
-  last_seen_at?: string | null;
   fee_efficiency_annualized?: number | null;
   capital_rotation_ratio?: number | null;
   data_freshness_hours?: number | null;
   our_positions_count?: number | null;
   our_total_pnl_pct?: number | null;
   outperformance_delta?: number | null;
-  avg_pnl_pct?: number | null;
   is_active_pool?: number | null;
   lesson_generated?: number | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  data_json?: string | null;
 }
 
 export interface PoolDeployExport {

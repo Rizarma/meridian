@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS position_state_events (
   id SERIAL PRIMARY KEY,
   ts TIMESTAMP NOT NULL DEFAULT NOW(),
   action TEXT NOT NULL,
-  position TEXT NOT NULL,
+  position TEXT,
   pool_name TEXT,
   reason TEXT
 );
