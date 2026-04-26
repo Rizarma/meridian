@@ -10,6 +10,7 @@
 
 import { executeTool } from "../../tools/executor.js";
 import { log } from "../infrastructure/logger.js";
+import { escapeMarkdownV2 } from "../infrastructure/telegram.js";
 import type { AgentType, ToolResult } from "../types/index.js";
 import { getErrorMessage } from "../utils/errors.js";
 import {
@@ -190,8 +191,10 @@ async function executeSingleTool(
 
     // Send formatted error to Telegram so LLM doesn't generate its own markdown
     const { sendMessageMarkdown } = await import("../infrastructure/telegram.js");
+    const safeToolName = escapeMarkdownV2(toolCall.function.name);
+    const safeError = escapeMarkdownV2(errorMessage);
     await sendMessageMarkdown(
-      `❌ *Error in ${toolCall.function.name}*\n\n${errorMessage}\n\n_Using cached state..._`
+      `❌ *Error in ${safeToolName}*\n\n${safeError}\n\n_Using cached state..._`
     );
 
     return {
